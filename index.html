@@ -1849,8 +1849,11 @@
                 if (!confirm('⚠️ 目前為本地模式，分享鏈結需先同步至雲端。\n是否仍要複製鏈結（他人可能無法開啟）？')) return;
             }
             const url = new URL(window.location.href.split('?')[0]);
-            url.searchParams.set('id', currentReportId);
+            
+            url.searchParams.set('share', currentUser.share_id);
+
             if (mode === 'view') url.searchParams.set('mode', 'view');
+
             navigator.clipboard.writeText(url.toString());
             alert("鏈結已複製！");
         }
