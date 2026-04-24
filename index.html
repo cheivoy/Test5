@@ -1902,10 +1902,14 @@
             } else {
                 // --- 雲端模式 ---
                 // 呼叫 API (見下方第 2 點)
-                const res = await fetch('/api/rename', {
+                const res = await fetch(`${WORKER_URL}/api/rename`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ oldId: old, newId: n, share_id: currentUser.share_id })
+                    body: JSON.stringify({
+                        oldId: old,
+                        newId: n,
+                        share_id: currentUser.share_id
+                    })
                 });
                 // ... 處理回傳
             }
