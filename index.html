@@ -888,19 +888,25 @@
             const logoutBtn = document.getElementById('logout-btn');
             const syncBtn = document.getElementById('sync-btn');
             const shareNote = document.getElementById('share-local-note');
+
             if (storageMode === 'cloud' && currentUser) {
-                banner.className = 'cloud';
-                banner.textContent = `☁️ 雲端模式 — ${currentUser.username}（${currentUser.guild || ''}）`;
-                authBtn.style.display = 'none';
-                logoutBtn.style.display = '';
-                syncBtn.style.display = 'none';
+                if (banner) {
+                    banner.className = 'cloud';
+                    banner.textContent = `☁️ 雲端模式 — ${currentUser.username}（${currentUser.guild || ''}）`;
+                }
+                if (authBtn) authBtn.style.display = 'none';
+                if (logoutBtn) logoutBtn.style.display = '';
+                if (syncBtn) syncBtn.style.display = 'none';
                 if (shareNote) shareNote.style.display = 'none';
             } else {
-                banner.className = 'local';
-                banner.textContent = '💾 本地模式（未登入）';
-                authBtn.style.display = '';
-                logoutBtn.style.display = 'none';
-                if (!isViewMode) syncBtn.style.display = '';
+                if (banner) {
+                    banner.className = 'local';
+                    banner.textContent = '💾 本地模式（未登入）';
+                }
+                if (authBtn) authBtn.style.display = '';
+                if (logoutBtn) logoutBtn.style.display = 'none';
+                // 加上 syncBtn 存在的防呆判斷
+                if (syncBtn && !isViewMode) syncBtn.style.display = '';
                 if (shareNote) shareNote.style.display = '';
             }
         }
@@ -954,7 +960,13 @@
                 });
                 const data = await res.json();
                 if (!res.ok) { msgEl.textContent = data.error || '登入失敗'; return; }
-                currentUser = { username: data.username, token: data.token, guild: data.guild };
+                // 加入 share_id 屬性
+                currentUser = {
+                    username: data.username,
+                    token: data.token,
+                    guild: data.guild,
+                    share_id: data.share_id
+                };
                 localStorage.setItem(LOCALSTORAGE_USER_KEY, JSON.stringify(currentUser));
                 storageMode = 'cloud';
                 closeModal('auth-modal');
@@ -1849,7 +1861,7 @@
                 if (!confirm('⚠️ 目前為本地模式，分享鏈結需先同步至雲端。\n是否仍要複製鏈結（他人可能無法開啟）？')) return;
             }
             const url = new URL(window.location.href.split('?')[0]);
-            
+
             url.searchParams.set('share', currentUser.share_id);
 
             if (mode === 'view') url.searchParams.set('mode', 'view');
