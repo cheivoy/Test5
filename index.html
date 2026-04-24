@@ -1610,7 +1610,7 @@
                 },
                 options: {
                     animation: false,                              // ← 新增
-                    devicePixelRatio: window.devicePixelRatio || 2, // ← 新增
+                    devicePixelRatio: Math.round(window.devicePixelRatio) || 2, // ← 新增
                     scales: { r: { min: 0, max: 100, ticks: { display: false } } }
                 }
             });
@@ -1701,7 +1701,7 @@
                     animation: false,
                     responsive: true,
                     maintainAspectRatio: true,
-                    devicePixelRatio: window.devicePixelRatio || 2,
+                    devicePixelRatio: Math.round(window.devicePixelRatio) || 2,
                     scales: { r: { min: 0, max: 100, ticks: { display: false } } }
                 }
             });
