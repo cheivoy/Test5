@@ -539,6 +539,45 @@
             .select-input {
                 width: 100% !important;
             }
+
+            .close-modal-btn {
+                top: 10px;
+                right: 15px;
+                font-size: 28px;
+                /* 手機版稍微大一點好點擊 */
+            }
+        }
+
+        /* 彈窗關閉按鈕樣式 */
+        .close-modal-btn {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #888;
+            cursor: pointer;
+            line-height: 1;
+            z-index: 10;
+            transition: color 0.2s;
+        }
+
+        .close-modal-btn:hover {
+            color: var(--danger);
+        }
+
+        /* 確保 modal-body 有相對定位，以便按鈕絕對定位 */
+        .modal-body {
+            position: relative;
+            /* 必須加上這行 */
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            width: 850px;
+            display: flex;
+            gap: 25px;
+            max-height: 90vh;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -738,6 +777,7 @@
     <!-- 戰報詳細 Modal -->
     <div id="modal" onclick="closeModal('modal')">
         <div class="modal-body" onclick="event.stopPropagation()">
+            <span class="close-modal-btn" onclick="closeModal('modal')">×</span>
             <div style="flex:1.2;"><canvas id="radarChart"></canvas></div>
             <div style="flex:1;">
                 <h2 id="m-name" style="margin:0;"></h2>
@@ -757,6 +797,7 @@
     <!-- 成員檔案 Modal -->
     <div id="member-modal" onclick="closeModal('member-modal')">
         <div class="modal-body" onclick="event.stopPropagation()">
+            <span class="close-modal-btn" onclick="closeModal('member-modal')">×</span>
             <div style="flex:1.2;">
                 <h3 style="margin-top:0;">近5場風格雷達圖</h3>
                 <canvas id="memberRadarChart"></canvas>
@@ -1573,14 +1614,28 @@
 
             document.getElementById('member-modal').style.display = 'flex';
             document.getElementById('mm-name').innerText = m.id;
-            document.getElementById('mm-note').value = m.note;
-            document.getElementById('mm-tag').value = m.tag;
-            document.getElementById('mm-tag-view').innerText = m.tag !== 'none' ? m.tag : '無標籤';
+            // --- 修改處：增加存在性檢查 ---
+            const noteEl = document.getElementById('mm-note');
+            if (noteEl) noteEl.value = m.note;
 
-            const jobSet = new Set(dbMembersMap.map(x => x.last_job));
-            document.getElementById('mm-job').innerHTML = [...jobSet].map(j => `<option value="${j}" ${j === m.last_job ? 'selected' : ''}>${j}</option>`).join('');
-            document.getElementById('mm-job-view').innerText = m.last_job;
-            document.getElementById('mm-job-view').style.background = `var(--color-${m.last_job})`;
+            const tagEl = document.getElementById('mm-tag');
+            if (tagEl) tagEl.value = m.tag;
+
+            const tagViewEl = document.getElementById('mm-tag-view');
+            if (tagViewEl) tagViewEl.innerText = (m.tag !== 'none' ? m.tag : '無標籤');
+
+            // 處理職業下拉選單或顯示
+            const jobEl = document.getElementById('mm-job');
+            if (jobEl) {
+                const jobSet = new Set(dbMembersMap.map(x => x.last_job));
+                jobEl.innerHTML = [...jobSet].map(j => `<option value="${j}" ${j === m.last_job ? 'selected' : ''}>${j}</option>`).join('');
+            }
+
+            const jobViewEl = document.getElementById('mm-job-view');
+            if (jobViewEl) {
+                jobViewEl.innerText = m.last_job;
+                jobViewEl.style.display = 'inline-block'; // 唯讀模式下應顯示標籤版
+            }
 
             const recent = m.histories
                 .sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -1813,23 +1868,47 @@
         }
 
         async function renameP(old) {
-            const n = prompt("輸入新名稱:", old);
-            if (!n) return;
-            if (storageMode === 'cloud' && currentUser) {
-                await fetch(WORKER_URL + "/api/rename", {
-                    method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + currentUser.token },
-                    body: JSON.stringify({ oldId: old, newId: n })
+            const n = prompt("請輸入新名稱:", old);
+            if (!n || n === old) return;
+
+            if (storageMode === 'local') {
+                // --- 1. 更新成員資料庫 ---
+                let db = getLocalMembers();
+                if (db[n]) return alert("錯誤：新名稱已存在");
+
+                db[n] = { ...db[old], id: n }; // 複製資料到新 ID
+                delete db[old]; // 刪除舊 ID
+                saveLocalMembers(db);
+
+                // --- 2. 關鍵補齊：更新所有歷史戰報中的名稱 ---
+                let hists = getLocalHistories();
+                let updateCount = 0;
+                hists.forEach(h => {
+                    let changed = false;
+                    // 檢查 A 隊
+                    h.data_a.forEach(p => { if (p.name === old) { p.name = n; changed = true; } });
+                    // 檢查 B 隊
+                    h.data_b.forEach(p => { if (p.name === old) { p.name = n; changed = true; } });
+                    if (changed) updateCount++;
                 });
-            } else {
-                const membersMap = getLocalMembers();
-                if (membersMap[old]) {
-                    membersMap[n] = { ...membersMap[old], id: n };
-                    delete membersMap[old];
-                    saveLocalMembers(membersMap);
+
+                if (updateCount > 0) {
+                    saveLocalHistories(hists);
+                    console.log(`已同步更新 ${updateCount} 場歷史戰報`);
                 }
+
+                alert("本地更名成功！");
+                location.reload();
+            } else {
+                // --- 雲端模式 ---
+                // 呼叫 API (見下方第 2 點)
+                const res = await fetch('/api/rename', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ oldId: old, newId: n, share_id: currentUser.share_id })
+                });
+                // ... 處理回傳
             }
-            await loadDbData();
         }
 
         // =====================================================
