@@ -1,7 +1,8 @@
+<!DOCTYPE html>
 <html lang="zh-TW"><head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NSH 戰績系統 Pro v6.2</title>
+    <title>NSH 戰績系統 Pro v7.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -27,9 +28,7 @@
             --color-潮光: #4dd0e1;
         }
 
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         body {
             margin: 0;
@@ -124,38 +123,27 @@
         .mvp-card {
             background: white;
             padding: 16px;
-            /* 增加一點內距感 */
             border-radius: 12px;
             border-left: 6px solid var(--gold);
-            /* 加粗左邊條，更有質感 */
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-            /* 稍微加深陰影 */
         }
 
-        /* 修改「最高指標標籤」（例如：人頭狗、拆遷大隊） */
         .mvp-label {
             font-size: 14px;
-            /* 原本 11px 太小了，改為 14px */
             color: #888;
-            /* 顏色稍微深一點增加對比 */
             margin-bottom: 6px;
             font-weight: 500;
         }
 
-        /* 修改「玩家名字」 */
         .mvp-name {
             font-weight: bold;
             font-size: 18px;
-            /* 原本 14px，放大到 18px 更有主角感 */
             color: #222;
-            /* 讓名字接近全黑，更顯眼 */
             margin-bottom: 4px;
         }
 
-        /* 修改「數值」（例如：擊殺數） */
         .mvp-val {
             font-size: 15px;
-            /* 原本 12px，放大到 15px */
             color: var(--accent);
             font-weight: bold;
         }
@@ -174,8 +162,7 @@
             font-size: 13px;
         }
 
-        th,
-        td {
+        th, td {
             text-align: left;
             padding: 12px;
             border-bottom: 1px solid #f8f9fa;
@@ -188,9 +175,7 @@
             position: relative;
         }
 
-        th:hover {
-            background: #eee;
-        }
+        th:hover { background: #eee; }
 
         .job-tag {
             padding: 2px 6px;
@@ -216,13 +201,8 @@
             font-weight: bold;
         }
 
-        .win {
-            background: var(--win);
-        }
-
-        .loss {
-            background: var(--loss);
-        }
+        .win { background: var(--win); }
+        .loss { background: var(--loss); }
 
         .btn {
             padding: 8px 16px;
@@ -233,15 +213,8 @@
             margin-right: 5px;
         }
 
-        .btn-primary {
-            background: var(--accent);
-            color: white;
-        }
-
-        .btn-outline {
-            background: white;
-            border: 1px solid #ddd;
-        }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-outline { background: white; border: 1px solid #ddd; }
 
         .filter-btn {
             padding: 5px 12px;
@@ -281,14 +254,11 @@
             border-radius: 5px;
         }
 
-        #modal,
-        #member-modal {
+        #modal, #member-modal, #auth-modal, #sync-confirm-modal {
             display: none;
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.4);
             justify-content: center;
             align-items: center;
@@ -323,9 +293,68 @@
             font-size: 12px;
         }
 
-        @media screen and (max-width: 768px) {
+        /* ===== 模式切換 banner ===== */
+        #mode-banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        #mode-banner.local { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+        #mode-banner.cloud { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
 
-            /* 1. 基礎佈局調整：讓 Body 恢復自然高度以利上下捲動 */
+        /* ===== 折疊板塊 ===== */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            user-select: none;
+            border: 1px solid var(--border);
+        }
+        .section-header:hover { background: #eee; }
+        .section-toggle-icon { font-size: 14px; transition: transform 0.2s; }
+        .section-toggle-icon.collapsed { transform: rotate(-90deg); }
+        .section-body { overflow: hidden; transition: max-height 0.3s ease; }
+        .section-body.collapsed { max-height: 0 !important; }
+
+        /* ===== Auth Modal ===== */
+        .auth-modal-body {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            width: 380px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        /* ===== 模式指示 (hist card) ===== */
+        .local-badge {
+            font-size: 10px;
+            background: #fff3e0;
+            color: #e65100;
+            border-radius: 3px;
+            padding: 1px 4px;
+            border: 1px solid #ffcc80;
+        }
+        .cloud-badge {
+            font-size: 10px;
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-radius: 3px;
+            padding: 1px 4px;
+            border: 1px solid #a5d6a7;
+        }
+
+        @media screen and (max-width: 768px) {
             body {
                 flex-direction: column;
                 height: auto;
@@ -333,21 +362,14 @@
                 overflow-y: auto !important;
                 overflow-x: hidden;
                 display: block;
-                /* 移除 flex 避免內容被擠壓 */
             }
 
-            /* 顯示漢堡選單按鈕 (需配合 HTML/JS 使用) */
-            #menu-toggle {
-                display: block !important;
-            }
+            #menu-toggle { display: block !important; }
 
-            /* 2. 側邊欄改為抽屜式選單 */
             .sidebar {
                 position: fixed;
                 left: -320px;
-                /* 預設隱藏在左側 */
-                top: 0;
-                bottom: 0;
+                top: 0; bottom: 0;
                 width: 280px;
                 z-index: 2000;
                 transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -355,41 +377,25 @@
                 box-shadow: 5px 0 15px rgba(0, 0, 0, 0.1);
                 height: 100vh;
                 padding-top: 60px;
-                /* 避免擋到按鈕 */
             }
 
-            .sidebar.active {
-                left: 0;
-            }
+            .sidebar.active { left: 0; }
 
-            /* 3. 主要內容區域 */
-            .main-content {
-                width: 100%;
-                height: auto;
-                overflow: visible;
-            }
+            .main-content { width: 100%; height: auto; overflow: visible; }
 
             .container {
                 padding: 12px;
                 padding-top: 70px;
-                /* 為漢堡按鈕預留空間 */
                 width: 100%;
                 max-width: 100vw;
             }
 
-            /* 4. 字體自適應與標籤優化 (防止擠壓折行) */
-            h2,
-            h3 {
-                font-size: 1.2rem;
-            }
+            h2, h3 { font-size: 1.2rem; }
 
-            .job-tag,
-            .result-tag,
-            .hash-tag {
+            .job-tag, .result-tag, .hash-tag {
                 font-size: 11px;
                 padding: 2px 4px;
                 white-space: nowrap;
-                /* 強制不換行 */
             }
 
             .mvp-name {
@@ -400,16 +406,12 @@
                 white-space: nowrap;
             }
 
-            /* 5. 核心：表格全方位捲動機制 */
             .table-card {
                 width: 100%;
                 overflow-x: auto !important;
-                /* 開啟左右滑動 */
                 -webkit-overflow-scrolling: touch;
-                /* iOS 順滑滾動 */
                 border-radius: 8px;
                 margin-bottom: 20px;
-                /* 視覺提示：右側淡入陰影表示還有內容 */
                 background: linear-gradient(to right, white 30%, rgba(255, 255, 255, 0)),
                     linear-gradient(to right, rgba(255, 255, 255, 0), white 70%) 0 100%,
                     radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, .1), rgba(0, 0, 0, 0)),
@@ -423,22 +425,16 @@
             table {
                 width: auto;
                 min-width: 850px;
-                /* 關鍵：強制寬度大於手機，確保一定可以滑動 */
                 border-collapse: collapse;
             }
 
-            th,
-            td {
+            th, td {
                 padding: 12px 8px;
                 font-size: 13px;
-                /* 適中字體 */
                 white-space: nowrap;
-                /* 絕對不許字體被擠到下一行 */
             }
 
-            /* 固定首欄 (玩家名字)：左右滑動時名字不動 */
-            th:first-child,
-            td:first-child {
+            th:first-child, td:first-child {
                 position: sticky;
                 left: 0;
                 z-index: 10;
@@ -446,595 +442,1147 @@
                 border-right: 1px solid var(--border);
             }
 
-            /* 6. 其他 UI 元件調整 */
-            .mvp-grid {
-                grid-template-columns: repeat(2, 1fr);
-                /* MVP 改為一排兩個 */
-                gap: 8px;
-            }
+            .mvp-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
 
             .modal-body {
                 width: 95vw;
                 flex-direction: column;
-                /* 雷達圖與資訊垂直排列 */
                 padding: 15px;
                 max-height: 90vh;
                 overflow-y: auto;
             }
 
-            #radarChart,
-            #memberRadarChart {
+            #radarChart, #memberRadarChart {
                 width: 100% !important;
                 height: auto !important;
                 max-height: 300px;
             }
 
-            .controls-row {
-                flex-direction: column;
-                /* 搜尋與日期改為垂直排列 */
-                gap: 10px;
-            }
-
-            .search-input,
-            .select-input {
-                width: 100% !important;
-            }
+            .controls-row { flex-direction: column; gap: 10px; }
+            .search-input, .select-input { width: 100% !important; }
         }
-        
     </style>
 </head>
 
 <body>
 
-    <button id="menu-toggle" class="admin-only-false" onclick="toggleMobileMenu()" style="display:none; position:fixed; top:10px; right:10px; z-index:1001; background:var(--accent); color:white; border:none; padding:10px; border-radius:5px; font-size:20px; cursor:pointer;">
-        ☰
-    </button>
-    <div class="sidebar">
-        <h2 style="font-size: 18px;" id="sys-title">NSH 戰績管理 Pro</h2>
-        <div class="nav-item active" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
-        <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員檔案室</div>
+<button id="menu-toggle" class="admin-only-false" onclick="toggleMobileMenu()" style="display:none; position:fixed; top:10px; right:10px; z-index:1001; background:var(--accent); color:white; border:none; padding:10px; border-radius:5px; font-size:20px; cursor:pointer;">☰</button>
 
-        <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
-            <div class="controls-row">
-                <input type="text" id="hist-search" class="search-input" placeholder="搜索幫會..." onkeyup="renderHistoryList()">
-            </div>
-            <div class="controls-row">
-                <select id="hist-time" class="select-input" style="flex:1;" onchange="renderHistoryList()">
-                    <option value="all">全部時間</option>
-                    <option value="7">最近一周</option>
-                    <option value="30">最近一個月</option>
-                    <option value="90">最近三個月</option>
-                </select>
-                <select id="hist-winloss" class="select-input" style="flex:1;" onchange="renderHistoryList()">
-                    <option value="all">勝負</option>
-                    <option value="win">勝利</option>
-                    <option value="loss">失敗</option>
-                </select>
-                <select id="hist-type" class="select-input" style="flex:1;" onchange="renderHistoryList()">
-                    <option value="all">類型</option>
-                    <option value="幫戰">幫戰</option>
-                    <option value="約戰">約戰</option>
-                    <option value="其他">其他</option>
-                </select>
-            </div>
-        </div>
-        <div class="history-list">
-            <div id="hist-items"><div class="hist-card" onclick="viewHistory('rep_1777024184478')">
-            <button class="del-btn" onclick="deleteHist(event, 'rep_1777024184478')">×</button>
-            <div><b>2026-04-19</b> <span style="font-size:10px; color:#999;">[幫戰]</span><br>醉仙居 VS ✵極楽淨土✵</div>
-            <div><span class="result-tag win">勝</span></div>
-        </div></div>
-        </div>
+<div class="sidebar">
+    <h2 style="font-size: 18px;" id="sys-title">NSH 戰績管理 Pro</h2>
+
+    <!-- 模式 Banner -->
+    <div id="mode-banner" class="local">💾 本地模式（未登入）</div>
+
+    <!-- 登入/登出按鈕 -->
+    <div style="margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn btn-outline" id="auth-btn" onclick="openAuthModal()" style="flex:1; font-size:12px;">🔑 登入 / 註冊</button>
+        <button class="btn btn-outline" id="logout-btn" onclick="logoutUser()" style="flex:1; font-size:12px; display:none;">🚪 登出</button>
+        <button class="btn btn-outline admin-only" id="sync-btn" onclick="syncLocalToCloud()" style="flex:1; font-size:12px; display:none; background:#e8f5e9; border-color:#a5d6a7; color:#2e7d32;">☁️ 同步到雲端</button>
     </div>
 
-    <div class="main-content">
-        <div class="container" id="page-report">
-            <div style="background:#fff; padding:15px; border-radius:12px; margin-bottom:20px; display:flex; gap:12px; align-items:center; border: 1px solid var(--border); flex-wrap: wrap;">
-                <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
-                <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入
-                    CSV</button>
-                <input type="text" id="custom-title" placeholder="戰報標題" style="padding:7px; border:1px solid #ddd; border-radius:5px; width:220px;">
-                <input type="date" id="match-date" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                <select id="match-result" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                    <option value="win">🏆 勝利</option>
-                    <option value="loss">💀 失敗</option>
-                </select>
-                <select id="match-type" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                    <option value="幫戰">⚔️ 幫戰</option>
-                    <option value="約戰">🤝 約戰</option>
-                    <option value="其他">📝 其他</option>
-                </select>
-                <button class="btn btn-primary admin-only" onclick="saveHistoryToDB()" id="save-btn" style="display:none; background: #4caf50;">💾 點此保存至資料庫</button>
-            </div>
+    <div class="nav-item active" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
+    <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員檔案室</div>
 
-            <div id="share-section" class="share-links">
-                <p style="margin:0 0 10px 0; font-weight:bold; font-size:13px;">🔗 戰報分享鏈結：</p>
-                <button class="btn btn-outline" onclick="copyShareLink('view')">📋 複製幫眾版 (唯讀)</button>
-                <button class="btn btn-outline admin-only" onclick="copyShareLink('admin')">📋 複製管理版 (可編輯)</button>
-            </div>
+    <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+        <div class="controls-row">
+            <input type="text" id="hist-search" class="search-input" placeholder="搜索幫會..." onkeyup="renderHistoryList()">
+        </div>
+        <div class="controls-row">
+            <select id="hist-time" class="select-input" style="flex:1;" onchange="renderHistoryList()">
+                <option value="all">全部時間</option>
+                <option value="7">最近一周</option>
+                <option value="30">最近一個月</option>
+                <option value="90">最近三個月</option>
+            </select>
+            <select id="hist-winloss" class="select-input" style="flex:1;" onchange="renderHistoryList()">
+                <option value="all">勝負</option>
+                <option value="win">勝利</option>
+                <option value="loss">失敗</option>
+            </select>
+            <select id="hist-type" class="select-input" style="flex:1;" onchange="renderHistoryList()">
+                <option value="all">類型</option>
+                <option value="幫戰">幫戰</option>
+                <option value="約戰">約戰</option>
+                <option value="其他">其他</option>
+            </select>
+        </div>
+    </div>
+    <div class="history-list">
+        <div id="hist-items"></div>
+    </div>
+</div>
 
-            <div id="report-view" style="display:none;">
-                <div id="job-filters" style="margin-bottom:20px;"></div>
-                <h3 id="display-title"></h3>
+<div class="main-content">
+    <div class="container" id="page-report">
+        <div style="background:#fff; padding:15px; border-radius:12px; margin-bottom:20px; display:flex; gap:12px; align-items:center; border: 1px solid var(--border); flex-wrap: wrap;">
+            <input type="file" id="csv-input" hidden onchange="handleCSV(this.files[0])">
+            <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
+            <input type="text" id="custom-title" placeholder="戰報標題" style="padding:7px; border:1px solid #ddd; border-radius:5px; width:220px;">
+            <input type="date" id="match-date" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
+            <!-- 場次下拉選單 (需求4) -->
+            <select id="match-session" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
+                <option value="第一場">第一場</option>
+                <option value="第二場">第二場</option>
+            </select>
+            <select id="match-result" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
+                <option value="win">🏆 勝利</option>
+                <option value="loss">💀 失敗</option>
+            </select>
+            <select id="match-type" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
+                <option value="幫戰">⚔️ 幫戰</option>
+                <option value="約戰">🤝 約戰</option>
+                <option value="其他">📝 其他</option>
+            </select>
+            <button class="btn btn-primary admin-only" onclick="saveHistory()" id="save-btn" style="display:none; background: #4caf50;">💾 點此保存</button>
+        </div>
+
+        <div id="share-section" class="share-links">
+            <p style="margin:0 0 10px 0; font-weight:bold; font-size:13px;">🔗 戰報分享鏈結：</p>
+            <button class="btn btn-outline" onclick="copyShareLink('view')">📋 複製幫眾版 (唯讀)</button>
+            <button class="btn btn-outline admin-only" onclick="copyShareLink('admin')">📋 複製管理版 (可編輯)</button>
+            <!-- 本地模式提示同步 -->
+            <div id="share-local-note" style="margin-top:8px; font-size:12px; color:#e65100; display:none;">
+                ⚠️ 目前為本地模式，分享鏈結需先同步到雲端才能讓他人開啟。
+            </div>
+        </div>
+
+        <div id="report-view" style="display:none;">
+            <div id="job-filters" style="margin-bottom:20px;"></div>
+
+            <!-- 折疊板塊：我方 -->
+            <div class="section-header" onclick="toggleSection('sec-mvp-a')">
+                <span><b id="display-title">我方</b> MVP 榜</span>
+                <span class="section-toggle-icon" id="icon-sec-mvp-a">▼</span>
+            </div>
+            <div class="section-body" id="sec-mvp-a">
                 <div id="mvp-a" class="mvp-grid"></div>
+            </div>
+
+            <div class="section-header" onclick="toggleSection('sec-table-a')">
+                <span>我方詳細數據</span>
+                <span class="section-toggle-icon" id="icon-sec-table-a">▼</span>
+            </div>
+            <div class="section-body" id="sec-table-a">
                 <div class="table-card" style="overflow-x: auto;">
                     <table>
-                        <thead>
-                            <tr id="th-a"></tr>
-                        </thead>
+                        <thead><tr id="th-a"></tr></thead>
                         <tbody id="tbody-a"></tbody>
                     </table>
                 </div>
-                <h3 id="name-b-title"></h3>
+            </div>
+
+            <!-- 折疊板塊：對方 -->
+            <div class="section-header" onclick="toggleSection('sec-mvp-b')">
+                <span><b id="name-b-title">對方</b> MVP 榜</span>
+                <span class="section-toggle-icon" id="icon-sec-mvp-b">▼</span>
+            </div>
+            <div class="section-body" id="sec-mvp-b">
                 <div id="mvp-b" class="mvp-grid"></div>
+            </div>
+
+            <div class="section-header" onclick="toggleSection('sec-table-b')">
+                <span>對方詳細數據</span>
+                <span class="section-toggle-icon" id="icon-sec-table-b">▼</span>
+            </div>
+            <div class="section-body" id="sec-table-b">
                 <div class="table-card" style="overflow-x: auto;">
                     <table>
-                        <thead>
-                            <tr id="th-b"></tr>
-                        </thead>
+                        <thead><tr id="th-b"></tr></thead>
                         <tbody id="tbody-b"></tbody>
                     </table>
                 </div>
             </div>
         </div>
+    </div>
 
-        <div class="container" id="page-db" style="display:none;">
-            <h3>幫會成員檔案室</h3>
-            <div style="margin-bottom: 15px; display:flex; gap:10px; flex-wrap: wrap;">
-                <input type="text" id="db-search" class="search-input" placeholder="搜索成員 ID..." onkeyup="renderDbTable()">
-                <select id="db-time" class="select-input" onchange="renderDbTable()">
-                    <option value="all">全部時間</option>
-                    <option value="7">最近一周</option>
-                    <option value="30">最近一個月</option>
-                    <option value="90">最近三個月</option>
-                </select>
-                <select id="db-job" class="select-input" onchange="renderDbTable()">
-                    <option value="all">全部職業</option>
-                </select>
-                <select id="db-tag" class="select-input" onchange="renderDbTable()">
-                    <option value="all">全部標籤</option>
+    <div class="container" id="page-db" style="display:none;">
+        <h3>幫會成員檔案室</h3>
+        <div style="margin-bottom: 15px; display:flex; gap:10px; flex-wrap: wrap;">
+            <input type="text" id="db-search" class="search-input" placeholder="搜索成員 ID..." onkeyup="renderDbTable()">
+            <select id="db-time" class="select-input" onchange="loadDbData()">
+                <option value="all">全部時間</option>
+                <option value="7">最近一周</option>
+                <option value="30">最近一個月</option>
+                <option value="90">最近三個月</option>
+            </select>
+            <select id="db-job" class="select-input" onchange="renderDbTable()">
+                <option value="all">全部職業</option>
+            </select>
+            <select id="db-tag" class="select-input" onchange="renderDbTable()">
+                <option value="all">全部標籤</option>
+                <option value="進攻團">進攻團</option>
+                <option value="防守團">防守團</option>
+                <option value="機動團">機動團</option>
+                <option value="none">無標籤</option>
+            </select>
+        </div>
+        <div class="table-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th onclick="sortDb('id')">玩家 ID ↕</th>
+                        <th onclick="sortDb('last_job')">最近職業 ↕</th>
+                        <th onclick="sortDb('tag')">所屬分類 ↕</th>
+                        <th onclick="sortDb('matches')">總場次 ↕</th>
+                        <th>幫戰/約戰/其他</th>
+                        <th onclick="sortDb('rate')">出席率 ↕</th>
+                        <th>管理員評語</th>
+                        <th class="admin-only">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="db-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 戰報詳細 Modal -->
+<div id="modal" onclick="closeModal('modal')">
+    <div class="modal-body" onclick="event.stopPropagation()">
+        <div style="flex:1.2;"><canvas id="radarChart"></canvas></div>
+        <div style="flex:1;">
+            <h2 id="m-name" style="margin:0;"></h2>
+            <div id="m-job-box" style="margin:10px 0;"></div>
+            <div id="m-stats-box" style="padding:15px; background:#f8f9fa; border-radius:10px; font-size:13px; line-height:1.6;"></div>
+            <p style="margin-top:20px; font-weight:bold;">單場管理備註：</p>
+            <textarea id="m-note" style="width:100%; height:100px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
+            <button id="save-note-btn" class="btn btn-primary admin-only" style="width:100%; margin-top:15px;" onclick="saveNoteOnly()">💾 儲存修改</button>
+        </div>
+    </div>
+</div>
+
+<!-- 成員檔案 Modal -->
+<div id="member-modal" onclick="closeModal('member-modal')">
+    <div class="modal-body" onclick="event.stopPropagation()">
+        <div style="flex:1.2;">
+            <h3 style="margin-top:0;">近5場風格雷達圖</h3>
+            <canvas id="memberRadarChart"></canvas>
+        </div>
+        <div style="flex:1;">
+            <h2 id="mm-name" style="margin:0;"></h2>
+            <div style="margin:10px 0; display:flex; gap:10px; align-items:center;">
+                職業：<select id="mm-job" class="select-input admin-only"></select>
+                <span id="mm-job-view" style="display:none;" class="job-tag"></span>
+                標籤：<select id="mm-tag" class="select-input admin-only">
+                    <option value="none">無標籤</option>
                     <option value="進攻團">進攻團</option>
                     <option value="防守團">防守團</option>
                     <option value="機動團">機動團</option>
-                    <option value="none">無標籤</option>
                 </select>
+                <span id="mm-tag-view" style="display:none;" class="hash-tag"></span>
             </div>
-            <div class="table-card">
-                <table>
-                    <thead>
-                        <tr>
-                            <th onclick="sortDb('id')">玩家 ID ↕</th>
-                            <th onclick="sortDb('last_job')">最近職業 ↕</th>
-                            <th onclick="sortDb('tag')">所屬分類 ↕</th>
-                            <th onclick="sortDb('matches')">總場次 ↕</th>
-                            <th>幫戰/約戰/其他</th>
-                            <th onclick="sortDb('rate')">出席率 ↕</th>
-                            <th>管理員評語</th>
-                            <th class="admin-only">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="db-table-body"></tbody>
-                </table>
-            </div>
+
+            <p style="margin-top:15px; font-weight:bold;">參賽記錄 (最近5場)：</p>
+            <div id="mm-history-list" class="scroll-list"></div>
+
+            <p style="margin-top:15px; font-weight:bold;">統戰綜合評語：</p>
+            <textarea id="mm-note" style="width:100%; height:80px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
+            <button class="btn btn-primary admin-only" style="width:100%; margin-top:10px;" onclick="saveMemberProfile()">💾 儲存檔案修改</button>
         </div>
     </div>
+</div>
 
-    <div id="modal" onclick="closeModal('modal')">
-        <div class="modal-body" onclick="event.stopPropagation()">
-            <div style="flex:1.2;"><canvas id="radarChart"></canvas></div>
-            <div style="flex:1;">
-                <h2 id="m-name" style="margin:0;"></h2>
-                <div id="m-job-box" style="margin:10px 0;"></div>
-                <div id="m-stats-box" style="padding:15px; background:#f8f9fa; border-radius:10px; font-size:13px; line-height:1.6;">
-                </div>
-                <p style="margin-top:20px; font-weight:bold;">單場管理備註：</p>
-                <textarea id="m-note" style="width:100%; height:100px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
-                <button id="save-note-btn" class="btn btn-primary admin-only" style="width:100%; margin-top:15px;" onclick="saveNoteOnly()">💾 儲存修改</button>
-            </div>
+<!-- 登入/註冊 Modal -->
+<div id="auth-modal" onclick="closeModal('auth-modal')">
+    <div class="auth-modal-body" onclick="event.stopPropagation()">
+        <h3 id="auth-title" style="margin-top:0;">🔑 登入帳號</h3>
+        <div id="auth-tabs" style="display:flex; gap:8px; margin-bottom:16px;">
+            <button class="btn btn-primary" id="tab-login" onclick="showAuthTab('login')" style="flex:1;">登入</button>
+            <button class="btn btn-outline" id="tab-register" onclick="showAuthTab('register')" style="flex:1;">註冊</button>
+        </div>
+        <div id="auth-form-login">
+            <label style="font-size:13px; font-weight:bold;">帳號</label>
+            <input type="text" id="login-username" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="輸入帳號">
+            <label style="font-size:13px; font-weight:bold;">密碼</label>
+            <input type="password" id="login-password" class="search-input" style="width:100%; margin-bottom:16px;" placeholder="輸入密碼">
+            <button class="btn btn-primary" style="width:100%;" onclick="doLogin()">登入</button>
+        </div>
+        <div id="auth-form-register" style="display:none;">
+            <label style="font-size:13px; font-weight:bold;">帳號（英數字）</label>
+            <input type="text" id="reg-username" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="設定帳號">
+            <label style="font-size:13px; font-weight:bold;">密碼</label>
+            <input type="password" id="reg-password" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="設定密碼">
+            <label style="font-size:13px; font-weight:bold;">幫會名稱</label>
+            <input type="text" id="reg-guild" class="search-input" style="width:100%; margin-bottom:16px;" placeholder="你的幫會名稱">
+            <button class="btn btn-primary" style="width:100%;" onclick="doRegister()">建立帳號</button>
+        </div>
+        <div id="auth-msg" style="margin-top:10px; font-size:13px; color:var(--danger);"></div>
+    </div>
+</div>
+
+<!-- 同步確認 Modal (需求5) -->
+<div id="sync-confirm-modal" onclick="closeModal('sync-confirm-modal')">
+    <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:460px;">
+        <h3 style="margin-top:0;">☁️ 同步確認</h3>
+        <p id="sync-confirm-msg" style="font-size:13px; line-height:1.7;"></p>
+        <div id="sync-conflict-list" style="max-height:180px; overflow-y:auto; margin-bottom:12px; font-size:12px;"></div>
+        <div style="display:flex; gap:8px;">
+            <button class="btn btn-primary" style="flex:1;" onclick="confirmSync()">確認同步</button>
+            <button class="btn btn-outline" style="flex:1;" onclick="closeModal('sync-confirm-modal')">取消</button>
         </div>
     </div>
+</div>
 
-    <div id="member-modal" onclick="closeModal('member-modal')">
-        <div class="modal-body" onclick="event.stopPropagation()">
-            <div style="flex:1.2;">
-                <h3 style="margin-top:0;">近5場風格雷達圖</h3>
-                <canvas id="memberRadarChart"></canvas>
-            </div>
-            <div style="flex:1;">
-                <h2 id="mm-name" style="margin:0;"></h2>
-                <div style="margin:10px 0; display:flex; gap:10px; align-items:center;">
-                    職業：<select id="mm-job" class="select-input admin-only"></select>
-                    <span id="mm-job-view" style="display:none;" class="job-tag"></span>
-                    標籤：<select id="mm-tag" class="select-input admin-only">
-                        <option value="none">無標籤</option>
-                        <option value="進攻團">進攻團</option>
-                        <option value="防守團">防守團</option>
-                        <option value="機動團">機動團</option>
-                    </select>
-                    <span id="mm-tag-view" style="display:none;" class="hash-tag"></span>
-                </div>
+<script>
+// =====================================================
+// ===  全域設定與常數
+// =====================================================
+const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev";
 
-                <p style="margin-top:15px; font-weight:bold;">參賽記錄 (最近5場)：</p>
-                <div id="mm-history-list" class="scroll-list"></div>
+const metrics = [
+    { l: '人頭狗', k: 'kill' }, { l: '傷害狗', k: 'pDmg' }, { l: '拆遷大隊', k: 'bDmg' },
+    { l: '媽媽', k: 'heal' }, { l: '快樂助攻', k: 'assist' }, { l: '化羽大帝', k: 'spring' },
+    { l: '對啦我最會抗', k: 'takeDmg' }, { l: '頂級黑奴', k: 'resource' }, { l: '起來重睡', k: 'death' }
+];
+const cols = [
+    { l: '玩家', k: 'name' }, { l: '職業', k: 'job' }, { l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' },
+    { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '治療', k: 'heal' },
+    { l: '承傷', k: 'takeDmg' }, { l: '重傷', k: 'death' }, { l: '化羽/清泉', k: 'spring' }, { l: '焚骨', k: 'bone' }
+];
 
-                <p style="margin-top:15px; font-weight:bold;">統戰綜合評語：</p>
-                <textarea id="mm-note" style="width:100%; height:80px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
-                <button class="btn btn-primary admin-only" style="width:100%; margin-top:10px;" onclick="saveMemberProfile()">💾 儲存檔案修改</button>
-            </div>
-        </div>
-    </div>
+let gA = [], gB = [], full = [], nameA = "", nameB = "", focusPlayer = null;
+let chart = null, memberChart = null, currentJobFilter = "all";
+let allHistories = [], dbMembersMap = [], dbSort = { key: 'matches', asc: false };
+let totalReportsInTimeframe = 0, currentReportId = null;
 
-    <script>
-        const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev";
+// =====================================================
+// ===  模式管理（本地 / 雲端）
+// =====================================================
+// storageMode: 'local' | 'cloud'
+let storageMode = 'local';
+let currentUser = null; // { username, token, guild }
 
-        // 欄位定義更新
-        const metrics = [{ l: '人頭狗', k: 'kill' }, { l: '傷害狗', k: 'pDmg' }, { l: '拆遷大隊', k: 'bDmg' }, { l: '媽媽', k: 'heal' }, { l: '快樂助攻', k: 'assist' }, { l: '化羽大帝', k: 'spring' }, { l: '對啦我最會抗', k: 'takeDmg' }, { l: '頂級黑奴', k: 'resource' }, { l: '起來重睡', k: 'death' }];
-        const cols = [
-            { l: '玩家', k: 'name' }, { l: '職業', k: 'job' }, { l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' },
-            { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '治療', k: 'heal' },
-            { l: '承傷', k: 'takeDmg' }, { l: '重傷', k: 'death' }, { l: '化羽/清泉', k: 'spring' }, { l: '焚骨', k: 'bone' }
-        ];
+const LOCALSTORAGE_HISTORIES_KEY = 'nsh_local_histories';
+const LOCALSTORAGE_MEMBERS_KEY   = 'nsh_local_members';
+const LOCALSTORAGE_USER_KEY      = 'nsh_current_user';
 
-        let gA = [], gB = [], full = [], nameA = "", nameB = "", focusPlayer = null;
-        let chart = null, memberChart = null, currentJobFilter = "all";
-        let allHistories = [], dbMembersMap = [], dbSort = { key: 'matches', asc: false };
-        let totalReportsInTimeframe = 0, currentReportId = null;
+function getLocalHistories() {
+    try { return JSON.parse(localStorage.getItem(LOCALSTORAGE_HISTORIES_KEY) || '[]'); } catch(e) { return []; }
+}
+function saveLocalHistories(arr) {
+    localStorage.setItem(LOCALSTORAGE_HISTORIES_KEY, JSON.stringify(arr));
+}
+function getLocalMembers() {
+    try { return JSON.parse(localStorage.getItem(LOCALSTORAGE_MEMBERS_KEY) || '{}'); } catch(e) { return {}; }
+}
+function saveLocalMembers(obj) {
+    localStorage.setItem(LOCALSTORAGE_MEMBERS_KEY, JSON.stringify(obj));
+}
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const isViewMode = urlParams.get('mode') === 'view';
+function updateModeBanner() {
+    const banner = document.getElementById('mode-banner');
+    const authBtn = document.getElementById('auth-btn');
+    const logoutBtn = document.getElementById('logout-btn');
+    const syncBtn = document.getElementById('sync-btn');
+    const shareNote = document.getElementById('share-local-note');
+    if (storageMode === 'cloud' && currentUser) {
+        banner.className = 'cloud';
+        banner.textContent = `☁️ 雲端模式 — ${currentUser.username}（${currentUser.guild || ''}）`;
+        authBtn.style.display = 'none';
+        logoutBtn.style.display = '';
+        syncBtn.style.display = 'none';
+        if (shareNote) shareNote.style.display = 'none';
+    } else {
+        banner.className = 'local';
+        banner.textContent = '💾 本地模式（未登入）';
+        authBtn.style.display = '';
+        logoutBtn.style.display = 'none';
+        if (!isViewMode) syncBtn.style.display = '';
+        if (shareNote) shareNote.style.display = '';
+    }
+}
 
-        window.onload = async () => {
-            // [Bug 修復區塊]：確保唯讀模式移除元素後，JS 依然能安全執行
-            if (isViewMode) {
-                document.querySelectorAll('.admin-only').forEach(el => el.remove());
-                document.getElementById('m-note').readOnly = true;
-                document.getElementById('mm-note').readOnly = true;
-                document.getElementById('custom-title').readOnly = true;
-                document.getElementById('sys-title').innerText = "NSH 查看模式";
-                document.getElementById('mm-job-view').style.display = 'inline-block';
-                document.getElementById('mm-tag-view').style.display = 'inline-block';
-            }
+// =====================================================
+// ===  Auth UI
+// =====================================================
+function openAuthModal() {
+    document.getElementById('auth-modal').style.display = 'flex';
+    document.getElementById('auth-msg').textContent = '';
+    showAuthTab('login');
+}
 
-            const matchDateEl = document.getElementById('match-date');
-            if (matchDateEl) matchDateEl.valueAsDate = new Date();
+function showAuthTab(tab) {
+    document.getElementById('auth-form-login').style.display   = tab === 'login'    ? '' : 'none';
+    document.getElementById('auth-form-register').style.display = tab === 'register' ? '' : 'none';
+    document.getElementById('tab-login').className    = tab === 'login'    ? 'btn btn-primary' : 'btn btn-outline';
+    document.getElementById('tab-register').className = tab === 'register' ? 'btn btn-primary' : 'btn btn-outline';
+}
 
-            await fetchAllHistories();
-            const reportId = urlParams.get('id');
-            if (reportId) viewHistory(reportId);
-        };
+async function doRegister() {
+    const username = document.getElementById('reg-username').value.trim();
+    const password = document.getElementById('reg-password').value.trim();
+    const guild    = document.getElementById('reg-guild').value.trim();
+    const msgEl    = document.getElementById('auth-msg');
+    if (!username || !password) { msgEl.textContent = '帳號和密碼不能為空'; return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/auth/register", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, guild })
+        });
+        const data = await res.json();
+        if (!res.ok) { msgEl.textContent = data.error || '註冊失敗'; return; }
+        msgEl.style.color = 'green';
+        msgEl.textContent = '註冊成功！請登入。';
+        showAuthTab('login');
+    } catch(e) { msgEl.textContent = '連線失敗: ' + e.message; }
+}
 
-        // 切換手機版菜單顯示/隱藏
-        function toggleMobileMenu() {
-            const sidebar = document.querySelector('.sidebar');
-            const btn = document.getElementById('menu-toggle');
-            sidebar.classList.toggle('active');
+async function doLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value.trim();
+    const msgEl    = document.getElementById('auth-msg');
+    if (!username || !password) { msgEl.textContent = '帳號和密碼不能為空'; return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/auth/login", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { msgEl.textContent = data.error || '登入失敗'; return; }
+        currentUser = { username: data.username, token: data.token, guild: data.guild };
+        localStorage.setItem(LOCALSTORAGE_USER_KEY, JSON.stringify(currentUser));
+        storageMode = 'cloud';
+        closeModal('auth-modal');
+        updateModeBanner();
+        await fetchAllHistories();
+        if (document.getElementById('page-db').style.display !== 'none') loadDbData();
+    } catch(e) { msgEl.textContent = '連線失敗: ' + e.message; }
+}
 
-            if (sidebar.classList.contains('active')) {
-                btn.innerText = '✕';
-                document.body.style.overflow = 'hidden'; // 選單打開時禁止背景捲動
-            } else {
-                btn.innerText = '☰';
-                document.body.style.overflow = 'auto'; // 恢復捲動
-            }
-        }
+function logoutUser() {
+    currentUser = null;
+    storageMode = 'local';
+    localStorage.removeItem(LOCALSTORAGE_USER_KEY);
+    updateModeBanner();
+    fetchAllHistories();
+}
 
-        // 為了方便操作，點擊導航項後自動關閉選單
-        const originalSwitchPage = switchPage;
-        switchPage = function (p) {
-            originalSwitchPage(p);
-            if (window.innerWidth <= 768) {
-                toggleMobileMenu();
-            }
-        };
-
-        // 取得所有戰報並加入快取清除
-        async function fetchAllHistories() {
-            try {
-                const res = await fetch(WORKER_URL + "/api/histories?t=" + Date.now(), { cache: "no-store" });
-                allHistories = await res.json();
-                renderHistoryList();
-            } catch (e) { console.error("獲取戰報失敗"); }
-        }
-
-        // 判斷日期是否在範圍內
-        function isWithinDays(dateStr, days) {
-            if (days === 'all') return true;
-            const diffTime = Math.abs(new Date() - new Date(dateStr));
-            return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= parseInt(days);
-        }
-
-        // 渲染左側歷史記錄
-        function renderHistoryList() {
-            const search = document.getElementById('hist-search').value.toLowerCase();
-            const timeFilter = document.getElementById('hist-time').value;
-            const winLoss = document.getElementById('hist-winloss').value;
-            const typeFilter = document.getElementById('hist-type').value; // 新增
-
-            const filtered = allHistories.filter(h => {
-                let matchData = {};
-                try { matchData = JSON.parse(h.raw_json); } catch (e) { }
-
-                const matchSearch = h.guild_a.toLowerCase().includes(search) || (h.guild_b && h.guild_b.toLowerCase().includes(search));
-                const matchTime = isWithinDays(h.date, timeFilter);
-
-                const matchWL = (winLoss === 'all' || matchData.result === winLoss);
-                const matchType = (typeFilter === 'all' || matchData.matchType === typeFilter); // 類型過濾
-
-                return matchSearch && matchTime && matchWL && matchType;
+// =====================================================
+// ===  折疊板塊
+// =====================================================
+function toggleSection(id) {
+    const body = document.getElementById(id);
+    const icon = document.getElementById('icon-' + id);
+    if (!body) return;
+    const isCollapsed = body.classList.contains('collapsed');
+    if (isCollapsed) {
+        body.style.maxHeight = body.scrollHeight + 'px';
+        body.classList.remove('collapsed');
+        if (icon) icon.classList.remove('collapsed');
+    } else {
+        body.style.maxHeight = body.scrollHeight + 'px';
+        requestAnimationFrame(() => {
+            body.style.maxHeight = body.scrollHeight + 'px';
+            requestAnimationFrame(() => {
+                body.classList.add('collapsed');
+                body.style.maxHeight = '';
+                if (icon) icon.classList.add('collapsed');
             });
+        });
+    }
+}
 
-            document.getElementById('hist-items').innerHTML = filtered.map(h => {
-                let resTag = '';
-                let typeLabel = ''; // 用於顯示類型小標籤
-                try {
-                    const d = JSON.parse(h.raw_json);
-                    if (d.result === 'win') resTag = '<span class="result-tag win">勝</span>';
-                    if (d.result === 'loss') resTag = '<span class="result-tag loss">敗</span>';
-                    typeLabel = `<span style="font-size:10px; color:#999;">[${d.matchType || '幫戰'}]</span>`;
-                } catch (e) { }
+// 初始化折疊板塊（展開）
+function initSections() {
+    ['sec-mvp-a','sec-table-a','sec-mvp-b','sec-table-b'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.maxHeight = 'none';
+    });
+}
 
-                return `<div class="hist-card" onclick="viewHistory('${h.id}')">
+// =====================================================
+// ===  URL 參數 / View Mode
+// =====================================================
+const urlParams = new URLSearchParams(window.location.search);
+const isViewMode = urlParams.get('mode') === 'view';
+
+// =====================================================
+// ===  初始化
+// =====================================================
+window.onload = async () => {
+    // 嘗試恢復登入狀態
+    const savedUser = localStorage.getItem(LOCALSTORAGE_USER_KEY);
+    if (savedUser) {
+        try {
+            currentUser = JSON.parse(savedUser);
+            storageMode = 'cloud';
+        } catch(e) { currentUser = null; storageMode = 'local'; }
+    }
+
+    if (isViewMode) {
+        document.querySelectorAll('.admin-only').forEach(el => el.remove());
+        document.getElementById('m-note').readOnly = true;
+        document.getElementById('mm-note').readOnly = true;
+        document.getElementById('custom-title').readOnly = true;
+        document.getElementById('sys-title').innerText = "NSH 查看模式";
+        document.getElementById('mm-job-view').style.display = 'inline-block';
+        document.getElementById('mm-tag-view').style.display = 'inline-block';
+    }
+
+    const matchDateEl = document.getElementById('match-date');
+    if (matchDateEl) matchDateEl.valueAsDate = new Date();
+
+    updateModeBanner();
+    initSections();
+
+    await fetchAllHistories();
+    const reportId = urlParams.get('id');
+    if (reportId) viewHistory(reportId);
+};
+
+// =====================================================
+// ===  fetchAllHistories（本地 + 雲端通用）
+// =====================================================
+async function fetchAllHistories() {
+    try {
+        if (storageMode === 'cloud' && currentUser) {
+            const res = await fetch(WORKER_URL + "/api/histories?t=" + Date.now(), {
+                cache: "no-store",
+                headers: { 'Authorization': 'Bearer ' + currentUser.token }
+            });
+            allHistories = await res.json();
+        } else {
+            allHistories = getLocalHistories();
+        }
+        renderHistoryList();
+    } catch (e) {
+        console.error("獲取戰報失敗", e);
+        // 降級到本地
+        allHistories = getLocalHistories();
+        renderHistoryList();
+    }
+}
+
+// =====================================================
+// ===  防呆：重複上傳檢查（需求5）
+// =====================================================
+function isDuplicateReport(date, guildA, session) {
+    return allHistories.some(h => {
+        let rawData = {};
+        try { rawData = JSON.parse(h.raw_json || '{}'); } catch(e) {}
+        const hDate = h.date || '';
+        const hGuildA = h.guild_a || rawData.nameA || '';
+        const hSession = rawData.session || '第一場';
+        return hDate === date && hGuildA === guildA && hSession === session;
+    });
+}
+
+// =====================================================
+// ===  saveHistory（本地版 / 雲端版統一入口）
+// =====================================================
+async function saveHistory() {
+    const id = "rep_" + Date.now();
+    const mr  = document.getElementById('match-result');
+    const mt  = document.getElementById('match-type');
+    const ms  = document.getElementById('match-session');
+    const date = document.getElementById('match-date').value;
+    const titleA = document.getElementById('custom-title').value;
+    const session = ms ? ms.value : '第一場';
+
+    // === 防呆：同幫會+同日期+同場次 ===
+    if (isDuplicateReport(date, titleA, session)) {
+        alert(`⚠️ 防呆提醒：\n「${titleA}」在 ${date} 的【${session}】已存在！\n請確認是否重複上傳，或選擇不同場次。`);
+        return;
+    }
+
+    const payload = {
+        id,
+        fullDateTime: date,
+        nameA: titleA,
+        nameB: nameB,
+        rawData: {
+            nameA: titleA,
+            nameB, gA, gB,
+            result: mr ? mr.value : "win",
+            matchType: mt ? mt.value : "幫戰",
+            session: session
+        }
+    };
+
+    if (storageMode === 'cloud' && currentUser) {
+        await saveHistoryToCloud(payload);
+    } else {
+        saveHistoryToLocal(payload);
+    }
+}
+
+function saveHistoryToLocal(payload) {
+    const localHistories = getLocalHistories();
+    const record = {
+        id: payload.id,
+        date: payload.fullDateTime,
+        guild_a: payload.nameA,
+        guild_b: payload.nameB,
+        raw_json: JSON.stringify(payload.rawData),
+        _source: 'local'
+    };
+    localHistories.unshift(record);
+    saveLocalHistories(localHistories);
+
+    // 更新本地成員
+    const membersMap = getLocalMembers();
+    payload.rawData.gA.forEach(p => {
+        if (!membersMap[p.name]) {
+            membersMap[p.name] = { id: p.name, last_job: p.job, matches: 0, total_dmg: 0, note: '' };
+        }
+        membersMap[p.name].matches++;
+        membersMap[p.name].total_dmg = (membersMap[p.name].total_dmg || 0) + p.pDmg;
+        membersMap[p.name].last_job = p.job;
+    });
+    saveLocalMembers(membersMap);
+
+    alert("已保存至本地！若要分享，請登入帳號後同步到雲端。");
+    currentReportId = payload.id;
+    const shareSec = document.getElementById('share-section');
+    if (shareSec) { shareSec.style.display = 'block'; }
+    fetchAllHistories();
+}
+
+async function saveHistoryToCloud(payload) {
+    try {
+        const res = await fetch(WORKER_URL + "/api/save-history", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await res.text());
+        alert("已保存成功！成員檔案已同步更新。");
+        currentReportId = payload.id;
+        const shareSec = document.getElementById('share-section');
+        if (shareSec) { shareSec.style.display = 'block'; }
+        await fetchAllHistories();
+    } catch (e) { alert("儲存失敗: " + e.message); }
+}
+
+// =====================================================
+// ===  同步本地到雲端（需求5）
+// =====================================================
+async function syncLocalToCloud() {
+    if (!currentUser) { alert('請先登入帳號'); return; }
+
+    const localHistories = getLocalHistories();
+    if (localHistories.length === 0) { alert('本地沒有可同步的戰報'); return; }
+
+    // 取得雲端已有戰報，找出衝突
+    let cloudHistories = [];
+    try {
+        const res = await fetch(WORKER_URL + "/api/histories?t=" + Date.now(), {
+            cache: "no-store",
+            headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        cloudHistories = await res.json();
+    } catch(e) {}
+
+    const conflicts = [];
+    const safe = [];
+
+    localHistories.forEach(lh => {
+        let lRaw = {};
+        try { lRaw = JSON.parse(lh.raw_json || '{}'); } catch(e) {}
+        const lDate = lh.date;
+        const lGuild = lh.guild_a || lRaw.nameA || '';
+        const lSession = lRaw.session || '第一場';
+
+        const conflict = cloudHistories.some(ch => {
+            let cRaw = {};
+            try { cRaw = JSON.parse(ch.raw_json || '{}'); } catch(e) {}
+            return ch.date === lDate && (ch.guild_a || cRaw.nameA || '') === lGuild && (cRaw.session || '第一場') === lSession;
+        });
+
+        if (conflict) conflicts.push(lh);
+        else safe.push(lh);
+    });
+
+    const msgEl = document.getElementById('sync-confirm-msg');
+    const listEl = document.getElementById('sync-conflict-list');
+
+    let msg = `本地共 <b>${localHistories.length}</b> 場戰報，其中：<br>`;
+    msg += `✅ <b>${safe.length}</b> 場可直接同步<br>`;
+    if (conflicts.length > 0) {
+        msg += `⚠️ <b>${conflicts.length}</b> 場與雲端存在同幫會+同日期+同場次衝突，請確認是否覆蓋：`;
+    }
+    msgEl.innerHTML = msg;
+
+    if (conflicts.length > 0) {
+        listEl.innerHTML = conflicts.map(h => {
+            let r = {};
+            try { r = JSON.parse(h.raw_json || '{}'); } catch(e) {}
+            return `<div style="padding:4px; border-bottom:1px solid #eee;">${h.date} 【${r.session || '第一場'}】${h.guild_a}</div>`;
+        }).join('');
+    } else {
+        listEl.innerHTML = '';
+    }
+
+    // 暫存待同步資料
+    window._pendingSyncData = { safe, conflicts, allLocal: localHistories };
+    document.getElementById('sync-confirm-modal').style.display = 'flex';
+}
+
+async function confirmSync() {
+    const { safe, conflicts, allLocal } = window._pendingSyncData || {};
+    closeModal('sync-confirm-modal');
+    if (!safe && !conflicts) return;
+    const toSync = [...(safe || []), ...(conflicts || [])];
+
+    let successCount = 0, failCount = 0;
+    for (const lh of toSync) {
+        let rawData = {};
+        try { rawData = JSON.parse(lh.raw_json || '{}'); } catch(e) {}
+        const payload = {
+            id: lh.id,
+            fullDateTime: lh.date,
+            nameA: lh.guild_a || rawData.nameA,
+            nameB: lh.guild_b || rawData.nameB,
+            rawData
+        };
+        try {
+            const res = await fetch(WORKER_URL + "/api/save-history", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) successCount++;
+            else failCount++;
+        } catch(e) { failCount++; }
+    }
+
+    // 清除已同步的本地資料
+    const remaining = allLocal.filter(lh => !toSync.find(s => s.id === lh.id));
+    saveLocalHistories(remaining);
+    if (remaining.length === 0) saveLocalMembers({});
+
+    storageMode = 'cloud';
+    updateModeBanner();
+    await fetchAllHistories();
+    alert(`同步完成！成功 ${successCount} 場，失敗 ${failCount} 場。`);
+}
+
+// =====================================================
+// ===  deleteHist（本地 + 雲端）
+// =====================================================
+async function deleteHist(e, id) {
+    e.stopPropagation();
+    if (!confirm("確定刪除？這會同步扣除成員的累計場次！")) return;
+
+    if (storageMode === 'cloud' && currentUser) {
+        await fetch(WORKER_URL + "/api/delete-history", {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ id })
+        });
+    } else {
+        // 本地刪除
+        const histories = getLocalHistories();
+        const target = histories.find(h => h.id === id);
+        if (target) {
+            let rawData = {};
+            try { rawData = JSON.parse(target.raw_json || '{}'); } catch(e) {}
+            const membersMap = getLocalMembers();
+            (rawData.gA || []).forEach(p => {
+                if (membersMap[p.name]) {
+                    membersMap[p.name].matches = Math.max(0, (membersMap[p.name].matches || 1) - 1);
+                    membersMap[p.name].total_dmg = Math.max(0, (membersMap[p.name].total_dmg || 0) - p.pDmg);
+                }
+            });
+            saveLocalMembers(membersMap);
+            saveLocalHistories(histories.filter(h => h.id !== id));
+        }
+    }
+    await fetchAllHistories();
+}
+
+// =====================================================
+// ===  CSV 導入
+// =====================================================
+function handleCSV(file) {
+    if (!file) return;
+    const parts = file.name.replace('.csv', '').split('_');
+    if (parts.length >= 4) {
+        const d = parts[0];
+        const matchDateEl = document.getElementById('match-date');
+        if (matchDateEl) matchDateEl.value = `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`;
+        nameA = parts[2]; nameB = parts[3];
+        document.getElementById('custom-title').value = `${nameA} VS ${nameB}`;
+    }
+    const reader = new FileReader();
+    reader.onload = e => {
+        const lines = e.target.result.split('\n');
+        let mode = 'A'; gA = []; gB = [];
+        for (let i = 2; i < lines.length; i++) {
+            const row = lines[i].trim();
+            if (!row) { if (lines[i + 1]?.includes(',') || lines[i + 2]?.includes(',')) { mode = 'B'; i += 2; } continue; }
+            const c = row.split(',').map(v => v.replace(/"/g, ''));
+            if (c.length < 10) continue;
+            const p = {
+                name: c[0], job: c[1],
+                kill: +c[2] || 0, assist: +c[3] || 0, resource: +c[4] || 0,
+                pDmg: +c[5] || 0, bDmg: +c[6] || 0, heal: +c[7] || 0,
+                takeDmg: +c[8] || 0, death: +c[9] || 0, spring: +c[10] || 0, bone: +c[11] || 0
+            };
+            if (mode === 'A') gA.push(p); else gB.push(p);
+        }
+        full = [...gA, ...gB];
+        const saveBtn = document.getElementById('save-btn');
+        if (saveBtn) saveBtn.style.display = 'block';
+        renderFilterButtons(); renderReport();
+    };
+    reader.readAsText(file);
+}
+
+// =====================================================
+// ===  渲染歷史列表
+// =====================================================
+function isWithinDays(dateStr, days) {
+    if (days === 'all') return true;
+    const diffTime = Math.abs(new Date() - new Date(dateStr));
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= parseInt(days);
+}
+
+function renderHistoryList() {
+    const search     = document.getElementById('hist-search').value.toLowerCase();
+    const timeFilter = document.getElementById('hist-time').value;
+    const winLoss    = document.getElementById('hist-winloss').value;
+    const typeFilter = document.getElementById('hist-type').value;
+
+    const filtered = allHistories.filter(h => {
+        let matchData = {};
+        try { matchData = JSON.parse(h.raw_json); } catch (e) {}
+
+        const matchSearch = h.guild_a.toLowerCase().includes(search) || (h.guild_b && h.guild_b.toLowerCase().includes(search));
+        const matchTime   = isWithinDays(h.date, timeFilter);
+        const matchWL     = (winLoss === 'all' || matchData.result === winLoss);
+        const matchType   = (typeFilter === 'all' || matchData.matchType === typeFilter);
+
+        return matchSearch && matchTime && matchWL && matchType;
+    });
+
+    document.getElementById('hist-items').innerHTML = filtered.map(h => {
+        let resTag = '', typeLabel = '', sessionLabel = '', sourceBadge = '';
+        try {
+            const d = JSON.parse(h.raw_json);
+            if (d.result === 'win') resTag = '<span class="result-tag win">勝</span>';
+            if (d.result === 'loss') resTag = '<span class="result-tag loss">敗</span>';
+            typeLabel   = `<span style="font-size:10px; color:#999;">[${d.matchType || '幫戰'}]</span>`;
+            sessionLabel = d.session ? `<span style="font-size:10px; color:#666; margin-left:3px;">${d.session}</span>` : '';
+        } catch (e) {}
+
+        if (h._source === 'local') {
+            sourceBadge = ' <span class="local-badge">本地</span>';
+        } else if (storageMode === 'cloud') {
+            sourceBadge = ' <span class="cloud-badge">雲端</span>';
+        }
+
+        return `<div class="hist-card" onclick="viewHistory('${h.id}')">
             ${!isViewMode ? `<button class="del-btn" onclick="deleteHist(event, '${h.id}')">×</button>` : ''}
-            <div><b>${h.date}</b> ${typeLabel}<br>${h.guild_a}</div>
+            <div><b>${h.date}</b> ${typeLabel}${sessionLabel}${sourceBadge}<br>${h.guild_a}</div>
             <div>${resTag}</div>
         </div>`;
-            }).join('');
-        }
+    }).join('');
+}
 
-        // 處理 CSV 導入
-        function handleCSV(file) {
-            if (!file) return;
-            const parts = file.name.replace('.csv', '').split('_');
-            if (parts.length >= 4) {
-                const d = parts[0];
-                const matchDateEl = document.getElementById('match-date');
-                if (matchDateEl) matchDateEl.value = `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`;
-                nameA = parts[2]; nameB = parts[3];
-                document.getElementById('custom-title').value = `${nameA} VS ${nameB}`;
-            }
-            const reader = new FileReader();
-            reader.onload = e => {
-                const lines = e.target.result.split('\n');
-                let mode = 'A'; gA = []; gB = [];
-                for (let i = 2; i < lines.length; i++) {
-                    const row = lines[i].trim();
-                    if (!row) { if (lines[i + 1]?.includes(',') || lines[i + 2]?.includes(',')) { mode = 'B'; i += 2; } continue; }
-                    const c = row.split(',').map(v => v.replace(/"/g, ''));
-                    if (c.length < 10) continue;
-                    // 新版欄位解析
-                    const p = {
-                        name: c[0], job: c[1],
-                        kill: +c[2] || 0, assist: +c[3] || 0, resource: +c[4] || 0,
-                        pDmg: +c[5] || 0, bDmg: +c[6] || 0, heal: +c[7] || 0,
-                        takeDmg: +c[8] || 0, death: +c[9] || 0, spring: +c[10] || 0, bone: +c[11] || 0
-                    };
-                    if (mode === 'A') gA.push(p); else gB.push(p);
-                }
-                full = [...gA, ...gB];
-                const saveBtn = document.getElementById('save-btn');
-                if (saveBtn) saveBtn.style.display = 'block';
-                renderFilterButtons(); renderReport();
-            };
-            reader.readAsText(file);
-        }
+// =====================================================
+// ===  viewHistory
+// =====================================================
+function viewHistory(id) {
+    currentReportId = id;
+    const h = allHistories.find(x => x.id === id);
+    if (h) {
+        const d = JSON.parse(h.raw_json);
+        gA = d.gA; gB = d.gB; full = [...gA, ...gB];
 
-        async function saveHistoryToDB() {
-            const id = "rep_" + Date.now();
-            const mr = document.getElementById('match-result');
-            const mt = document.getElementById('match-type'); // 新增
+        document.getElementById('display-title').innerText = d.nameA || h.guild_a;
+        document.getElementById('name-b-title').innerText  = d.nameB || '未知';
 
-            const payload = {
-                id,
-                fullDateTime: document.getElementById('match-date').value,
-                nameA: document.getElementById('custom-title').value,
-                nameB: nameB,
-                rawData: {
-                    nameA: document.getElementById('custom-title').value,
-                    nameB, gA, gB,
-                    result: mr ? mr.value : "win",
-                    matchType: mt ? mt.value : "幫戰" // 存入類型
-                }
-            };
-            try {
-                const res = await fetch(WORKER_URL + "/api/save-history", { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!res.ok) throw new Error(await res.text());
-                alert("已保存成功！成員檔案已同步更新。");
-                currentReportId = id;
-                showShareSection();
-                await fetchAllHistories();
-            } catch (e) { alert("儲存失敗: " + e.message); }
-        }
+        const matchResultEl = document.getElementById('match-result');
+        if (matchResultEl && d.result) matchResultEl.value = d.result;
 
-        async function deleteHist(e, id) {
-            e.stopPropagation();
-            if (!confirm("確定刪除？這會同步扣除成員的累計場次！")) return;
-            await fetch(WORKER_URL + "/api/delete-history", { method: 'POST', body: JSON.stringify({ id }) });
-            await fetchAllHistories();
-        }
+        const customTitleEl = document.getElementById('custom-title');
+        if (customTitleEl && d.nameA) customTitleEl.value = d.nameA;
 
-        // 取得雷達圖欄位
-        function getRadarCols(job) {
-            if (job === '素問') return [{ l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '治療', k: 'heal' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }, { l: '化羽/清泉', k: 'spring' }];
-            if (job === '潮光') return [{ l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }, { l: '化羽/清泉', k: 'spring' }];
-            if (job === '九靈') return [{ l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }, { l: '焚骨', k: 'bone' }];
-            return [{ l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }];
-        }
+        const matchTypeEl = document.getElementById('match-type');
+        if (matchTypeEl && d.matchType) matchTypeEl.value = d.matchType;
 
-        // [Bug 修復區塊]：檢視戰報時，安全地為元素賦值，避免 null 報錯
-        function viewHistory(id) {
-            currentReportId = id;
-            const h = allHistories.find(x => x.id === id);
-            if (h) {
-                const d = JSON.parse(h.raw_json);
-                gA = d.gA; gB = d.gB; full = [...gA, ...gB];
+        const matchSessionEl = document.getElementById('match-session');
+        if (matchSessionEl && d.session) matchSessionEl.value = d.session;
 
-                document.getElementById('display-title').innerText = d.nameA || h.guild_a;
-                document.getElementById('name-b-title').innerText = d.nameB || '未知';
+        switchPage('report');
+        renderFilterButtons();
+        renderReport();
+        showShareSection();
+    }
+}
 
-                const matchResultEl = document.getElementById('match-result');
-                if (matchResultEl && d.result) matchResultEl.value = d.result;
+// =====================================================
+// ===  渲染戰報
+// =====================================================
+function renderReport() {
+    document.getElementById('report-view').style.display = 'block';
+    initSections();
+    renderMVPs('a', gA); renderMVPs('b', gB);
+    const avg = full.reduce((a, b) => a + b.pDmg, 0) / (full.length || 1);
+    ['a', 'b'].forEach(t => {
+        const data = (t === 'a' ? gA : gB).filter(p => currentJobFilter === 'all' || p.job === currentJobFilter);
+        document.getElementById('th-' + t).innerHTML = cols.map(c => `<th onclick="sortBy('${t}', '${c.k}')">${c.l} ↕</th>`).join('');
+        document.getElementById('tbody-' + t).innerHTML = data.map(p => `
+            <tr onclick="openModal('${p.name}')" style="cursor:pointer;">
+                <td>${p.name} ${p.pDmg > avg * 2.5 ? '🔥' : ''}</td>
+                <td><span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span></td>
+                ${cols.slice(2).map(c => `<td>${p[c.k] >= 10000 ? (p[c.k] / 10000).toFixed(1) + 'w' : p[c.k]}</td>`).join('')}
+            </tr>`).join('');
+    });
+}
 
-                const customTitleEl = document.getElementById('custom-title');
-                if (customTitleEl && d.nameA) customTitleEl.value = d.nameA;
+function renderMVPs(team, players) {
+    document.getElementById('mvp-' + team).innerHTML = metrics.map(m => {
+        const top = [...players].sort((a, b) => b[m.k] - a[m.k])[0];
+        return top ? `<div class="mvp-card"><div class="mvp-label">${m.l}</div><div class="mvp-name">${top.name}</div><div class="mvp-val">${top[m.k] >= 10000 ? (top[m.k] / 10000).toFixed(1) + 'w' : top[m.k]}</div></div>` : '';
+    }).join('');
+}
 
-                const matchTypeEl = document.getElementById('match-type');
-                if (matchTypeEl && d.matchType) matchTypeEl.value = d.matchType; // 回填類型
+function renderFilterButtons() {
+    const jobs = ["all", ...new Set(full.map(p => p.job))];
+    document.getElementById('job-filters').innerHTML = jobs.map(j => `<button class="filter-btn ${currentJobFilter === j ? 'active' : ''}" onclick="setJobFilter('${j}')">${j === 'all' ? '全部' : j}</button>`).join('');
+}
+function setJobFilter(j) { currentJobFilter = j; renderFilterButtons(); renderReport(); }
+function sortBy(team, key) { (team === 'a' ? gA : gB).sort((a, b) => b[key] - a[key]); renderReport(); }
 
-                switchPage('report');
-                renderFilterButtons();
-                renderReport();
-                showShareSection();
-            }
-        }
-
-        function renderReport() {
-            document.getElementById('report-view').style.display = 'block';
-            renderMVPs('a', gA); renderMVPs('b', gB);
-            const avg = full.reduce((a, b) => a + b.pDmg, 0) / (full.length || 1);
-            ['a', 'b'].forEach(t => {
-                const data = (t === 'a' ? gA : gB).filter(p => currentJobFilter === 'all' || p.job === currentJobFilter);
-                document.getElementById('th-' + t).innerHTML = cols.map(c => `<th onclick="sortBy('${t}', '${c.k}')">${c.l} ↕</th>`).join('');
-                document.getElementById('tbody-' + t).innerHTML = data.map(p => `
-                <tr onclick="openModal('${p.name}')" style="cursor:pointer;">
-                    <td>${p.name} ${p.pDmg > avg * 2.5 ? '🔥' : ''}</td>
-                    <td><span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span></td>
-                    ${cols.slice(2).map(c => `<td>${p[c.k] >= 10000 ? (p[c.k] / 10000).toFixed(1) + 'w' : p[c.k]}</td>`).join('')}
-                </tr>`).join('');
-            });
-        }
-
-        async function openModal(n) {
-            focusPlayer = full.find(x => x.name === n);
-            document.getElementById('modal').style.display = 'flex';
-            document.getElementById('m-name').innerText = focusPlayer.name;
-            document.getElementById('m-job-box').innerHTML = `<span class="job-tag" style="background:var(--color-${focusPlayer.job})">${focusPlayer.job}</span>`;
-            document.getElementById('m-stats-box').innerHTML = `
+// =====================================================
+// ===  Modal：單場詳細（雷達圖 Bug Fix）
+// =====================================================
+async function openModal(n) {
+    focusPlayer = full.find(x => x.name === n);
+    document.getElementById('modal').style.display = 'flex';
+    document.getElementById('m-name').innerText = focusPlayer.name;
+    document.getElementById('m-job-box').innerHTML = `<span class="job-tag" style="background:var(--color-${focusPlayer.job})">${focusPlayer.job}</span>`;
+    document.getElementById('m-stats-box').innerHTML = `
 擊敗：${focusPlayer.kill} ｜ 助攻：${focusPlayer.assist}<br>
 輸出：${(focusPlayer.pDmg / 10000).toFixed(1)}w ｜ 塔傷：${(focusPlayer.bDmg / 10000).toFixed(1)}w<br>
 承傷：${(focusPlayer.takeDmg / 10000).toFixed(1)}w ｜ 治療：${(focusPlayer.heal / 10000).toFixed(1)}w<br>
 資源：${focusPlayer.resource} ｜ 重傷：${focusPlayer.death}<br>
 化羽：${focusPlayer.spring} ｜ 焚骨：${focusPlayer.bone}
 `;
-            const res = await fetch(`${WORKER_URL}/api/member-note?id=${encodeURIComponent(focusPlayer.name)}&t=${Date.now()}`, { cache: "no-store" });
+
+    // 備註（雲端 or 本地）
+    let parsedNote = "";
+    if (storageMode === 'cloud' && currentUser) {
+        try {
+            const res = await fetch(`${WORKER_URL}/api/member-note?id=${encodeURIComponent(focusPlayer.name)}&t=${Date.now()}`, {
+                cache: "no-store",
+                headers: { 'Authorization': 'Bearer ' + currentUser.token }
+            });
             const data = await res.json();
-            let parsedNote = "";
             try { const p = JSON.parse(data.note); parsedNote = p.text || ""; } catch (e) { parsedNote = data.note || ""; }
-            document.getElementById('m-note').value = parsedNote;
+        } catch(e) {}
+    } else {
+        const membersMap = getLocalMembers();
+        const m = membersMap[focusPlayer.name];
+        if (m) { try { parsedNote = JSON.parse(m.note || '{}').text || m.note || ""; } catch(e) { parsedNote = m.note || ""; } }
+    }
+    document.getElementById('m-note').value = parsedNote;
 
-            const rCols = getRadarCols(focusPlayer.job);
-            const stats = {};
-            rCols.forEach(c => {
-                const vals = full.filter(x => x.job === focusPlayer.job).map(x => x[c.k]);
-                stats[c.k] = { max: Math.max(...vals, 1), min: Math.min(...vals, 0) };
+    const rCols = getRadarCols(focusPlayer.job);
+    const stats = {};
+    rCols.forEach(c => {
+        const vals = full.filter(x => x.job === focusPlayer.job).map(x => x[c.k]);
+        stats[c.k] = { max: Math.max(...vals, 1), min: Math.min(...vals, 0) };
+    });
+
+    // ===== Bug Fix: 重建 canvas 以確保 context 正確 =====
+    if (chart) { chart.destroy(); chart = null; }
+    const oldCanvas = document.getElementById('radarChart');
+    const newCanvas = document.createElement('canvas');
+    newCanvas.id = 'radarChart';
+    oldCanvas.parentNode.replaceChild(newCanvas, oldCanvas);
+
+    chart = new Chart(newCanvas, {
+        type: 'radar',
+        data: {
+            labels: rCols.map(c => c.l),
+            datasets: [{
+                label: '單場職業內分佈',
+                data: rCols.map(c => {
+                    const max = stats[c.k].max;
+                    const min = stats[c.k].min;
+                    const val = focusPlayer[c.k];
+                    if (c.k === 'death') return ((max - val) / (max - min || 1)) * 100;
+                    return ((val - min) / (max - min || 1)) * 100;
+                }),
+                backgroundColor: 'rgba(142,154,175,0.2)',
+                borderColor: '#8e9aaf'
+            }]
+        },
+        options: { scales: { r: { min: 0, max: 100, ticks: { display: false } } } }
+    });
+}
+
+// =====================================================
+// ===  Modal：成員檔案室詳細（雷達圖 Bug Fix）
+// =====================================================
+async function openMemberDetail(id) {
+    const m = dbMembersMap.find(x => x.id === id);
+    if (!m) return;
+    focusPlayer = m;
+
+    document.getElementById('member-modal').style.display = 'flex';
+    document.getElementById('mm-name').innerText = m.id;
+    document.getElementById('mm-note').value = m.note;
+    document.getElementById('mm-tag').value = m.tag;
+    document.getElementById('mm-tag-view').innerText = m.tag !== 'none' ? m.tag : '無標籤';
+
+    const jobSet = new Set(dbMembersMap.map(x => x.last_job));
+    document.getElementById('mm-job').innerHTML = [...jobSet].map(j => `<option value="${j}" ${j === m.last_job ? 'selected' : ''}>${j}</option>`).join('');
+    document.getElementById('mm-job-view').innerText = m.last_job;
+    document.getElementById('mm-job-view').style.background = `var(--color-${m.last_job})`;
+
+    const recent = m.histories
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .slice(0, 5);
+
+    document.getElementById('mm-history-list').innerHTML = recent.map(h => `
+    <div style="padding:6px; border-bottom:1px solid #eee;">
+        <b>[${h.date}]</b> <span style="color:var(--accent)">[${h.type || '幫戰'}]</span> ${h.session ? `【${h.session}】` : ''} ${h.title}<br>
+        擊敗:${h.stats.kill} 助攻:${h.stats.assist} 資源:${h.stats.resource}<br>
+        輸出:${(h.stats.pDmg / 10000).toFixed(1)}w 塔傷:${(h.stats.bDmg / 10000).toFixed(1)}w
+    </div>
+`).join('');
+
+    const rCols = getRadarCols(m.last_job);
+    const avgStats = {};
+    rCols.forEach(c => { avgStats[c.k] = m.aggr[c.k] / m.matches; });
+
+    const classPeers = dbMembersMap.filter(x => x.last_job === m.last_job && x.matches > 0);
+    const globalStats = {};
+    rCols.forEach(c => {
+        const peerAvgs = classPeers.map(p => p.aggr[c.k] / p.matches);
+        globalStats[c.k] = { max: Math.max(...peerAvgs, 1), min: Math.min(...peerAvgs, 0) };
+    });
+
+    // ===== Bug Fix: 重建 canvas =====
+    if (memberChart) { memberChart.destroy(); memberChart = null; }
+    const oldMCanvas = document.getElementById('memberRadarChart');
+    const newMCanvas = document.createElement('canvas');
+    newMCanvas.id = 'memberRadarChart';
+    oldMCanvas.parentNode.replaceChild(newMCanvas, oldMCanvas);
+
+    memberChart = new Chart(newMCanvas, {
+        type: 'radar',
+        data: {
+            labels: rCols.map(c => c.l),
+            datasets: [{
+                label: '綜合能力分佈',
+                data: rCols.map(c => {
+                    const max = globalStats[c.k].max;
+                    const min = globalStats[c.k].min;
+                    const val = avgStats[c.k];
+                    if (c.k === 'death') return ((max - val) / (max - min || 1)) * 100;
+                    return ((val - min) / (max - min || 1)) * 100;
+                }),
+                backgroundColor: 'rgba(251,192,45,0.2)',
+                borderColor: '#fbc02d'
+            }]
+        },
+        options: { scales: { r: { min: 0, max: 100, ticks: { display: false } } } }
+    });
+}
+
+// =====================================================
+// ===  成員檔案室
+// =====================================================
+async function loadDbData() {
+    const timeFilter = document.getElementById('db-time').value;
+    const filteredHistories = allHistories.filter(h => isWithinDays(h.date, timeFilter));
+    totalReportsInTimeframe = filteredHistories.length;
+
+    let dbRaw = [];
+    const infoMap = {};
+    const jobSet = new Set();
+
+    if (storageMode === 'cloud' && currentUser) {
+        const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now(), {
+            cache: "no-store",
+            headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        dbRaw = await res.json();
+    } else {
+        const membersMap = getLocalMembers();
+        dbRaw = Object.values(membersMap);
+    }
+
+    dbRaw.forEach(m => {
+        let noteStr = "", tagStr = "none";
+        try { const p = JSON.parse(m.note); noteStr = p.text || ""; tagStr = p.tag || "none"; }
+        catch (e) { noteStr = m.note || ""; tagStr = "none"; }
+        infoMap[m.id] = { note: noteStr, tag: tagStr, lastJob: m.last_job };
+        if (m.last_job) jobSet.add(m.last_job);
+    });
+
+    const jobSelect = document.getElementById('db-job');
+    const currJob = jobSelect.value;
+    jobSelect.innerHTML = '<option value="all">全部職業</option>' + [...jobSet].map(j => `<option value="${j}">${j}</option>`).join('');
+    jobSelect.value = currJob || 'all';
+
+    const map = {};
+    filteredHistories.forEach(h => {
+        try {
+            const d = JSON.parse(h.raw_json);
+            const aName = d.nameA || h.guild_a;
+            const type = d.matchType || "幫戰";
+            const session = d.session || "第一場";
+
+            d.gA.forEach(p => {
+                if (!map[p.name]) {
+                    map[p.name] = {
+                        id: p.name,
+                        matches: 0,
+                        histories: [],
+                        aggr: {},
+                        counts: { "幫戰": 0, "約戰": 0, "其他": 0 }
+                    };
+                }
+                map[p.name].matches++;
+                map[p.name].counts[type] = (map[p.name].counts[type] || 0) + 1;
+                map[p.name].histories.push({ date: h.date, title: aName, stats: p, type: type, session: session });
+                map[p.name].last_job = p.job;
+
+                cols.slice(2).forEach(c => {
+                    map[p.name].aggr[c.k] = (map[p.name].aggr[c.k] || 0) + (p[c.k] || 0);
+                });
             });
+        } catch (e) {}
+    });
 
-            if (chart) chart.destroy();
-            chart = new Chart(document.getElementById('radarChart'), {
-                type: 'radar',
-                data: {
-                    labels: rCols.map(c => c.l), datasets: [{
-                        label: '單場職業內分佈', data: rCols.map(c => {
-                            const max = stats[c.k].max;
-                            const min = stats[c.k].min;
-                            const val = focusPlayer[c.k];
+    dbMembersMap = Object.values(map).map(m => {
+        m.note = infoMap[m.id]?.note || "";
+        m.tag  = infoMap[m.id]?.tag  || "none";
+        m.last_job = m.last_job || infoMap[m.id]?.lastJob || "未知";
+        m.rate = totalReportsInTimeframe > 0 ? (m.matches / totalReportsInTimeframe * 100) : 0;
+        return m;
+    });
+    renderDbTable();
+}
 
-                            if (c.k === 'death') {
-                                // 生存力（反向）
-                                return ((max - val) / (max - min || 1)) * 100;
-                            }
+function renderDbTable() {
+    const search = document.getElementById('db-search').value.toLowerCase();
+    const jobF   = document.getElementById('db-job').value;
+    const tagF   = document.getElementById('db-tag').value;
 
-                            return ((val - min) / (max - min || 1)) * 100;
-                        }), backgroundColor: 'rgba(142,154,175,0.2)', borderColor: '#8e9aaf'
-                    }]
-                },
-                options: { scales: { r: { min: 0, max: 100, ticks: { display: false } } } }
-            });
-        }
+    let data = dbMembersMap.filter(m => {
+        const matchS = m.id.toLowerCase().includes(search);
+        const matchJ = jobF === 'all' || m.last_job === jobF;
+        const matchT = tagF === 'all' || m.tag === tagF;
+        return matchS && matchJ && matchT;
+    });
 
-        // 構建成員檔案室
-        async function loadDbData() {
-            const timeFilter = document.getElementById('db-time').value;
-            const filteredHistories = allHistories.filter(h => isWithinDays(h.date, timeFilter));
-            totalReportsInTimeframe = filteredHistories.length;
+    data.sort((a, b) => {
+        let va = a[dbSort.key], vb = b[dbSort.key];
+        if (typeof va === 'string') return dbSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
+        return dbSort.asc ? va - vb : vb - va;
+    });
 
-            const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now(), { cache: "no-store" });
-            const dbRaw = await res.json();
-            const infoMap = {};
-            const jobSet = new Set();
-
-            dbRaw.forEach(m => {
-                let noteStr = "", tagStr = "none";
-                try { const p = JSON.parse(m.note); noteStr = p.text || ""; tagStr = p.tag || "none"; }
-                catch (e) { noteStr = m.note || ""; tagStr = "none"; }
-                infoMap[m.id] = { note: noteStr, tag: tagStr, lastJob: m.last_job };
-                if (m.last_job) jobSet.add(m.last_job);
-            });
-
-            const jobSelect = document.getElementById('db-job');
-            const currJob = jobSelect.value;
-            jobSelect.innerHTML = '<option value="all">全部職業</option>' + [...jobSet].map(j => `<option value="${j}">${j}</option>`).join('');
-            jobSelect.value = currJob || 'all';
-
-            const map = {};
-            filteredHistories.forEach(h => {
-                try {
-                    const d = JSON.parse(h.raw_json);
-                    const aName = d.nameA || h.guild_a;
-                    const type = d.matchType || "幫戰"; // 預設為幫戰
-
-                    d.gA.forEach(p => {
-                        if (!map[p.name]) {
-                            map[p.name] = {
-                                id: p.name,
-                                matches: 0,
-                                histories: [],
-                                aggr: {},
-                                // 新增分類計數器
-                                counts: { "幫戰": 0, "約戰": 0, "其他": 0 }
-                            };
-                        }
-                        map[p.name].matches++;
-                        map[p.name].counts[type] = (map[p.name].counts[type] || 0) + 1; // 分類累加
-
-                        map[p.name].histories.push({ date: h.date, title: aName, stats: p, type: type });
-                        map[p.name].last_job = p.job;
-
-                        cols.slice(2).forEach(c => {
-                            map[p.name].aggr[c.k] = (map[p.name].aggr[c.k] || 0) + (p[c.k] || 0);
-                        });
-                    });
-                } catch (e) { }
-            });
-
-            dbMembersMap = Object.values(map).map(m => {
-                m.note = infoMap[m.id]?.note || "";
-                m.tag = infoMap[m.id]?.tag || "none";
-                m.last_job = m.last_job || infoMap[m.id]?.lastJob || "未知";
-                m.rate = totalReportsInTimeframe > 0 ? (m.matches / totalReportsInTimeframe * 100) : 0;
-                return m;
-            });
-            renderDbTable();
-        }
-
-        function renderDbTable() {
-            const search = document.getElementById('db-search').value.toLowerCase();
-            const jobF = document.getElementById('db-job').value;
-            const tagF = document.getElementById('db-tag').value;
-
-            let data = dbMembersMap.filter(m => {
-                const matchS = m.id.toLowerCase().includes(search);
-                const matchJ = jobF === 'all' || m.last_job === jobF;
-                const matchT = tagF === 'all' || m.tag === tagF;
-                return matchS && matchJ && matchT;
-            });
-
-            data.sort((a, b) => {
-                let va = a[dbSort.key], vb = b[dbSort.key];
-                if (typeof va === 'string') return dbSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
-                return dbSort.asc ? va - vb : vb - va;
-            });
-
-            document.getElementById('db-table-body').innerHTML = data.map(m => `
+    document.getElementById('db-table-body').innerHTML = data.map(m => `
         <tr onclick="openMemberDetail('${m.id}')" style="cursor:pointer">
             <td><b>${m.id}</b></td>
             <td><span class="job-tag" style="background:var(--color-${m.last_job})">${m.last_job}</span></td>
@@ -1050,136 +1598,140 @@
             </td>
         </tr>
     `).join('');
+}
+
+function sortDb(key) {
+    if (dbSort.key === key) dbSort.asc = !dbSort.asc;
+    else { dbSort.key = key; dbSort.asc = false; }
+    renderDbTable();
+}
+
+async function saveMemberProfile() {
+    const newNote = document.getElementById('mm-note').value;
+    const newTag  = document.getElementById('mm-tag').value;
+
+    if (storageMode === 'cloud' && currentUser) {
+        const payload = { id: focusPlayer.id, note: JSON.stringify({ text: newNote, tag: newTag }) };
+        await fetch(WORKER_URL + "/api/update-note", {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify(payload)
+        });
+    } else {
+        const membersMap = getLocalMembers();
+        if (!membersMap[focusPlayer.id]) membersMap[focusPlayer.id] = { id: focusPlayer.id, last_job: focusPlayer.last_job, matches: 0, total_dmg: 0, note: '' };
+        membersMap[focusPlayer.id].note = JSON.stringify({ text: newNote, tag: newTag });
+        saveLocalMembers(membersMap);
+    }
+
+    alert("檔案已更新！");
+    await loadDbData();
+}
+
+async function saveNoteOnly() {
+    const note = document.getElementById('m-note').value;
+    if (storageMode === 'cloud' && currentUser) {
+        const res = await fetch(`${WORKER_URL}/api/member-note?id=${encodeURIComponent(focusPlayer.name)}&t=${Date.now()}`, {
+            headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const data = await res.json();
+        let oldTag = "none";
+        try { oldTag = JSON.parse(data.note).tag || "none"; } catch (e) {}
+        const payload = { id: focusPlayer.name, note: JSON.stringify({ text: note, tag: oldTag }) };
+        await fetch(WORKER_URL + "/api/update-note", {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify(payload)
+        });
+    } else {
+        const membersMap = getLocalMembers();
+        if (!membersMap[focusPlayer.name]) membersMap[focusPlayer.name] = { id: focusPlayer.name, last_job: focusPlayer.job, matches: 0, total_dmg: 0, note: '' };
+        let oldTag = "none";
+        try { oldTag = JSON.parse(membersMap[focusPlayer.name].note || '{}').tag || "none"; } catch(e) {}
+        membersMap[focusPlayer.name].note = JSON.stringify({ text: note, tag: oldTag });
+        saveLocalMembers(membersMap);
+    }
+    alert("評語已儲存");
+}
+
+async function renameP(old) {
+    const n = prompt("輸入新名稱:", old);
+    if (!n) return;
+    if (storageMode === 'cloud' && currentUser) {
+        await fetch(WORKER_URL + "/api/rename", {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ oldId: old, newId: n })
+        });
+    } else {
+        const membersMap = getLocalMembers();
+        if (membersMap[old]) {
+            membersMap[n] = { ...membersMap[old], id: n };
+            delete membersMap[old];
+            saveLocalMembers(membersMap);
         }
+    }
+    await loadDbData();
+}
 
-        function sortDb(key) {
-            if (dbSort.key === key) dbSort.asc = !dbSort.asc;
-            else { dbSort.key = key; dbSort.asc = false; }
-            renderDbTable();
-        }
+// =====================================================
+// ===  雷達圖欄位定義
+// =====================================================
+function getRadarCols(job) {
+    if (job === '素問') return [{ l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '治療', k: 'heal' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }, { l: '化羽/清泉', k: 'spring' }];
+    if (job === '潮光') return [{ l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }, { l: '化羽/清泉', k: 'spring' }];
+    if (job === '九靈') return [{ l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }, { l: '焚骨', k: 'bone' }];
+    return [{ l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '資源', k: 'resource' }, { l: '人傷', k: 'pDmg' }, { l: '塔傷', k: 'bDmg' }, { l: '承傷', k: 'takeDmg' }, { l: '存活', k: 'death' }];
+}
 
-        async function openMemberDetail(id) {
-            const m = dbMembersMap.find(x => x.id === id);
-            if (!m) return;
-            focusPlayer = m;
+// =====================================================
+// ===  UI 工具函數
+// =====================================================
+function switchPage(p) {
+    document.getElementById('page-report').style.display = p === 'report' ? 'block' : 'none';
+    document.getElementById('page-db').style.display     = p === 'db'     ? 'block' : 'none';
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    document.getElementById('nav-' + p).classList.add('active');
+    if (p === 'db') loadDbData();
+}
 
-            document.getElementById('member-modal').style.display = 'flex';
-            document.getElementById('mm-name').innerText = m.id;
-            document.getElementById('mm-note').value = m.note;
-            document.getElementById('mm-tag').value = m.tag;
-            document.getElementById('mm-tag-view').innerText = m.tag !== 'none' ? m.tag : '無標籤';
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+function showShareSection() { document.getElementById('share-section').style.display = 'block'; }
 
-            const jobSet = new Set(dbMembersMap.map(x => x.last_job));
-            document.getElementById('mm-job').innerHTML = [...jobSet].map(j => `<option value="${j}" ${j === m.last_job ? 'selected' : ''}>${j}</option>`).join('');
-            document.getElementById('mm-job-view').innerText = m.last_job;
-            document.getElementById('mm-job-view').style.background = `var(--color-${m.last_job})`;
+function copyShareLink(mode) {
+    if (storageMode === 'local') {
+        if (!confirm('⚠️ 目前為本地模式，分享鏈結需先同步至雲端。\n是否仍要複製鏈結（他人可能無法開啟）？')) return;
+    }
+    const url = new URL(window.location.href.split('?')[0]);
+    url.searchParams.set('id', currentReportId);
+    if (mode === 'view') url.searchParams.set('mode', 'view');
+    navigator.clipboard.writeText(url.toString());
+    alert("鏈結已複製！");
+}
 
-            const recent = m.histories
-                .sort((a, b) => new Date(b.date) - new Date(a.date))
-                .slice(0, 5);
+function toggleMobileMenu() {
+    const sidebar = document.querySelector('.sidebar');
+    const btn = document.getElementById('menu-toggle');
+    sidebar.classList.toggle('active');
+    if (sidebar.classList.contains('active')) {
+        btn.innerText = '✕';
+        document.body.style.overflow = 'hidden';
+    } else {
+        btn.innerText = '☰';
+        document.body.style.overflow = 'auto';
+    }
+}
 
-            document.getElementById('mm-history-list').innerHTML = recent.map(h => `
-    <div style="padding:6px; border-bottom:1px solid #eee;">
-        <b>[${h.date}]</b> <span style="color:var(--accent)">[${h.type || '幫戰'}]</span> ${h.title}<br>
-        擊敗:${h.stats.kill} 助攻:${h.stats.assist} 資源:${h.stats.resource}<br>
-        輸出:${(h.stats.pDmg / 10000).toFixed(1)}w 塔傷:${(h.stats.bDmg / 10000).toFixed(1)}w
-    </div>
-`).join('');
+// 覆寫 switchPage 以在手機版自動關閉側邊欄
+const _origSwitchPage = switchPage;
+switchPage = function(p) {
+    _origSwitchPage(p);
+    if (window.innerWidth <= 768) {
+        const sidebar = document.querySelector('.sidebar');
+        if (sidebar.classList.contains('active')) toggleMobileMenu();
+    }
+};
 
-            const rCols = getRadarCols(m.last_job);
-            const avgStats = {};
-            rCols.forEach(c => { avgStats[c.k] = m.aggr[c.k] / m.matches; });
-
-            const classPeers = dbMembersMap.filter(x => x.last_job === m.last_job && x.matches > 0);
-            const globalStats = {};
-            rCols.forEach(c => {
-                const peerAvgs = classPeers.map(p => p.aggr[c.k] / p.matches);
-                globalStats[c.k] = { max: Math.max(...peerAvgs, 1), min: Math.min(...peerAvgs, 0) };
-            });
-
-            if (memberChart) memberChart.destroy();
-            memberChart = new Chart(document.getElementById('memberRadarChart'), {
-                type: 'radar',
-                data: {
-                    labels: rCols.map(c => c.l), datasets: [{
-                        label: '綜合能力分佈', data: rCols.map(c => {
-                            const max = globalStats[c.k].max;
-                            const min = globalStats[c.k].min;
-                            const val = avgStats[c.k];
-
-                            if (c.k === 'death') {
-                                // 生存力（反向）
-                                return ((max - val) / (max - min || 1)) * 100;
-                            }
-
-                            return ((val - min) / (max - min || 1)) * 100;
-                        }), backgroundColor: 'rgba(251,192,45,0.2)', borderColor: '#fbc02d'
-                    }]
-                },
-                options: { scales: { r: { min: 0, max: 100, ticks: { display: false } } } }
-            });
-        }
-
-        async function saveMemberProfile() {
-            const newNote = document.getElementById('mm-note').value;
-            const newTag = document.getElementById('mm-tag').value;
-            const newJob = document.getElementById('mm-job').value;
-
-            const payload = { id: focusPlayer.id, note: JSON.stringify({ text: newNote, tag: newTag }) };
-            await fetch(WORKER_URL + "/api/update-note", { method: 'POST', body: JSON.stringify(payload) });
-
-            alert("檔案已更新！");
-            await loadDbData();
-        }
-
-        async function saveNoteOnly() {
-            const res = await fetch(`${WORKER_URL}/api/member-note?id=${encodeURIComponent(focusPlayer.name)}`);
-            const data = await res.json();
-            let oldTag = "none";
-            try { oldTag = JSON.parse(data.note).tag || "none"; } catch (e) { }
-
-            const payload = { id: focusPlayer.name, note: JSON.stringify({ text: document.getElementById('m-note').value, tag: oldTag }) };
-            await fetch(WORKER_URL + "/api/update-note", { method: 'POST', body: JSON.stringify(payload) });
-            alert("評語已儲存");
-        }
-
-        function switchPage(p) {
-            document.getElementById('page-report').style.display = p === 'report' ? 'block' : 'none';
-            document.getElementById('page-db').style.display = p === 'db' ? 'block' : 'none';
-            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-            document.getElementById('nav-' + p).classList.add('active');
-            if (p === 'db') loadDbData();
-        }
-
-        function renderMVPs(team, players) {
-            document.getElementById('mvp-' + team).innerHTML = metrics.map(m => {
-                const top = [...players].sort((a, b) => b[m.k] - a[m.k])[0];
-                return top ? `<div class="mvp-card"><div class="mvp-label">${m.l}</div><div class="mvp-name">${top.name}</div><div class="mvp-val">${top[m.k] >= 10000 ? (top[m.k] / 10000).toFixed(1) + 'w' : top[m.k]}</div></div>` : '';
-            }).join('');
-        }
-
-        function renderFilterButtons() { const jobs = ["all", ...new Set(full.map(p => p.job))]; document.getElementById('job-filters').innerHTML = jobs.map(j => `<button class="filter-btn ${currentJobFilter === j ? 'active' : ''}" onclick="setJobFilter('${j}')">${j === 'all' ? '全部' : j}</button>`).join(''); }
-        function setJobFilter(j) { currentJobFilter = j; renderFilterButtons(); renderReport(); }
-        function sortBy(team, key) { (team === 'a' ? gA : gB).sort((a, b) => b[key] - a[key]); renderReport(); }
-        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-        function showShareSection() { document.getElementById('share-section').style.display = 'block'; }
-
-        function copyShareLink(mode) {
-            const url = new URL(window.location.href.split('?')[0]);
-            url.searchParams.set('id', currentReportId);
-            if (mode === 'view') url.searchParams.set('mode', 'view');
-            navigator.clipboard.writeText(url.toString());
-            alert("鏈結已複製！");
-        }
-
-        async function renameP(old) {
-            const n = prompt("輸入新名稱:", old);
-            if (n) {
-                await fetch(WORKER_URL + "/api/rename", { method: 'POST', body: JSON.stringify({ oldId: old, newId: n }) });
-                await loadDbData();
-            }
-        }
-    </script>
-
+</script>
 
 </body></html>
