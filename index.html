@@ -1,818 +1,157 @@
 <html lang="zh-TW"><head>
     <meta charset="UTF-8">
-    <title>NSH 戰績系統 Pro v6.1</title>
+    <title>NSH 戰績系統 Pro v6.2 - 精準分析版</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg: #f5f6f8; --sidebar: #ffffff; --card: #ffffff;
             --text: #5a6473; --accent: #8e9aaf; --accent-soft: #d1d9e6;
-            --border: #edf0f2; --danger: #e57373; --gold: #fbc02d;
+            --border: #edf0f2; --danger: #e57373; --gold: #fbc02d; --win: #66bb6a;
             --color-碎夢: #5b9bd5; --color-神相: #4fc3f7; --color-血河: #e57373;
             --color-九靈: #ba68c8; --color-玄機: #fdd835; --color-龍吟: #81c784;
             --color-鐵衣: #ffb74d; --color-素問: #f06292; --color-潮光: #4dd0e1;
         }
         * { box-sizing: border-box; }
         body { margin: 0; display: flex; background: var(--bg); color: var(--text); font-family: "PingFang TC", sans-serif; height: 100vh; overflow: hidden; }
-        .sidebar { width: 280px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-        .container { padding: 30px; max-width: 1400px; margin: 0 auto; width: 100%; }
-        .nav-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; }
-        .nav-item.active { background: var(--accent-soft); font-weight: bold; }
-        .history-list { flex: 1; overflow-y: auto; margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px; }
-        .hist-card { font-size: 11px; padding: 10px; background: #fff; border-radius: 6px; margin-bottom: 8px; border: 1px solid var(--border); position: relative; cursor: pointer; }
-        .del-btn { position: absolute; top: 5px; right: 5px; color: var(--danger); border: none; background: none; cursor: pointer; font-size: 16px; z-index: 10; }
         
-        .mvp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-bottom: 25px; }
-        .mvp-card { background: white; padding: 12px; border-radius: 12px; border-left: 4px solid var(--gold); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-        .mvp-label { font-size: 11px; color: #999; margin-bottom: 4px; }
-        .mvp-name { font-weight: bold; font-size: 14px; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .mvp-val { font-size: 12px; color: var(--accent); font-weight: bold; }
+        /* 側邊欄 */
+        .sidebar { width: 300px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
+        .nav-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; transition: 0.3s; }
+        .nav-item:hover { background: #f0f2f5; }
+        .nav-item.active { background: var(--accent-soft); font-weight: bold; }
+        
+        /* 歷史記錄過濾器 */
+        .search-box { background: #f8f9fa; padding: 10px; border-radius: 8px; margin-top: 15px; font-size: 12px; }
+        .search-box select, .search-box input { width: 100%; margin-top: 5px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        
+        .history-list { flex: 1; overflow-y: auto; margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
+        .hist-card { font-size: 11px; padding: 10px; background: #fff; border-radius: 6px; margin-bottom: 8px; border: 1px solid var(--border); position: relative; cursor: pointer; }
+        .hist-card.win { border-left: 4px solid var(--win); }
+        .hist-card.loss { border-left: 4px solid var(--danger); }
+        .del-btn { position: absolute; top: 5px; right: 5px; color: var(--danger); border: none; background: none; cursor: pointer; font-size: 16px; }
 
-        .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; overflow: hidden; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #f8f9fa; }
-        th { background: #fafbfc; cursor: pointer; user-select: none; }
-        .job-tag { padding: 2px 6px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; }
-        .btn { padding: 8px 16px; border-radius: 8px; border:none; cursor:pointer; font-size:13px; margin-right: 5px; }
+        /* 主內容區 */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+        .container { padding: 30px; max-width: 1500px; margin: 0 auto; width: 100%; }
+        
+        /* MVP 卡片 */
+        .mvp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .mvp-card { background: white; padding: 10px; border-radius: 10px; border-left: 3px solid var(--gold); box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .mvp-label { font-size: 10px; color: #999; }
+        .mvp-name { font-weight: bold; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mvp-val { font-size: 11px; color: var(--accent); }
+
+        /* 表格樣式 */
+        .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1000px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #f8f9fa; }
+        th { background: #fafbfc; cursor: pointer; position: sticky; top: 0; z-index: 10; }
+        th:hover { background: #f0f2f5; }
+        .job-tag { padding: 2px 6px; border-radius: 4px; color: white; font-size: 10px; font-weight: bold; }
+        .hashtag-tag { background: #e0e0e0; padding: 2px 6px; border-radius: 10px; font-size: 10px; margin-right: 3px; }
+
+        /* 按鈕與工具 */
+        .btn { padding: 8px 16px; border-radius: 8px; border:none; cursor:pointer; font-size:13px; }
         .btn-primary { background:var(--accent); color:white; }
-        .btn-outline { background:white; border:1px solid #ddd; }
-        .filter-btn { padding: 5px 12px; border-radius: 15px; border: 1px solid #ddd; background: white; margin-right: 5px; cursor: pointer; font-size: 12px; }
-        .filter-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+        .btn-success { background:var(--win); color:white; }
+        .filter-group { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+        .filter-btn { padding: 5px 12px; border-radius: 15px; border: 1px solid #ddd; background: white; cursor: pointer; font-size: 11px; }
+        .filter-btn.active { background: var(--accent); color: white; }
 
-        #modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); justify-content:center; align-items:center; z-index:1000; }
-        .modal-body { background:white; padding:30px; border-radius:20px; width:850px; display:flex; gap:25px; }
-        .share-links { margin: 15px 0; padding: 15px; background: #eef2f7; border-radius: 10px; display: none; }
+        /* 彈窗 */
+        #modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:1000; }
+        .modal-body { background:white; padding:30px; border-radius:20px; width:1000px; max-height: 90vh; overflow-y: auto; display:flex; gap:25px; }
+        .member-hist-list { margin-top: 15px; font-size: 12px; }
+        .member-hist-item { padding: 8px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+        
+        .share-links { margin: 15px 0; padding: 15px; background: #eef2f7; border-radius: 10px; display: none; border: 1px dashed var(--accent); }
     </style>
 </head>
 <body>
     <div class="sidebar">
-        <h2 style="font-size: 18px;" id="sys-title">NSH 戰績管理 Pro</h2>
-        <div class="nav-item active" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
-        <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員檔案室</div>
-        <div class="history-list"><div id="hist-items">
-            <div class="hist-card" onclick="viewHistory('rep_1776850071520')">
-                <button class="del-btn" onclick="deleteHist(event, 'rep_1776850071520')">×</button>
-                <b>2026-04-19 20:00</b><br>醉仙居
-            </div>
-            <div class="hist-card" onclick="viewHistory('rep_1776850093145')">
-                <button class="del-btn" onclick="deleteHist(event, 'rep_1776850093145')">×</button>
-                <b>2026-04-19 20:00</b><br>醉仙居
-            </div></div></div>
-    </div>
-    <div class="main-content">
-        <div class="container" id="page-report" style="display: block;">
-            <div style="background:#fff; padding:15px; border-radius:12px; margin-bottom:20px; display:flex; gap:12px; align-items:center; border: 1px solid var(--border); flex-wrap: wrap;">
-                <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
-                <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
-                <input type="text" id="custom-title" placeholder="戰報標題" style="padding:7px; border:1px solid #ddd; border-radius:5px; width:220px;">
-                <input type="date" id="match-date" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                <button class="btn btn-primary admin-only" onclick="saveHistoryToDB()" id="save-btn" style="display:none; background: #4caf50;">💾 點此保存至資料庫</button>
-            </div>
-
-            <div id="share-section" class="share-links" style="display: block;">
-                <p style="margin:0 0 10px 0; font-weight:bold; font-size:13px;">🔗 戰報分享鏈結：</p>
-                <button class="btn btn-outline" onclick="copyShareLink('view')">📋 複製幫眾版 (唯讀)</button>
-                <button class="btn btn-outline admin-only" onclick="copyShareLink('admin')">📋 複製管理版 (可編輯)</button>
-            </div>
-
-            <div id="report-view" style="display: block;">
-                <div id="job-filters" style="margin-bottom:20px;"><button class="filter-btn active" onclick="setJobFilter('all')">全部</button><button class="filter-btn " onclick="setJobFilter('玄機')">玄機</button><button class="filter-btn " onclick="setJobFilter('碎夢')">碎夢</button><button class="filter-btn " onclick="setJobFilter('素問')">素問</button><button class="filter-btn " onclick="setJobFilter('九靈')">九靈</button><button class="filter-btn " onclick="setJobFilter('鐵衣')">鐵衣</button><button class="filter-btn " onclick="setJobFilter('龍吟')">龍吟</button><button class="filter-btn " onclick="setJobFilter('血河')">血河</button><button class="filter-btn " onclick="setJobFilter('神相')">神相</button></div>
-                <h3 id="display-title">醉仙居</h3>
-                <div id="mvp-a" class="mvp-grid"><div class="mvp-card"><div class="mvp-label">擊殺最高</div><div class="mvp-name">梧秋</div><div class="mvp-val">60</div></div><div class="mvp-card"><div class="mvp-label">傷害最高</div><div class="mvp-name">梧秋</div><div class="mvp-val">5517.3w</div></div><div class="mvp-card"><div class="mvp-label">對建最高</div><div class="mvp-name">澐慕</div><div class="mvp-val">63523.7w</div></div><div class="mvp-card"><div class="mvp-label">治療最高</div><div class="mvp-name">姜紫嫣</div><div class="mvp-val">3956.6w</div></div><div class="mvp-card"><div class="mvp-label">助攻最高</div><div class="mvp-name">孤煙殘陽</div><div class="mvp-val">383</div></div><div class="mvp-card"><div class="mvp-label">化羽最高</div><div class="mvp-name">孓孒子</div><div class="mvp-val">16</div></div><div class="mvp-card"><div class="mvp-label">承傷最高</div><div class="mvp-name">成毅</div><div class="mvp-val">5202.6w</div></div></div>
-                <div class="table-card"><table><thead><tr id="th-a"><th onclick="sortBy('a', 'name')">玩家</th><th onclick="sortBy('a', 'job')">職業</th><th onclick="sortBy('a', 'kill')">擊敗</th><th onclick="sortBy('a', 'assist')">助攻</th><th onclick="sortBy('a', 'pDmg')">對人</th><th onclick="sortBy('a', 'bDmg')">對建</th><th onclick="sortBy('a', 'heal')">治療</th><th onclick="sortBy('a', 'takeDmg')">承受</th><th onclick="sortBy('a', 'death')">重傷</th><th onclick="sortBy('a', 'spring')">化羽</th></tr></thead><tbody id="tbody-a">
-                <tr onclick="openModal('君賜丶哈旎')" style="cursor:pointer;">
-                    <td>君賜丶哈旎 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>5</td><td>65</td><td>930.6w</td><td>32618.7w</td><td>0</td><td>1126.4w</td>
-                    <td>8</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('七櫻緋葬')" style="cursor:pointer;">
-                    <td>七櫻緋葬 </td>
-                    <td><span class="job-tag" style="background:var(--color-碎夢)">碎夢</span></td>
-                    <td>16</td><td>47</td><td>2196.0w</td><td>1092.0w</td><td>0</td><td>1365.4w</td>
-                    <td>15</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('沐柔煙')" style="cursor:pointer;">
-                    <td>沐柔煙 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>349</td><td>108.8w</td><td>171.2w</td><td>3453.9w</td><td>1715.1w</td>
-                    <td>3</td><td>7</td>
-                </tr>
-                <tr onclick="openModal('乖乖聽話')" style="cursor:pointer;">
-                    <td>乖乖聽話 </td>
-                    <td><span class="job-tag" style="background:var(--color-碎夢)">碎夢</span></td>
-                    <td>30</td><td>80</td><td>1826.2w</td><td>60.4w</td><td>0</td><td>1104.4w</td>
-                    <td>6</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('寒笙')" style="cursor:pointer;">
-                    <td>寒笙 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>1</td><td>199</td><td>41.0w</td><td>0</td><td>3100.0w</td><td>1214.5w</td>
-                    <td>3</td><td>8</td>
-                </tr>
-                <tr onclick="openModal('王母娘娘')" style="cursor:pointer;">
-                    <td>王母娘娘 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>5</td><td>72</td><td>586.7w</td><td>47970.1w</td><td>0</td><td>1082.3w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('乖乖')" style="cursor:pointer;">
-                    <td>乖乖 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>343</td><td>5.9w</td><td>0</td><td>2890.8w</td><td>1298.2w</td>
-                    <td>3</td><td>13</td>
-                </tr>
-                <tr onclick="openModal('元丶')" style="cursor:pointer;">
-                    <td>元丶 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>360</td><td>28.2w</td><td>37.5w</td><td>3013.9w</td><td>1498.7w</td>
-                    <td>3</td><td>9</td>
-                </tr>
-                <tr onclick="openModal('戀獄')" style="cursor:pointer;">
-                    <td>戀獄 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>15</td><td>159</td><td>2198.3w</td><td>716.5w</td><td>0</td><td>1121.0w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('夏凝裳')" style="cursor:pointer;">
-                    <td>夏凝裳 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>34</td><td>239</td><td>3605.2w</td><td>4516.1w</td><td>0</td><td>855.0w</td>
-                    <td>7</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('轆轤嘟嘟')" style="cursor:pointer;">
-                    <td>轆轤嘟嘟 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>9</td><td>66</td><td>926.6w</td><td>46743.6w</td><td>0</td><td>654.1w</td>
-                    <td>3</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('曙妮')" style="cursor:pointer;">
-                    <td>曙妮 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>2</td><td>39</td><td>541.6w</td><td>27489.2w</td><td>0</td><td>588.4w</td>
-                    <td>8</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('橙橙狸')" style="cursor:pointer;">
-                    <td>橙橙狸 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>4</td><td>26</td><td>387.1w</td><td>33394.7w</td><td>0</td><td>701.8w</td>
-                    <td>9</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('湘雪')" style="cursor:pointer;">
-                    <td>湘雪 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>173</td><td>12.7w</td><td>140.8w</td><td>2812.4w</td><td>1574.7w</td>
-                    <td>10</td><td>8</td>
-                </tr>
-                <tr onclick="openModal('陸桓')" style="cursor:pointer;">
-                    <td>陸桓 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>168</td><td>8688</td><td>49.4w</td><td>2306.6w</td><td>1486.1w</td>
-                    <td>6</td><td>15</td>
-                </tr>
-                <tr onclick="openModal('慕子瑤')" style="cursor:pointer;">
-                    <td>慕子瑤 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>2</td><td>57</td><td>654.7w</td><td>49732.3w</td><td>0</td><td>824.2w</td>
-                    <td>12</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('孓孒子')" style="cursor:pointer;">
-                    <td>孓孒子 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>211</td><td>41.5w</td><td>1274.2w</td><td>3644.0w</td><td>2236.4w</td>
-                    <td>8</td><td>16</td>
-                </tr>
-                <tr onclick="openModal('夜闌珊')" style="cursor:pointer;">
-                    <td>夜闌珊 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>8</td><td>219</td><td>937.9w</td><td>179.0w</td><td>114.6w</td><td>2963.4w</td>
-                    <td>3</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('秦洛風')" style="cursor:pointer;">
-                    <td>秦洛風 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>22</td><td>108</td><td>3200.6w</td><td>16670.8w</td><td>0</td><td>1551.8w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('南糖')" style="cursor:pointer;">
-                    <td>南糖 </td>
-                    <td><span class="job-tag" style="background:var(--color-碎夢)">碎夢</span></td>
-                    <td>32</td><td>132</td><td>2219.5w</td><td>40.8w</td><td>0</td><td>1349.0w</td>
-                    <td>7</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('獨孤不敗')" style="cursor:pointer;">
-                    <td>獨孤不敗 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>29</td><td>165</td><td>3324.8w</td><td>4151.6w</td><td>0</td><td>1206.4w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('雨歇微涼')" style="cursor:pointer;">
-                    <td>雨歇微涼 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>148</td><td>18.0w</td><td>414.9w</td><td>2382.3w</td><td>1796.3w</td>
-                    <td>8</td><td>14</td>
-                </tr>
-                <tr onclick="openModal('月彤')" style="cursor:pointer;">
-                    <td>月彤 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>3</td><td>63</td><td>572.3w</td><td>49195.4w</td><td>0</td><td>1366.9w</td>
-                    <td>7</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('佟葭月')" style="cursor:pointer;">
-                    <td>佟葭月 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>6</td><td>64</td><td>948.6w</td><td>28522.0w</td><td>0</td><td>1346.4w</td>
-                    <td>19</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('穆登葛格')" style="cursor:pointer;">
-                    <td>穆登葛格 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>26</td><td>78</td><td>4009.3w</td><td>1577.9w</td><td>112.9w</td><td>2973.7w</td>
-                    <td>20</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('成毅')" style="cursor:pointer;">
-                    <td>成毅 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>2</td><td>242</td><td>338.6w</td><td>250.8w</td><td>44.2w</td><td>5202.6w</td>
-                    <td>6</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('心緒')" style="cursor:pointer;">
-                    <td>心緒 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>10</td><td>131</td><td>2052.0w</td><td>3001.7w</td><td>9.1w</td><td>906.3w</td>
-                    <td>9</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('蛋蛋裡有毒')" style="cursor:pointer;">
-                    <td>蛋蛋裡有毒 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>4</td><td>67</td><td>1197.6w</td><td>32503.1w</td><td>0</td><td>1627.8w</td>
-                    <td>15</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('孤煙殘陽')" style="cursor:pointer;">
-                    <td>孤煙殘陽 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>383</td><td>74.6w</td><td>73.3w</td><td>3644.5w</td><td>2787.5w</td>
-                    <td>3</td><td>10</td>
-                </tr>
-                <tr onclick="openModal('范統')" style="cursor:pointer;">
-                    <td>范統 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>1</td><td>175</td><td>488.3w</td><td>9.1w</td><td>154.5w</td><td>2909.3w</td>
-                    <td>3</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('櫻桃白蘭地')" style="cursor:pointer;">
-                    <td>櫻桃白蘭地 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>223</td><td>12.4w</td><td>0</td><td>2521.9w</td><td>1186.3w</td>
-                    <td>0</td><td>8</td>
-                </tr>
-                <tr onclick="openModal('蕭行嶽')" style="cursor:pointer;">
-                    <td>蕭行嶽 </td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>23</td><td>98</td><td>2686.2w</td><td>4166.6w</td><td>86.4w</td><td>2374.8w</td>
-                    <td>12</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('夏繁')" style="cursor:pointer;">
-                    <td>夏繁 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>23</td><td>172</td><td>2305.4w</td><td>0</td><td>0</td><td>1800.9w</td>
-                    <td>1</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('梧秋')" style="cursor:pointer;">
-                    <td>梧秋 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>60</td><td>223</td><td>5517.3w</td><td>2178.0w</td><td>10.5w</td><td>1294.9w</td>
-                    <td>16</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('浮生如夢')" style="cursor:pointer;">
-                    <td>浮生如夢 </td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>13</td><td>102</td><td>2332.3w</td><td>2006.8w</td><td>79.8w</td><td>1901.8w</td>
-                    <td>16</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('沐曉夢')" style="cursor:pointer;">
-                    <td>沐曉夢 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>24</td><td>126</td><td>2145.8w</td><td>117.2w</td><td>0</td><td>1529.5w</td>
-                    <td>8</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('澐慕')" style="cursor:pointer;">
-                    <td>澐慕 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>4</td><td>62</td><td>895.7w</td><td>63523.7w</td><td>0</td><td>1375.5w</td>
-                    <td>3</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('眠月暝')" style="cursor:pointer;">
-                    <td>眠月暝 </td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>21</td><td>125</td><td>2601.1w</td><td>270.6w</td><td>86.9w</td><td>1438.1w</td>
-                    <td>5</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('虞煙')" style="cursor:pointer;">
-                    <td>虞煙 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>21</td><td>116</td><td>2193.4w</td><td>4984.8w</td><td>10.3w</td><td>1296.7w</td>
-                    <td>16</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('中部楊過')" style="cursor:pointer;">
-                    <td>中部楊過 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>46</td><td>197</td><td>4130.9w</td><td>2870.0w</td><td>10.2w</td><td>1057.4w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('聽書')" style="cursor:pointer;">
-                    <td>聽書 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>0</td><td>174</td><td>294.9w</td><td>948.7w</td><td>52.9w</td><td>4525.4w</td>
-                    <td>5</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('夏晴夜')" style="cursor:pointer;">
-                    <td>夏晴夜 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>4</td><td>46</td><td>508.4w</td><td>37492.9w</td><td>0</td><td>1361.7w</td>
-                    <td>8</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('蝶帝')" style="cursor:pointer;">
-                    <td>蝶帝 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>190</td><td>93.7w</td><td>269.8w</td><td>3594.2w</td><td>1424.8w</td>
-                    <td>9</td><td>14</td>
-                </tr>
-                <tr onclick="openModal('宮尛乄若風灬彡')" style="cursor:pointer;">
-                    <td>宮尛乄若風灬彡 </td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>16</td><td>147</td><td>2543.6w</td><td>3948.6w</td><td>85.4w</td><td>1407.9w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('南宮莉芳')" style="cursor:pointer;">
-                    <td>南宮莉芳 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>40</td><td>163</td><td>4191.5w</td><td>397.0w</td><td>97.3w</td><td>2819.1w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('菲倪')" style="cursor:pointer;">
-                    <td>菲倪 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>332</td><td>14.7w</td><td>0</td><td>2438.5w</td><td>773.5w</td>
-                    <td>3</td><td>10</td>
-                </tr>
-                <tr onclick="openModal('米小姬')" style="cursor:pointer;">
-                    <td>米小姬 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>216</td><td>89.9w</td><td>134.1w</td><td>3139.4w</td><td>2020.5w</td>
-                    <td>8</td><td>10</td>
-                </tr>
-                <tr onclick="openModal('听雨丷')" style="cursor:pointer;">
-                    <td>听雨丷 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>123</td><td>20.7w</td><td>22.8w</td><td>2714.2w</td><td>1214.1w</td>
-                    <td>5</td><td>10</td>
-                </tr>
-                <tr onclick="openModal('玖壹壹')" style="cursor:pointer;">
-                    <td>玖壹壹 </td>
-                    <td><span class="job-tag" style="background:var(--color-碎夢)">碎夢</span></td>
-                    <td>48</td><td>89</td><td>2735.7w</td><td>402.6w</td><td>0</td><td>1277.0w</td>
-                    <td>7</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('理玖')" style="cursor:pointer;">
-                    <td>理玖 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>45</td><td>211</td><td>2834.0w</td><td>6490.4w</td><td>0</td><td>1047.6w</td>
-                    <td>6</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('南梔')" style="cursor:pointer;">
-                    <td>南梔 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>190</td><td>31.8w</td><td>432.2w</td><td>3011.7w</td><td>888.5w</td>
-                    <td>5</td><td>14</td>
-                </tr>
-                <tr onclick="openModal('瑜落州')" style="cursor:pointer;">
-                    <td>瑜落州 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>11</td><td>129</td><td>2310.4w</td><td>8607.5w</td><td>0</td><td>1380.9w</td>
-                    <td>8</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('姜紫嫣')" style="cursor:pointer;">
-                    <td>姜紫嫣 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>1</td><td>226</td><td>98.5w</td><td>7.5w</td><td>3956.6w</td><td>1924.0w</td>
-                    <td>2</td><td>6</td>
-                </tr>
-                <tr onclick="openModal('詩姊')" style="cursor:pointer;">
-                    <td>詩姊 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>11</td><td>104</td><td>1749.2w</td><td>3584.0w</td><td>0</td><td>1022.3w</td>
-                    <td>6</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('弦笙')" style="cursor:pointer;">
-                    <td>弦笙 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>349</td><td>88.4w</td><td>201.2w</td><td>2356.0w</td><td>1656.6w</td>
-                    <td>3</td><td>6</td>
-                </tr>
-                <tr onclick="openModal('帥就完事')" style="cursor:pointer;">
-                    <td>帥就完事 </td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>35</td><td>156</td><td>2803.8w</td><td>233.2w</td><td>84.7w</td><td>1572.7w</td>
-                    <td>3</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('清牧百鬼花')" style="cursor:pointer;">
-                    <td>清牧百鬼花 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>3</td><td>74</td><td>832.1w</td><td>11110.9w</td><td>7.1w</td><td>648.3w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('一爹一爹痛痛')" style="cursor:pointer;">
-                    <td>一爹一爹痛痛 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>1</td><td>117</td><td>460.0w</td><td>311.1w</td><td>78.0w</td><td>4334.7w</td>
-                    <td>7</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('冥夜雲晨')" style="cursor:pointer;">
-                    <td>冥夜雲晨 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>45</td><td>164</td><td>4005.7w</td><td>3288.7w</td><td>77.7w</td><td>1592.8w</td>
-                    <td>7</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('慕昕瀾')" style="cursor:pointer;">
-                    <td>慕昕瀾 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>16</td><td>227</td><td>2089.9w</td><td>3200.6w</td><td>0</td><td>1405.6w</td>
-                    <td>7</td><td>0</td>
-                </tr></tbody></table></div>
-                <h3 id="name-b-title">敵軍：✵極楽淨土✵</h3>
-                <div id="mvp-b" class="mvp-grid"><div class="mvp-card"><div class="mvp-label">擊殺最高</div><div class="mvp-name">咩仆丶</div><div class="mvp-val">50</div></div><div class="mvp-card"><div class="mvp-label">傷害最高</div><div class="mvp-name">南宮淩夜</div><div class="mvp-val">4911.8w</div></div><div class="mvp-card"><div class="mvp-label">對建最高</div><div class="mvp-name">椒頭爛兒</div><div class="mvp-val">39451.8w</div></div><div class="mvp-card"><div class="mvp-label">治療最高</div><div class="mvp-name">波小波</div><div class="mvp-val">5910.3w</div></div><div class="mvp-card"><div class="mvp-label">助攻最高</div><div class="mvp-name">安康</div><div class="mvp-val">276</div></div><div class="mvp-card"><div class="mvp-label">化羽最高</div><div class="mvp-name">咲夜夜</div><div class="mvp-val">17</div></div><div class="mvp-card"><div class="mvp-label">承傷最高</div><div class="mvp-name">鶴池燕</div><div class="mvp-val">6388.8w</div></div></div>
-                <div class="table-card"><table><thead><tr id="th-b"><th onclick="sortBy('b', 'name')">玩家</th><th onclick="sortBy('b', 'job')">職業</th><th onclick="sortBy('b', 'kill')">擊敗</th><th onclick="sortBy('b', 'assist')">助攻</th><th onclick="sortBy('b', 'pDmg')">對人</th><th onclick="sortBy('b', 'bDmg')">對建</th><th onclick="sortBy('b', 'heal')">治療</th><th onclick="sortBy('b', 'takeDmg')">承受</th><th onclick="sortBy('b', 'death')">重傷</th><th onclick="sortBy('b', 'spring')">化羽</th></tr></thead><tbody id="tbody-b">
-                <tr onclick="openModal('寒雪月')" style="cursor:pointer;">
-                    <td>寒雪月 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>2</td><td>39</td><td>440.6w</td><td>25501.6w</td><td>7.6w</td><td>500.7w</td>
-                    <td>18</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('韮零')" style="cursor:pointer;">
-                    <td>韮零 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>21</td><td>122</td><td>3382.1w</td><td>0</td><td>117.9w</td><td>2847.0w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('預言柚子')" style="cursor:pointer;">
-                    <td>預言柚子 </td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>21</td><td>125</td><td>2534.0w</td><td>257.2w</td><td>81.4w</td><td>2142.5w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('豬阿豬')" style="cursor:pointer;">
-                    <td>豬阿豬 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>0</td><td>22</td><td>457.0w</td><td>24026.0w</td><td>0</td><td>1352.0w</td>
-                    <td>11</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('丶凜夜')" style="cursor:pointer;">
-                    <td>丶凜夜 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>4</td><td>26</td><td>808.3w</td><td>28873.4w</td><td>0</td><td>1240.2w</td>
-                    <td>17</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('波小波')" style="cursor:pointer;">
-                    <td>波小波 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>258</td><td>132.0w</td><td>0</td><td>5910.3w</td><td>3138.8w</td>
-                    <td>9</td><td>12</td>
-                </tr>
-                <tr onclick="openModal('汐南憂討酒')" style="cursor:pointer;">
-                    <td>汐南憂討酒 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>0</td><td>110</td><td>491.5w</td><td>97.6w</td><td>138.9w</td><td>3610.0w</td>
-                    <td>16</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('鶴池燕')" style="cursor:pointer;">
-                    <td>鶴池燕 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>0</td><td>160</td><td>353.2w</td><td>0</td><td>165.6w</td><td>6388.8w</td>
-                    <td>8</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('蝶戀雪喵')" style="cursor:pointer;">
-                    <td>蝶戀雪喵 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>43</td><td>33.3w</td><td>132.7w</td><td>2168.5w</td><td>3378.7w</td>
-                    <td>12</td><td>11</td>
-                </tr>
-                <tr onclick="openModal('嵐序')" style="cursor:pointer;">
-                    <td>嵐序 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>2</td><td>23</td><td>669.9w</td><td>33463.0w</td><td>0</td><td>841.3w</td>
-                    <td>12</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('落水塵埃')" style="cursor:pointer;">
-                    <td>落水塵埃 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>17</td><td>155</td><td>3066.0w</td><td>0</td><td>0</td><td>1995.6w</td>
-                    <td>18</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('黎落')" style="cursor:pointer;">
-                    <td>黎落 </td>
-                    <td><span class="job-tag" style="background:var(--color-碎夢)">碎夢</span></td>
-                    <td>17</td><td>11</td><td>1751.6w</td><td>388.7w</td><td>0</td><td>999.1w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('歐哈那冫費南雪')" style="cursor:pointer;">
-                    <td>歐哈那冫費南雪 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>12</td><td>114</td><td>2228.6w</td><td>2838.9w</td><td>0</td><td>1634.2w</td>
-                    <td>15</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('南妡')" style="cursor:pointer;">
-                    <td>南妡 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>79</td><td>35.0w</td><td>26.6w</td><td>2430.7w</td><td>1977.5w</td>
-                    <td>13</td><td>12</td>
-                </tr>
-                <tr onclick="openModal('唯一')" style="cursor:pointer;">
-                    <td>唯一 </td>
-                    <td><span class="job-tag" style="background:var(--color-碎夢)">碎夢</span></td>
-                    <td>21</td><td>35</td><td>1215.6w</td><td>381.9w</td><td>0</td><td>955.2w</td>
-                    <td>12</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('令狐上尉')" style="cursor:pointer;">
-                    <td>令狐上尉 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>2</td><td>144</td><td>748.6w</td><td>445.1w</td><td>37.9w</td><td>5486.3w</td>
-                    <td>9</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('咲夜夜')" style="cursor:pointer;">
-                    <td>咲夜夜 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>190</td><td>48.4w</td><td>9627</td><td>5529.4w</td><td>2754.5w</td>
-                    <td>11</td><td>17</td>
-                </tr>
-                <tr onclick="openModal('綾奈')" style="cursor:pointer;">
-                    <td>綾奈 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>16</td><td>67</td><td>1426.3w</td><td>443.5w</td><td>4.4w</td><td>1215.2w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('眾所睡')" style="cursor:pointer;">
-                    <td>眾所睡 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>14</td><td>206</td><td>3212.6w</td><td>661.4w</td><td>18.6w</td><td>1569.9w</td>
-                    <td>17</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('沉吟一聲秋月白')" style="cursor:pointer;">
-                    <td>沉吟一聲秋月白 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>2</td><td>22</td><td>235.2w</td><td>12851.5w</td><td>0</td><td>415.1w</td>
-                    <td>21</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('狐狸狸')" style="cursor:pointer;">
-                    <td>狐狸狸 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>1</td><td>244</td><td>91.6w</td><td>0</td><td>4087.7w</td><td>2308.1w</td>
-                    <td>13</td><td>12</td>
-                </tr>
-                <tr onclick="openModal('阿斯利安')" style="cursor:pointer;">
-                    <td>阿斯利安 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>0</td><td>13</td><td>383.7w</td><td>23298.3w</td><td>0</td><td>886.4w</td>
-                    <td>14</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('丨嘦姕丨')" style="cursor:pointer;">
-                    <td>丨嘦姕丨 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>1</td><td>18</td><td>362.4w</td><td>20933.6w</td><td>0</td><td>808.7w</td>
-                    <td>15</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('夜宮雪嫣')" style="cursor:pointer;">
-                    <td>夜宮雪嫣 </td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>9</td><td>95</td><td>2778.1w</td><td>0</td><td>112.9w</td><td>2640.7w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('桃花')" style="cursor:pointer;">
-                    <td>桃花 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>260</td><td>58.7w</td><td>4.5w</td><td>4613.3w</td><td>3227.1w</td>
-                    <td>7</td><td>13</td>
-                </tr>
-                <tr onclick="openModal('衿煊')" style="cursor:pointer;">
-                    <td>衿煊 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>16</td><td>134</td><td>1445.7w</td><td>966.3w</td><td>14.3w</td><td>1192.9w</td>
-                    <td>12</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('雪輕煙')" style="cursor:pointer;">
-                    <td>雪輕煙 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>3</td><td>141</td><td>577.1w</td><td>568.6w</td><td>53.5w</td><td>3960.0w</td>
-                    <td>11</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('綏岁')" style="cursor:pointer;">
-                    <td>綏岁 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>44</td><td>43.0w</td><td>323.6w</td><td>2330.1w</td><td>1765.1w</td>
-                    <td>11</td><td>14</td>
-                </tr>
-                <tr onclick="openModal('椒頭爛兒')" style="cursor:pointer;">
-                    <td>椒頭爛兒 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>4</td><td>40</td><td>1044.4w</td><td>39451.8w</td><td>0</td><td>1455.7w</td>
-                    <td>6</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('小渃婭')" style="cursor:pointer;">
-                    <td>小渃婭 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>3</td><td>54</td><td>875.1w</td><td>8257.2w</td><td>0</td><td>977.4w</td>
-                    <td>18</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('紫夢情兒')" style="cursor:pointer;">
-                    <td>紫夢情兒 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>91</td><td>8.3w</td><td>0</td><td>2565.4w</td><td>2171.9w</td>
-                    <td>11</td><td>9</td>
-                </tr>
-                <tr onclick="openModal('煙花落')" style="cursor:pointer;">
-                    <td>煙花落 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>3</td><td>27</td><td>501.1w</td><td>14506.5w</td><td>0</td><td>853.5w</td>
-                    <td>17</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('紫鳶花')" style="cursor:pointer;">
-                    <td>紫鳶花 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>136</td><td>29.0w</td><td>82.6w</td><td>3277.6w</td><td>1963.0w</td>
-                    <td>17</td><td>12</td>
-                </tr>
-                <tr onclick="openModal('黎里')" style="cursor:pointer;">
-                    <td>黎里 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>2</td><td>25</td><td>431.1w</td><td>22221.5w</td><td>0</td><td>601.5w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('希凝')" style="cursor:pointer;">
-                    <td>希凝 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>8</td><td>59</td><td>1548.4w</td><td>27195.5w</td><td>0</td><td>1147.4w</td>
-                    <td>16</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('蘇暮雨')" style="cursor:pointer;">
-                    <td>蘇暮雨 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>3</td><td>61</td><td>1122.1w</td><td>9678.8w</td><td>0</td><td>1040.7w</td>
-                    <td>11</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('賈斯林柯比')" style="cursor:pointer;">
-                    <td>賈斯林柯比 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>273</td><td>104.8w</td><td>0</td><td>3774.0w</td><td>2919.2w</td>
-                    <td>9</td><td>14</td>
-                </tr>
-                <tr onclick="openModal('封狼居胥')" style="cursor:pointer;">
-                    <td>封狼居胥 </td>
-                    <td><span class="job-tag" style="background:var(--color-鐵衣)">鐵衣</span></td>
-                    <td>2</td><td>29</td><td>375.0w</td><td>22811.9w</td><td>0</td><td>989.7w</td>
-                    <td>23</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('結冰水')" style="cursor:pointer;">
-                    <td>結冰水 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>83</td><td>69.9w</td><td>66.8w</td><td>2398.4w</td><td>3867.0w</td>
-                    <td>17</td><td>14</td>
-                </tr>
-                <tr onclick="openModal('雨犽')" style="cursor:pointer;">
-                    <td>雨犽 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>7</td><td>73</td><td>986.6w</td><td>7170.7w</td><td>5.4w</td><td>863.7w</td>
-                    <td>12</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('蝕烬')" style="cursor:pointer;">
-                    <td>蝕烬 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>14</td><td>126</td><td>1920.9w</td><td>992.4w</td><td>14.7w</td><td>1028.6w</td>
-                    <td>5</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('沈夢蝶')" style="cursor:pointer;">
-                    <td>沈夢蝶 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>32</td><td>148</td><td>3774.5w</td><td>166.7w</td><td>0</td><td>1769.5w</td>
-                    <td>8</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('倪默')" style="cursor:pointer;">
-                    <td>倪默 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>143</td><td>30.5w</td><td>9.7w</td><td>4232.8w</td><td>2051.1w</td>
-                    <td>15</td><td>13</td>
-                </tr>
-                <tr onclick="openModal('南宮淩夜')" style="cursor:pointer;">
-                    <td>南宮淩夜 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>40</td><td>115</td><td>4911.8w</td><td>811.5w</td><td>25.3w</td><td>837.1w</td>
-                    <td>17</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('社恐神相')" style="cursor:pointer;">
-                    <td>社恐神相 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>13</td><td>75</td><td>2726.3w</td><td>1100.0w</td><td>10.1w</td><td>1052.7w</td>
-                    <td>11</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('溺水青蛙')" style="cursor:pointer;">
-                    <td>溺水青蛙 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>5</td><td>68</td><td>673.2w</td><td>0</td><td>0</td><td>520.5w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('鶴燼川')" style="cursor:pointer;">
-                    <td>鶴燼川 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-血河)">血河</span></td>
-                    <td>15</td><td>32</td><td>3997.1w</td><td>1756.5w</td><td>103.9w</td><td>2156.6w</td>
-                    <td>11</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('今天也想吃可頌')" style="cursor:pointer;">
-                    <td>今天也想吃可頌 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>8</td><td>54</td><td>912.0w</td><td>16158.3w</td><td>0</td><td>1132.7w</td>
-                    <td>16</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('波瑟芬妮')" style="cursor:pointer;">
-                    <td>波瑟芬妮 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>232</td><td>96.1w</td><td>0</td><td>3364.8w</td><td>2745.1w</td>
-                    <td>9</td><td>8</td>
-                </tr>
-                <tr onclick="openModal('璃心')" style="cursor:pointer;">
-                    <td>璃心 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>62</td><td>41.0w</td><td>57.9w</td><td>2477.4w</td><td>2536.2w</td>
-                    <td>15</td><td>11</td>
-                </tr>
-                <tr onclick="openModal('咩仆丶')" style="cursor:pointer;">
-                    <td>咩仆丶 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-碎夢)">碎夢</span></td>
-                    <td>50</td><td>81</td><td>3834.9w</td><td>28.2w</td><td>0</td><td>1185.9w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('安康')" style="cursor:pointer;">
-                    <td>安康 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>276</td><td>125.2w</td><td>17.1w</td><td>3660.6w</td><td>2386.9w</td>
-                    <td>8</td><td>12</td>
-                </tr>
-                <tr onclick="openModal('安渝')" style="cursor:pointer;">
-                    <td>安渝 </td>
-                    <td><span class="job-tag" style="background:var(--color-玄機)">玄機</span></td>
-                    <td>8</td><td>42</td><td>908.5w</td><td>1117.4w</td><td>0</td><td>547.4w</td>
-                    <td>19</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('小杰')" style="cursor:pointer;">
-                    <td>小杰 🔥</td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>16</td><td>145</td><td>3745.3w</td><td>728.0w</td><td>0</td><td>3024.0w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('流沙包丶')" style="cursor:pointer;">
-                    <td>流沙包丶 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>9</td><td>63</td><td>2265.3w</td><td>1317.8w</td><td>0</td><td>1008.4w</td>
-                    <td>11</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('明月輕風起')" style="cursor:pointer;">
-                    <td>明月輕風起 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>61</td><td>29.5w</td><td>124.7w</td><td>1082.9w</td><td>1533.5w</td>
-                    <td>24</td><td>4</td>
-                </tr>
-                <tr onclick="openModal('久曜')" style="cursor:pointer;">
-                    <td>久曜 </td>
-                    <td><span class="job-tag" style="background:var(--color-龍吟)">龍吟</span></td>
-                    <td>1</td><td>28</td><td>625.3w</td><td>23681.1w</td><td>0</td><td>1015.9w</td>
-                    <td>16</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('六屁')" style="cursor:pointer;">
-                    <td>六屁 </td>
-                    <td><span class="job-tag" style="background:var(--color-神相)">神相</span></td>
-                    <td>13</td><td>138</td><td>2048.0w</td><td>360.2w</td><td>22.1w</td><td>1172.9w</td>
-                    <td>10</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('晞颺')" style="cursor:pointer;">
-                    <td>晞颺 </td>
-                    <td><span class="job-tag" style="background:var(--color-九靈)">九靈</span></td>
-                    <td>29</td><td>149</td><td>2471.4w</td><td>1037.3w</td><td>0</td><td>1732.0w</td>
-                    <td>13</td><td>0</td>
-                </tr>
-                <tr onclick="openModal('時桉')" style="cursor:pointer;">
-                    <td>時桉 </td>
-                    <td><span class="job-tag" style="background:var(--color-素問)">素問</span></td>
-                    <td>0</td><td>29</td><td>31.0w</td><td>292.6w</td><td>2393.0w</td><td>1568.2w</td>
-                    <td>11</td><td>6</td>
-                </tr></tbody></table></div>
+        <h2 style="font-size: 18px;" id="sys-title">NSH 戰績管理 Pro v6.2</h2>
+        
+        <div class="nav-item active" onclick="switchPage('report')">📊 戰報解析</div>
+        <div class="nav-item" onclick="switchPage('db')">👥 成員檔案室</div>
+        
+        <div class="search-box">
+            <strong>🔍 歷史紀錄搜尋</strong>
+            <select id="hist-filter-range" onchange="loadHistoryList()">
+                <option value="all">所有時間</option>
+                <option value="7">最近一週</option>
+                <option value="30">最近一個月</option>
+                <option value="90">最近三個月</option>
+            </select>
+            <input type="text" id="hist-search-guild" placeholder="搜尋幫會名字..." oninput="loadHistoryList()">
+            <div style="margin-top:5px; display:flex; gap:5px;">
+                <label><input type="checkbox" id="check-win" checked="" onchange="loadHistoryList()"> 勝</label>
+                <label><input type="checkbox" id="check-loss" checked="" onchange="loadHistoryList()"> 負</label>
             </div>
         </div>
 
-        <div class="container" id="page-db" style="display: none;">
-            <h3>幫會成員檔案室 (自動同步)</h3>
+        <div class="history-list" id="hist-items"></div>
+    </div>
+
+    <div class="main-content">
+        <div class="container" id="page-report">
+            <div style="background:#fff; padding:20px; border-radius:12px; margin-bottom:20px; border: 1px solid var(--border);">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap: wrap;">
+                    <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
+                    <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
+                    <input type="text" id="custom-title" placeholder="戰報標題" style="padding:7px; border:1px solid #ddd; border-radius:5px; width:200px;">
+                    <input type="date" id="match-date" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
+                    <div class="admin-only" style="background:#f0f0f0; padding:5px 10px; border-radius:8px;">
+                        結果：
+                        <label><input type="radio" name="match-result" value="勝利" checked=""> 勝利</label>
+                        <label><input type="radio" name="match-result" value="失敗"> 失敗</label>
+                    </div>
+                    <button class="btn btn-success admin-only" onclick="saveHistoryToDB()" id="save-btn" style="display:none;">💾 保存至資料庫</button>
+                </div>
+            </div>
+
+            <div id="share-section" class="share-links">
+                <p style="margin:0 0 10px 0; font-weight:bold; font-size:13px;">🔗 分享當前戰報：</p>
+                <button class="btn btn-primary" style="font-size:11px;" onclick="copyShareLink('view')">📋 複製幫眾版 (唯讀)</button>
+                <button class="btn admin-only" style="font-size:11px; background:#ddd;" onclick="copyShareLink('admin')">📋 複製管理版</button>
+            </div>
+
+            <div id="report-view" style="display:none;">
+                <div id="job-filters" class="filter-group"></div>
+                <h3 id="display-title"></h3>
+                <div id="mvp-a" class="mvp-grid"></div>
+                <div class="table-card"><table><thead><tr id="th-a"></tr></thead><tbody id="tbody-a"></tbody></table></div>
+                <h3 id="name-b-title" style="color:#999; font-size:16px;"></h3>
+                <div id="mvp-b" class="mvp-grid"></div>
+                <div class="table-card"><table><thead><tr id="th-b"></tr></thead><tbody id="tbody-b"></tbody></table></div>
+            </div>
+        </div>
+
+        <div class="container" id="page-db" style="display:none;">
+            <div style="background:#fff; padding:20px; border-radius:12px; margin-bottom:20px; border: 1px solid var(--border);">
+                <div style="display:flex; gap:15px; align-items:center;">
+                    <input type="text" id="db-search-id" placeholder="搜尋成員 ID..." style="padding:8px; border:1px solid #ddd; border-radius:8px; width:250px;" oninput="fetchMembers()">
+                    <select id="db-filter-range" style="padding:8px; border:1px solid #ddd; border-radius:8px;" onchange="fetchMembers()">
+                        <option value="all">所有時間出席率</option>
+                        <option value="7">最近一週出席率</option>
+                        <option value="30">最近一個月出席率</option>
+                        <option value="90">最近三個月出席率</option>
+                    </select>
+                </div>
+                <div id="db-job-filters" class="filter-group" style="margin-top:15px;"></div>
+                <div id="db-hashtag-filters" class="filter-group"></div>
+            </div>
+
             <div class="table-card">
-                <table>
+                <table id="member-table">
                     <thead>
                         <tr>
-                            <th>玩家 ID</th><th>最近職業</th><th>參賽次數</th><th>出席率</th><th>累計總傷</th><th>管理員評語</th><th class="admin-only">操作</th>
+                            <th onclick="sortMemberTable('id')">玩家 ID ⇅</th>
+                            <th onclick="sortMemberTable('last_job')">職業 ⇅</th>
+                            <th onclick="sortMemberTable('hashtag')">分團標籤 ⇅</th>
+                            <th onclick="sortMemberTable('matches')">參賽場次 ⇅</th>
+                            <th onclick="sortMemberTable('rate')">出席率 ⇅</th>
+                            <th>管理員評語</th>
+                            <th class="admin-only">操作</th>
                         </tr>
                     </thead>
                     <tbody id="db-table-body"></tbody>
@@ -823,42 +162,75 @@
 
     <div id="modal" onclick="closeModal()">
         <div class="modal-body" onclick="event.stopPropagation()">
-            <div style="flex:1.2;"><canvas id="radarChart"></canvas></div>
+            <div style="flex:1.2; text-align:center;">
+                <canvas id="radarChart"></canvas>
+                <div class="member-hist-list">
+                    <h4 style="border-bottom:2px solid #eee; padding-bottom:5px;">個人歷史參與紀錄</h4>
+                    <div id="m-history-items"></div>
+                </div>
+            </div>
             <div style="flex:1;">
                 <h2 id="m-name" style="margin:0;"></h2>
-                <div id="m-job-box" style="margin:10px 0;"></div>
+                <div style="margin:10px 0; display:flex; gap:10px;">
+                    <select id="m-edit-job" class="admin-only" style="padding:5px; border-radius:5px; border:1px solid #ddd;"><option value="碎夢">碎夢</option><option value="神相">神相</option><option value="血河">血河</option><option value="九靈">九靈</option><option value="玄機">玄機</option><option value="龍吟">龍吟</option><option value="鐵衣">鐵衣</option><option value="素問">素問</option><option value="潮光">潮光</option></select>
+                    <select id="m-edit-hashtag" class="admin-only" style="padding:5px; border-radius:5px; border:1px solid #ddd;">
+                        <option value="進攻團">進攻團</option>
+                        <option value="防守團">防守團</option>
+                        <option value="機動團">機動團</option>
+                    </select>
+                </div>
                 <div id="m-stats-box" style="padding:15px; background:#f8f9fa; border-radius:10px; font-size:13px; line-height:1.6;"></div>
-                <p style="margin-top:20px; font-weight:bold;">管理備註：</p>
-                <textarea id="m-note" style="width:100%; height:100px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
-                <button id="save-note-btn" class="btn btn-primary admin-only" style="width:100%; margin-top:15px;" onclick="saveNoteOnly()">💾 儲存修改</button>
+                <p style="margin-top:20px; font-weight:bold;">統戰評語：</p>
+                <textarea id="m-note" style="width:100%; height:80px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
+                <div class="admin-only" style="margin-top:15px; display:flex; flex-direction:column; gap:10px;">
+                    <button class="btn btn-primary" onclick="saveMemberFullInfo()">💾 儲存所有修改</button>
+                    <button class="btn" style="background:#eee;" onclick="renameP(focusPlayer.id)">👤 修改玩家名稱</button>
+                </div>
             </div>
         </div>
     </div>
 
 <script>
-    const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev"; // 務必確認這是你的網址
-    let gA = [], gB = [], full = [], nameA = "", nameB = "", focusPlayer = null, chart = null, currentJobFilter = "all", totalReports = 0, currentReportId = null;
+    const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev"; // 請確認與你的 Worker 網址一致
+    let gA = [], gB = [], full = [], nameA = "", nameB = "", focusPlayer = null, chart = null, currentJobFilter = "all", currentHashtagFilter = "all", totalReports = 0, currentReportId = null;
+    let allHistories = [], allMembers = [];
 
     const urlParams = new URLSearchParams(window.location.search);
     const isViewMode = urlParams.get('mode') === 'view';
 
-    const radarCols = [{l:'擊敗', k:'kill'}, {l:'助攻', k:'assist'}, {l:'對人', k:'pDmg'}, {l:'對建', k:'bDmg'}, {l:'治療', k:'heal'}, {l:'承受', k:'takeDmg'}];
-    const metrics = [{l:'擊殺最高', k:'kill'}, {l:'傷害最高', k:'pDmg'}, {l:'對建最高', k:'bDmg'}, {l:'治療最高', k:'heal'}, {l:'助攻最高', k:'assist'}, {l:'化羽最高', k:'spring'}, {l:'承傷最高', k:'takeDmg'}];
-    const cols = [{l:'玩家', k:'name'}, {l:'職業', k:'job'}, ...radarCols, {l:'重傷', k:'death'}, {l:'化羽', k:'spring'}];
+    // 職業與顏色
+    const jobColors = { "碎夢":"#5b9bd5", "神相":"#4fc3f7", "血河":"#e57373", "九靈":"#ba68c8", "玄機":"#fdd835", "龍吟":"#81c784", "鐵衣":"#ffb74d", "素問":"#f06292", "潮光":"#4dd0e1" };
+    
+    // 欄位定義
+    const metrics = [
+        {l:'擊敗最高', k:'kill'}, {l:'助攻最高', k:'assist'}, {l:'資源最高', k:'res'}, 
+        {l:'傷害最高', k:'pDmg'}, {l:'對建最高', k:'bDmg'}, {l:'治療最高', k:'heal'}, 
+        {l:'承傷最高', k:'takeDmg'}, {l:'重傷最高', k:'death'}, {l:'化羽最高', k:'spring'}
+    ];
+    const tableCols = [
+        {l:'玩家名字', k:'name'}, {l:'職業', k:'job'}, {l:'擊敗', k:'kill'}, {l:'助攻', k:'assist'}, 
+        {l:'資源', k:'res'}, {l:'對玩家傷害', k:'pDmg'}, {l:'對建築傷害', k:'bDmg'}, {l:'治療值', k:'heal'}, 
+        {l:'承受傷害', k:'takeDmg'}, {l:'重傷', k:'death'}, {l:'化羽/清泉', k:'spring'}, {l:'焚骨', k:'bone'}
+    ];
 
     window.onload = () => {
         if(isViewMode) {
             document.querySelectorAll('.admin-only').forEach(el => el.remove());
             document.getElementById('m-note').readOnly = true;
-            document.getElementById('sys-title').innerText = "NSH 查看模式";
+            document.getElementById('sys-title').innerText = "NSH 戰績查看版";
         }
         document.getElementById('match-date').valueAsDate = new Date();
         loadHistoryList().then(() => {
             const reportId = urlParams.get('id');
             if(reportId) viewHistory(reportId);
         });
+        
+        // 初始化職業下拉選單
+        const jobSelect = document.getElementById('m-edit-job');
+        Object.keys(jobColors).forEach(j => jobSelect.add(new Option(j, j)));
     };
 
+    // CSV 處理功能
     function handleCSV(file) {
         if(!file) return;
         const parts = file.name.replace('.csv', '').split('_');
@@ -877,7 +249,12 @@
                 if(!row) { if(lines[i+1]?.includes(',') || lines[i+2]?.includes(',')) { mode = 'B'; i+=2; } continue; }
                 const c = row.split(',').map(v => v.replace(/"/g,''));
                 if(c.length < 10) continue;
-                const p = { name:c[0], job:c[1], kill:+c[2], assist:+c[3], pDmg:+c[5], bDmg:+c[6], heal:+c[7], takeDmg:+c[8], death:+c[9], spring:+c[10] };
+                // CSV 索引解析 (請根據你的 CSV 欄位順序微調)
+                const p = { 
+                    name:c[0], job:c[1], kill:+c[2], assist:+c[3], res:+c[4]||0, 
+                    pDmg:+c[5], bDmg:+c[6], heal:+c[7], takeDmg:+c[8], 
+                    death:+c[9], spring:+c[10], bone:+c[11]||0 
+                };
                 if(mode==='A') gA.push(p); else gB.push(p);
             }
             full = [...gA, ...gB];
@@ -887,125 +264,76 @@
         reader.readAsText(file);
     }
 
+    // 保存與刪除
     async function saveHistoryToDB() {
         const id = "rep_" + Date.now();
+        const resValue = document.querySelector('input[name="match-result"]:checked').value;
         const payload = {
             id,
             fullDateTime: document.getElementById('match-date').value,
             nameA: document.getElementById('custom-title').value,
             nameB: nameB,
-            rawData: { nameA: document.getElementById('custom-title').value, nameB, gA, gB }
+            result: resValue,
+            rawData: { nameA: document.getElementById('custom-title').value, nameB, gA, gB, result: resValue }
         };
-        try {
-            const res = await fetch(WORKER_URL + "/api/save-history", { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-            if(!res.ok) throw new Error(await res.text());
-            alert("已保存成功！成員檔案已同步更新。");
-            currentReportId = id;
-            showShareSection();
-            loadHistoryList();
-        } catch(e) { alert("儲存失敗: " + e.message); }
-    }
-
-    async function deleteHist(e, id) {
-        e.stopPropagation();
-        if(!confirm("確定刪除？這會同步扣除成員的累計場次與傷害！")) return;
-        await fetch(WORKER_URL + "/api/delete-history", { method:'POST', body: JSON.stringify({id}) });
-        loadHistoryList();
-    }
-
-    async function fetchMembers() {
-        const res = await fetch(WORKER_URL + "/api/members");
-        const list = await res.json();
-        document.getElementById('db-table-body').innerHTML = list.map(m => `
-            <tr onclick="openMemberDetail('${m.id}')" style="cursor:pointer">
-                <td><b>${m.id}</b></td>
-                <td><span class="job-tag" style="background:var(--color-${m.last_job})">${m.last_job}</span></td>
-                <td>${m.matches} 場</td>
-                <td>${totalReports > 0 ? ((m.matches/totalReports)*100).toFixed(1) : 0}%</td>
-                <td>${(m.total_dmg/10000).toFixed(0)}w</td>
-                <td>${m.note || ''}</td>
-                <td class="admin-only">
-                    <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
-                </td>
-            </tr>
-        `).join('');
+        const res = await fetch(WORKER_URL + "/api/save-history", { method:'POST', body: JSON.stringify(payload) });
+        if(res.ok) { alert("保存成功！"); currentReportId = id; showShareSection(); loadHistoryList(); }
     }
 
     async function loadHistoryList() {
         const res = await fetch(WORKER_URL + "/api/histories");
-        const data = await res.json();
-        totalReports = data.length;
-        document.getElementById('hist-items').innerHTML = data.map(h => `
-            <div class="hist-card" onclick="viewHistory('${h.id}')">
+        allHistories = await res.json();
+        
+        const range = document.getElementById('hist-filter-range').value;
+        const search = document.getElementById('hist-search-guild').value.toLowerCase();
+        const winCheck = document.getElementById('check-win').checked;
+        const lossCheck = document.getElementById('check-loss').checked;
+
+        const filtered = allHistories.filter(h => {
+            const hDate = new Date(h.date);
+            const diffDays = (new Date() - hDate) / (1000*60*60*24);
+            const dateMatch = range === 'all' || diffDays <= parseInt(range);
+            const nameMatch = h.guild_a.toLowerCase().includes(search);
+            const resultMatch = (h.result === '勝利' && winCheck) || (h.result === '失敗' && lossCheck);
+            return dateMatch && nameMatch && resultMatch;
+        });
+
+        document.getElementById('hist-items').innerHTML = filtered.map(h => `
+            <div class="hist-card ${h.result === '勝利' ? 'win' : 'loss'}" onclick="viewHistory('${h.id}')">
                 ${!isViewMode ? `<button class="del-btn" onclick="deleteHist(event, '${h.id}')">×</button>` : ''}
-                <b>${h.date}</b><br>${h.guild_a}
+                <div style="display:flex; justify-content:space-between;">
+                    <b>${h.date}</b> <span style="color:${h.result==='勝利'?'green':'red'}">${h.result}</span>
+                </div>
+                ${h.guild_a}
             </div>`).join('');
     }
 
-    function viewHistory(id) {
-        currentReportId = id;
-        fetch(WORKER_URL + "/api/histories").then(res => res.json()).then(list => {
-            const h = list.find(x => x.id === id);
-            if(h) {
-                const d = JSON.parse(h.raw_json);
-                gA = d.gA; gB = d.gB; full = [...gA, ...gB];
-                document.getElementById('display-title').innerText = d.nameA;
-                document.getElementById('name-b-title').innerText = "敵軍：" + d.nameB;
-                switchPage('report'); renderFilterButtons(); renderReport();
-                showShareSection();
-            }
-        });
+    async function deleteHist(e, id) {
+        e.stopPropagation();
+        if(!confirm("確定刪除此戰報並扣除成員累計數據？")) return;
+        await fetch(WORKER_URL + "/api/delete-history", { method:'POST', body: JSON.stringify({id}) });
+        loadHistoryList();
     }
 
+    // 戰報顯示渲染
     function renderReport() {
         document.getElementById('report-view').style.display = 'block';
         renderMVPs('a', gA); renderMVPs('b', gB);
         const avg = full.reduce((a,b)=>a+b.pDmg,0)/full.length;
+
         ['a','b'].forEach(t => {
             const data = (t==='a'?gA:gB).filter(p => currentJobFilter==='all' || p.job===currentJobFilter);
-            document.getElementById('th-'+t).innerHTML = cols.map(c => `<th onclick="sortBy('${t}', '${c.k}')">${c.l}</th>`).join('');
+            document.getElementById('th-'+t).innerHTML = tableCols.map(c => `<th onclick="sortReportTable('${t}', '${c.k}')">${c.l}</th>`).join('');
             document.getElementById('tbody-'+t).innerHTML = data.map(p => `
-                <tr onclick="openModal('${p.name}')" style="cursor:pointer;">
+                <tr onclick="openMemberModal('${p.name}')" style="cursor:pointer;">
                     <td>${p.name} ${p.pDmg > avg*2.5 ? '🔥':''}</td>
-                    <td><span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span></td>
-                    ${radarCols.map(c => `<td>${p[c.k]>=10000?(p[c.k]/10000).toFixed(1)+'w':p[c.k]}</td>`).join('')}
-                    <td>${p.death}</td><td>${p.spring}</td>
+                    <td><span class="job-tag" style="background:${jobColors[p.job]}">${p.job}</span></td>
+                    <td>${p.kill}</td><td>${p.assist}</td><td>${p.res}</td>
+                    <td>${(p.pDmg/10000).toFixed(1)}w</td><td>${(p.bDmg/10000).toFixed(1)}w</td>
+                    <td>${(p.heal/10000).toFixed(1)}w</td><td>${(p.takeDmg/10000).toFixed(1)}w</td>
+                    <td>${p.death}</td><td>${p.spring}</td><td>${p.bone}</td>
                 </tr>`).join('');
         });
-    }
-
-    async function openModal(n) {
-        focusPlayer = full.find(x => x.name === n);
-        document.getElementById('modal').style.display='flex';
-        document.getElementById('m-name').innerText = focusPlayer.name;
-        document.getElementById('m-job-box').innerHTML = `<span class="job-tag" style="background:var(--color-${focusPlayer.job})">${focusPlayer.job}</span>`;
-        document.getElementById('m-stats-box').innerHTML = `本場輸出：${(focusPlayer.pDmg/10000).toFixed(1)}w<br>對建築物：${(focusPlayer.bDmg/10000).toFixed(1)}w<br>承受傷害：${(focusPlayer.takeDmg/10000).toFixed(1)}w<br>治療量：${(focusPlayer.heal/10000).toFixed(1)}w`;
-        
-        // 獲取備註
-        const res = await fetch(`${WORKER_URL}/api/member-note?id=${encodeURIComponent(focusPlayer.name)}`);
-        const data = await res.json();
-        document.getElementById('m-note').value = data.note || '';
-
-        const stats = {}; radarCols.forEach(c => { const vals = full.map(x => x[c.k]); stats[c.k] = { max: Math.max(...vals), min: Math.min(...vals) }; });
-        if(chart) chart.destroy();
-        chart = new Chart(document.getElementById('radarChart'), {
-            type:'radar',
-            data:{ labels: radarCols.map(c => c.l), datasets:[{ label:'能力分佈', data: radarCols.map(c => ((focusPlayer[c.k]-stats[c.k].min)/(stats[c.k].max-stats[c.k].min || 1))*100), backgroundColor:'rgba(142,154,175,0.2)', borderColor:'#8e9aaf' }] },
-            options:{ scales:{ r:{ min:0, max:100, ticks:{display:false} } } }
-        });
-    }
-
-    async function saveNoteOnly() {
-        await fetch(WORKER_URL + "/api/update-note", { method:'POST', body: JSON.stringify({ id: focusPlayer.name, note: document.getElementById('m-note').value }) });
-        alert("評語已儲存");
-    }
-
-    function switchPage(p) {
-        document.getElementById('page-report').style.display = p==='report'?'block':'none';
-        document.getElementById('page-db').style.display = p==='db'?'block':'none';
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-        document.getElementById('nav-'+p).classList.add('active');
-        if(p==='db') fetchMembers();
     }
 
     function renderMVPs(team, players) {
@@ -1015,10 +343,147 @@
         }).join('');
     }
 
-    function renderFilterButtons() { const jobs = ["all", ...new Set(full.map(p => p.job))]; document.getElementById('job-filters').innerHTML = jobs.map(j => `<button class="filter-btn ${currentJobFilter===j?'active':''}" onclick="setJobFilter('${j}')">${j==='all'?'全部':j}</button>`).join(''); }
-    function setJobFilter(j) { currentJobFilter = j; renderFilterButtons(); renderReport(); }
-    function sortBy(team, key) { (team==='a'?gA:gB).sort((a,b)=>b[key]-a[key]); renderReport(); }
-    function closeModal() { document.getElementById('modal').style.display='none'; }
+    // 成員檔案室功能
+    async function fetchMembers() {
+        const res = await fetch(WORKER_URL + "/api/members");
+        allMembers = await res.json();
+        
+        const range = document.getElementById('db-filter-range').value;
+        const searchId = document.getElementById('db-search-id').value.toLowerCase();
+        
+        // 計算該時間範圍內的總戰報數
+        const rangeHistories = allHistories.filter(h => {
+            const diff = (new Date() - new Date(h.date)) / (1000*60*60*24);
+            return range === 'all' || diff <= parseInt(range);
+        });
+        const currentTotal = rangeHistories.length;
+
+        let filtered = allMembers.filter(m => {
+            const jobMatch = currentJobFilter === 'all' || m.last_job === currentJobFilter;
+            const tagMatch = currentHashtagFilter === 'all' || m.hashtag === currentHashtagFilter;
+            const idMatch = m.id.toLowerCase().includes(searchId);
+            return jobMatch && tagMatch && idMatch;
+        });
+
+        // 渲染過濾按鈕
+        renderDBFilterButtons();
+
+        document.getElementById('db-table-body').innerHTML = filtered.map(m => {
+            const rate = currentTotal > 0 ? ((m.matches/currentTotal)*100).toFixed(1) : 0;
+            return `
+            <tr onclick="openMemberModal('${m.id}')" style="cursor:pointer">
+                <td><b>${m.id}</b></td>
+                <td><span class="job-tag" style="background:${jobColors[m.last_job]}">${m.last_job}</span></td>
+                <td><span class="hashtag-tag">${m.hashtag || '未分類'}</span></td>
+                <td>${m.matches} 場</td>
+                <td>${rate}%</td>
+                <td style="font-size:11px; color:#888;">${m.note || ''}</td>
+                <td class="admin-only">
+                    <button class="btn btn-outline" style="padding:2px 8px; font-size:10px;" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    function renderDBFilterButtons() {
+        const jobs = ["all", ...Object.keys(jobColors)];
+        document.getElementById('db-job-filters').innerHTML = jobs.map(j => `<button class="filter-btn ${currentJobFilter===j?'active':''}" onclick="setDBJobFilter('${j}')">${j==='all'?'全部職業':j}</button>`).join('');
+        
+        const tags = ["all", "進攻團", "防守團", "機動團"];
+        document.getElementById('db-hashtag-filters').innerHTML = tags.map(t => `<button class="filter-btn ${currentHashtagFilter===t?'active':''}" onclick="setDBTagFilter('${t}')">${t==='all'?'全部標籤':t}</button>`).join('');
+    }
+
+    // 彈窗詳情與雷達圖
+    async function openMemberModal(name) {
+        focusPlayer = allMembers.find(m => m.id === name) || { id: name, last_job: '碎夢', hashtag: '進攻團', note: '' };
+        document.getElementById('modal').style.display='flex';
+        document.getElementById('m-name').innerText = focusPlayer.id;
+        document.getElementById('m-note').value = focusPlayer.note || '';
+        document.getElementById('m-edit-job').value = focusPlayer.last_job;
+        document.getElementById('m-edit-hashtag').value = focusPlayer.hashtag || '進攻團';
+
+        // 找出該玩家的所有參與記錄
+        const personalHist = [];
+        allHistories.forEach(h => {
+            const d = JSON.parse(h.raw_json);
+            const pData = [...d.gA, ...d.gB].find(x => x.name === name);
+            if(pData) personalHist.push({ date: h.date, result: h.result, guild: h.guild_a, ...pData });
+        });
+
+        document.getElementById('m-history-items').innerHTML = personalHist.map(ph => `
+            <div class="member-hist-item">
+                <span>${ph.date} (${ph.result})</span>
+                <span style="color:#888">${ph.job} | 傷:${(ph.pDmg/10000).toFixed(1)}w</span>
+            </div>
+        `).join('');
+
+        // 動態雷達圖邏輯
+        renderRadar(focusPlayer.last_job, personalHist);
+    }
+
+    function renderRadar(job, history) {
+        let labels = [], keys = [];
+        if(job === '素問') {
+            labels = ['助攻', '資源', '治療值', '承受傷害', '重傷', '化羽/清泉'];
+            keys = ['assist', 'res', 'heal', 'takeDmg', 'death', 'spring'];
+        } else if(job === '潮光') {
+            labels = ['擊敗', '助攻', '資源', '對玩家傷害', '對建築傷害', '承受傷害', '重傷', '化羽/清泉'];
+            keys = ['kill', 'assist', 'res', 'pDmg', 'bDmg', 'takeDmg', 'death', 'spring'];
+        } else if(job === '九靈') {
+            labels = ['擊敗', '助攻', '資源', '對玩家傷害', '對建築傷害', '承受傷害', '重傷', '焚骨'];
+            keys = ['kill', 'assist', 'res', 'pDmg', 'bDmg', 'takeDmg', 'death', 'bone'];
+        } else {
+            labels = ['擊敗', '助攻', '資源', '對玩家傷害', '對建築傷害', '承受傷害', '重傷'];
+            keys = ['kill', 'assist', 'res', 'pDmg', 'bDmg', 'takeDmg', 'death'];
+        }
+
+        // 計算平均值
+        const avgData = keys.map(k => {
+            const sum = history.reduce((a, b) => a + (b[k] || 0), 0);
+            return history.length > 0 ? sum / history.length : 0;
+        });
+
+        if(chart) chart.destroy();
+        chart = new Chart(document.getElementById('radarChart'), {
+            type:'radar',
+            data:{ labels, datasets:[{ label:'綜合能力(平均)', data: avgData, backgroundColor:'rgba(142,154,175,0.2)', borderColor:'#8e9aaf' }] },
+            options:{ scales:{ r:{ ticks:{display:false} } } }
+        });
+    }
+
+    async function saveMemberFullInfo() {
+        const payload = {
+            id: focusPlayer.id,
+            job: document.getElementById('m-edit-job').value,
+            hashtag: document.getElementById('m-edit-hashtag').value,
+            note: document.getElementById('m-note').value
+        };
+        await fetch(WORKER_URL + "/api/update-member-full", { method:'POST', body: JSON.stringify(payload) });
+        alert("資料已更新！");
+        fetchMembers(); closeModal();
+    }
+
+    // 其他工具
+    function switchPage(p) {
+        document.getElementById('page-report').style.display = p==='report'?'block':'none';
+        document.getElementById('page-db').style.display = p==='db'?'block':'none';
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        if(p==='db') { fetchMembers(); document.querySelectorAll('.nav-item')[1].classList.add('active'); }
+        else document.querySelectorAll('.nav-item')[0].classList.add('active');
+    }
+
+    function viewHistory(id) {
+        currentReportId = id;
+        const h = allHistories.find(x => x.id === id);
+        if(h) {
+            const d = JSON.parse(h.raw_json);
+            gA = d.gA; gB = d.gB; full = [...gA, ...gB];
+            document.getElementById('display-title').innerText = d.nameA + ` (${h.result})`;
+            document.getElementById('name-b-title').innerText = "敵軍：" + d.nameB;
+            switchPage('report'); renderFilterButtons(); renderReport(); showShareSection();
+        }
+    }
+
     function showShareSection() { document.getElementById('share-section').style.display = 'block'; }
     
     function copyShareLink(mode) {
@@ -1026,10 +491,15 @@
         url.searchParams.set('id', currentReportId);
         if(mode === 'view') url.searchParams.set('mode', 'view');
         navigator.clipboard.writeText(url.toString());
-        alert("鏈結已複製！");
+        alert("鏈結已複製！此鏈結已包含當前戰報 ID 與權限設定。");
     }
 
     function renameP(old) { const n = prompt("輸入新名稱:", old); if(n) fetch(WORKER_URL + "/api/rename", { method:'POST', body: JSON.stringify({oldId:old, newId:n}) }).then(()=>fetchMembers()); }
+    function setDBJobFilter(j) { currentJobFilter = j; fetchMembers(); }
+    function setDBTagFilter(t) { currentHashtagFilter = t; fetchMembers(); }
+    function closeModal() { document.getElementById('modal').style.display='none'; }
+    function sortReportTable(t, k) { (t==='a'?gA:gB).sort((a,b)=>b[k]-a[k]); renderReport(); }
+    function sortMemberTable(k) { allMembers.sort((a,b)=> (b[k]||0) > (a[k]||0) ? 1 : -1); fetchMembers(); }
 </script>
 
 </body></html>
