@@ -1827,6 +1827,7 @@
             <td>${m.note || ''}</td>
             <td class="admin-only">
                 <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
+                <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); mergeP('${m.id}')">合併</button>
             </td>
         </tr>
     `).join('');
@@ -1954,6 +1955,31 @@
                 } catch (e) {
                     alert("更名失敗，請稍後再試：" + e.message);
                 }
+            }
+        }
+
+        async function mergeP(fromId) {
+            const toId = prompt(`將「${fromId}」的所有記錄合併到哪個成員 ID？\n（輸入目標成員的現有 ID）`);
+            if (!toId || toId === fromId) return;
+
+            if (!confirm(`確認將「${fromId}」（${dbMembersMap.find(m => m.id === fromId)?.matches || 0}場）合併到「${toId}」？\n合併後「${fromId}」將被刪除，無法還原！`)) return;
+
+            try {
+                const res = await fetch(`${WORKER_URL}/api/merge-member`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + currentUser.token
+                    },
+                    body: JSON.stringify({ fromId, toId })
+                });
+                const data = await res.json();
+                if (!res.ok) { alert("合併失敗：" + (data.error || res.status)); return; }
+                alert(`合併成功！已同步更新 ${data.updated} 場戰報。`);
+                await fetchAllHistories();
+                loadDbData();
+            } catch (e) {
+                alert("合併失敗：" + e.message);
             }
         }
 
