@@ -79,7 +79,12 @@
                 </select>
             </div>
         </div>
-        <div class="history-list"><div id="hist-items"></div></div>
+        <div class="history-list"><div id="hist-items">
+            <div class="hist-card" onclick="viewHistory('rep_1777013851804')">
+                <button class="del-btn" onclick="deleteHist(event, 'rep_1777013851804')">×</button>
+                <div><b>2026-04-19</b><br>醉仙居 VS ✵極楽淨土✵</div>
+                <div><span class="result-tag win">勝</span></div>
+            </div></div></div>
     </div>
     
     <div class="main-content">
@@ -200,7 +205,7 @@
 <script>
     const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev";
     
-    // 欄位定義更新 (C2, C3)
+    // 欄位定義更新
     const metrics = [{l:'擊殺最高', k:'kill'}, {l:'傷害最高', k:'pDmg'}, {l:'對建最高', k:'bDmg'}, {l:'治療最高', k:'heal'}, {l:'助攻最高', k:'assist'}, {l:'化羽最高', k:'spring'}, {l:'承傷最高', k:'takeDmg'}, {l:'資源最高', k:'resource'}, {l:'重傷最高', k:'death'}];
     const cols = [
         {l:'玩家', k:'name'}, {l:'職業', k:'job'}, {l:'擊敗', k:'kill'}, {l:'助攻', k:'assist'}, 
@@ -217,21 +222,26 @@
     const isViewMode = urlParams.get('mode') === 'view';
 
     window.onload = async () => {
+        // [Bug 修復區塊]：確保唯讀模式移除元素後，JS 依然能安全執行
         if(isViewMode) {
             document.querySelectorAll('.admin-only').forEach(el => el.remove());
             document.getElementById('m-note').readOnly = true;
             document.getElementById('mm-note').readOnly = true;
+            document.getElementById('custom-title').readOnly = true; 
             document.getElementById('sys-title').innerText = "NSH 查看模式";
             document.getElementById('mm-job-view').style.display = 'inline-block';
             document.getElementById('mm-tag-view').style.display = 'inline-block';
         }
-        document.getElementById('match-date').valueAsDate = new Date();
+        
+        const matchDateEl = document.getElementById('match-date');
+        if(matchDateEl) matchDateEl.valueAsDate = new Date();
+
         await fetchAllHistories();
         const reportId = urlParams.get('id');
         if(reportId) viewHistory(reportId);
     };
 
-    // 取得所有戰報並加入快取清除 (D1)
+    // 取得所有戰報並加入快取清除
     async function fetchAllHistories() {
         try {
             const res = await fetch(WORKER_URL + "/api/histories?t=" + Date.now(), { cache: "no-store" });
@@ -247,7 +257,7 @@
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= parseInt(days);
     }
 
-    // 渲染左側歷史記錄 (B1)
+    // 渲染左側歷史記錄
     function renderHistoryList() {
         const search = document.getElementById('hist-search').value.toLowerCase();
         const timeFilter = document.getElementById('hist-time').value;
@@ -279,13 +289,14 @@
         }).join('');
     }
 
-    // 處理 CSV 導入 (C1, C2)
+    // 處理 CSV 導入
     function handleCSV(file) {
         if(!file) return;
         const parts = file.name.replace('.csv', '').split('_');
         if(parts.length >= 4) {
             const d = parts[0];
-            document.getElementById('match-date').value = `${d.substring(0,4)}-${d.substring(4,6)}-${d.substring(6,8)}`;
+            const matchDateEl = document.getElementById('match-date');
+            if(matchDateEl) matchDateEl.value = `${d.substring(0,4)}-${d.substring(4,6)}-${d.substring(6,8)}`;
             nameA = parts[2]; nameB = parts[3];
             document.getElementById('custom-title').value = `${nameA} VS ${nameB}`;
         }
@@ -308,7 +319,8 @@
                 if(mode==='A') gA.push(p); else gB.push(p);
             }
             full = [...gA, ...gB];
-            document.getElementById('save-btn').style.display = 'block';
+            const saveBtn = document.getElementById('save-btn');
+            if(saveBtn) saveBtn.style.display = 'block';
             renderFilterButtons(); renderReport();
         };
         reader.readAsText(file);
@@ -316,6 +328,7 @@
 
     async function saveHistoryToDB() {
         const id = "rep_" + Date.now();
+        const mr = document.getElementById('match-result');
         const payload = {
             id,
             fullDateTime: document.getElementById('match-date').value,
@@ -324,7 +337,7 @@
             rawData: { 
                 nameA: document.getElementById('custom-title').value, 
                 nameB, gA, gB, 
-                result: document.getElementById('match-result').value // 保存勝負
+                result: mr ? mr.value : "win"
             }
         };
         try {
@@ -344,7 +357,7 @@
         await fetchAllHistories();
     }
 
-    // 取得雷達圖欄位 (C3)
+    // 取得雷達圖欄位
     function getRadarCols(job) {
         if (job === '素問') return [{l:'助攻', k:'assist'}, {l:'資源', k:'resource'}, {l:'治療', k:'heal'}, {l:'承受', k:'takeDmg'}, {l:'重傷', k:'death'}, {l:'化羽/清泉', k:'spring'}];
         if (job === '潮光') return [{l:'擊敗', k:'kill'}, {l:'助攻', k:'assist'}, {l:'資源', k:'resource'}, {l:'對人', k:'pDmg'}, {l:'對建', k:'bDmg'}, {l:'承受', k:'takeDmg'}, {l:'重傷', k:'death'}, {l:'化羽/清泉', k:'spring'}];
@@ -352,16 +365,26 @@
         return [{l:'擊敗', k:'kill'}, {l:'助攻', k:'assist'}, {l:'資源', k:'resource'}, {l:'對人', k:'pDmg'}, {l:'對建', k:'bDmg'}, {l:'承受', k:'takeDmg'}, {l:'重傷', k:'death'}];
     }
 
+    // [Bug 修復區塊]：檢視戰報時，安全地為元素賦值，避免 null 報錯
     function viewHistory(id) {
         currentReportId = id;
         const h = allHistories.find(x => x.id === id);
         if(h) {
             const d = JSON.parse(h.raw_json);
             gA = d.gA; gB = d.gB; full = [...gA, ...gB];
-            document.getElementById('display-title').innerText = d.nameA;
+            
+            document.getElementById('display-title').innerText = d.nameA || h.guild_a;
             document.getElementById('name-b-title').innerText = "敵軍：" + (d.nameB || '未知');
-            if(d.result) document.getElementById('match-result').value = d.result;
-            switchPage('report'); renderFilterButtons(); renderReport();
+            
+            const matchResultEl = document.getElementById('match-result');
+            if(matchResultEl && d.result) matchResultEl.value = d.result;
+            
+            const customTitleEl = document.getElementById('custom-title');
+            if(customTitleEl && d.nameA) customTitleEl.value = d.nameA;
+
+            switchPage('report'); 
+            renderFilterButtons(); 
+            renderReport();
             showShareSection();
         }
     }
@@ -391,7 +414,6 @@
         
         const res = await fetch(`${WORKER_URL}/api/member-note?id=${encodeURIComponent(focusPlayer.name)}&t=${Date.now()}`, {cache:"no-store"});
         const data = await res.json();
-        // 解析 Note 與 Tag (JSON 儲存法)
         let parsedNote = "";
         try { const p = JSON.parse(data.note); parsedNote = p.text || ""; } catch(e) { parsedNote = data.note || ""; }
         document.getElementById('m-note').value = parsedNote;
@@ -411,13 +433,12 @@
         });
     }
 
-    // 構建成員檔案室 (前端聚合，A2, A3)
+    // 構建成員檔案室
     async function loadDbData() {
         const timeFilter = document.getElementById('db-time').value;
         const filteredHistories = allHistories.filter(h => isWithinDays(h.date, timeFilter));
         totalReportsInTimeframe = filteredHistories.length;
 
-        // 向後端獲取備註與標籤
         const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now(), {cache:"no-store"});
         const dbRaw = await res.json();
         const infoMap = {};
@@ -431,13 +452,11 @@
             if(m.last_job) jobSet.add(m.last_job);
         });
 
-        // 動態填充職業下拉選單 (A1)
         const jobSelect = document.getElementById('db-job');
         const currJob = jobSelect.value;
         jobSelect.innerHTML = '<option value="all">全部職業</option>' + [...jobSet].map(j => `<option value="${j}">${j}</option>`).join('');
         jobSelect.value = currJob || 'all';
 
-        // 聚合數據
         const map = {};
         filteredHistories.forEach(h => {
             try {
@@ -449,7 +468,6 @@
                     map[p.name].histories.push({ date: h.date, title: aName, stats: p });
                     map[p.name].last_job = p.job;
                     
-                    // 加總所有數值
                     cols.slice(2).forEach(c => {
                         map[p.name].aggr[c.k] = (map[p.name].aggr[c.k] || 0) + (p[c.k] || 0);
                     });
@@ -480,7 +498,6 @@
             return matchS && matchJ && matchT;
         });
 
-        // 自動排序邏輯
         data.sort((a, b) => {
             let va = a[dbSort.key], vb = b[dbSort.key];
             if(typeof va === 'string') return dbSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -508,11 +525,10 @@
         renderDbTable();
     }
 
-    // 成員詳情與綜合雷達圖 (A4)
     async function openMemberDetail(id) {
         const m = dbMembersMap.find(x => x.id === id);
         if(!m) return;
-        focusPlayer = m; // Set context
+        focusPlayer = m; 
         
         document.getElementById('member-modal').style.display='flex';
         document.getElementById('mm-name').innerText = m.id;
@@ -525,17 +541,14 @@
         document.getElementById('mm-job-view').innerText = m.last_job;
         document.getElementById('mm-job-view').style.background = `var(--color-${m.last_job})`;
 
-        // 歷史記錄列表
         document.getElementById('mm-history-list').innerHTML = m.histories.map(h => 
             `<div style="padding:5px; border-bottom:1px solid #eee;">[${h.date}] ${h.title} - 輸出: ${(h.stats.pDmg/10000).toFixed(1)}w</div>`
         ).join('');
 
-        // 綜合雷達圖 (計算平均值)
         const rCols = getRadarCols(m.last_job);
         const avgStats = {};
         rCols.forEach(c => { avgStats[c.k] = m.aggr[c.k] / m.matches; });
         
-        // 取得同職業的大盤平均最大/最小值作對比
         const classPeers = dbMembersMap.filter(x => x.last_job === m.last_job && x.matches > 0);
         const globalStats = {};
         rCols.forEach(c => {
@@ -551,11 +564,10 @@
         });
     }
 
-    // 儲存成員標籤與備註 (合併為 JSON 存入原有 Note 欄位, A5)
     async function saveMemberProfile() {
         const newNote = document.getElementById('mm-note').value;
         const newTag = document.getElementById('mm-tag').value;
-        const newJob = document.getElementById('mm-job').value; // 雖然更換職業最好由新戰報推進，但保留手動選擇
+        const newJob = document.getElementById('mm-job').value; 
 
         const payload = { id: focusPlayer.id, note: JSON.stringify({text: newNote, tag: newTag}) };
         await fetch(WORKER_URL + "/api/update-note", { method:'POST', body: JSON.stringify(payload) });
@@ -565,7 +577,6 @@
     }
 
     async function saveNoteOnly() {
-        // 單場視窗保存備註，為了不洗掉標籤，先獲取現有標籤
         const res = await fetch(`${WORKER_URL}/api/member-note?id=${encodeURIComponent(focusPlayer.name)}`);
         const data = await res.json();
         let oldTag = "none";
