@@ -1867,6 +1867,11 @@
             alert("評語已儲存");
         }
 
+        // =====================================================
+        // ===  前端 renameP 修復版
+        // ===  修復點：雲端模式缺少 Authorization header 導致 500
+        // =====================================================
+
         async function renameP(old) {
             const n = prompt("請輸入新名稱:", old);
             if (!n || n === old) return;
@@ -1876,44 +1881,63 @@
                 let db = getLocalMembers();
                 if (db[n]) return alert("錯誤：新名稱已存在");
 
-                db[n] = { ...db[old], id: n }; // 複製資料到新 ID
-                delete db[old]; // 刪除舊 ID
+                db[n] = { ...db[old], id: n };
+                delete db[old];
                 saveLocalMembers(db);
 
-                // --- 2. 關鍵補齊：更新所有歷史戰報中的名稱 ---
+                // --- 2. 更新所有歷史戰報中的名稱 ---
                 let hists = getLocalHistories();
-                let updateCount = 0;
                 hists.forEach(h => {
+                    let rawData = {};
+                    try { rawData = JSON.parse(h.raw_json || '{}'); } catch (e) { }
                     let changed = false;
-                    // 檢查 A 隊
-                    h.data_a.forEach(p => { if (p.name === old) { p.name = n; changed = true; } });
-                    // 檢查 B 隊
-                    h.data_b.forEach(p => { if (p.name === old) { p.name = n; changed = true; } });
-                    if (changed) updateCount++;
+                    const replaceName = (arr) => {
+                        if (!Array.isArray(arr)) return arr;
+                        return arr.map(p => {
+                            if (p.name === old) { p.name = n; changed = true; }
+                            return p;
+                        });
+                    };
+                    if (rawData.gA) rawData.gA = replaceName(rawData.gA);
+                    if (rawData.gB) rawData.gB = replaceName(rawData.gB);
+                    if (changed) h.raw_json = JSON.stringify(rawData);
                 });
-
-                if (updateCount > 0) {
-                    saveLocalHistories(hists);
-                    console.log(`已同步更新 ${updateCount} 場歷史戰報`);
-                }
+                saveLocalHistories(hists);
 
                 alert("本地更名成功！");
-                location.reload();
+                await fetchAllHistories();
+                loadDbData();
+
             } else {
                 // --- 雲端模式 ---
-                // 呼叫 API (見下方第 2 點)
-                const res = await fetch(`${WORKER_URL}/api/rename`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        oldId: old,
-                        newId: n,
-                        share_id: currentUser.share_id
-                    })
-                });
-                // ... 處理回傳
+                // ⭐ 修復：必須傳 Authorization header，否則後端 user = null → 500
+                try {
+                    const res = await fetch(`${WORKER_URL}/api/rename`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + currentUser.token   // ← 這行原本缺少！
+                        },
+                        body: JSON.stringify({ oldId: old, newId: n })
+                    });
+
+                    const data = await res.json();
+
+                    if (!res.ok) {
+                        alert("更名失敗：" + (data.error || res.status));
+                        return;
+                    }
+
+                    alert(`更名成功！已同步更新 ${data.updated || 0} 場戰報。`);
+                    await fetchAllHistories();
+                    loadDbData();
+
+                } catch (e) {
+                    alert("更名失敗，請稍後再試：" + e.message);
+                }
             }
         }
+
 
         // =====================================================
         // ===  雷達圖欄位定義
