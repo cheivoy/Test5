@@ -1,108 +1,91 @@
 <html lang="zh-TW"><head>
     <meta charset="UTF-8">
-    <title>NSH 戰績系統 Pro v5.0</title>
+    <title>NSH 戰績系統 Pro v5.8 - 完整功能版</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <style>
         :root {
             --bg: #f5f6f8; --sidebar: #ffffff; --card: #ffffff;
             --text: #5a6473; --accent: #8e9aaf; --accent-soft: #d1d9e6;
-            --border: #edf0f2;
+            --border: #edf0f2; --danger: #e57373; --gold: #fbc02d;
             --color-碎夢: #5b9bd5; --color-神相: #4fc3f7; --color-血河: #e57373;
             --color-九靈: #ba68c8; --color-玄機: #fdd835; --color-龍吟: #81c784;
             --color-鐵衣: #ffb74d; --color-素問: #f06292; --color-潮光: #4dd0e1;
         }
         * { box-sizing: border-box; }
         body { margin: 0; display: flex; background: var(--bg); color: var(--text); font-family: "PingFang TC", sans-serif; height: 100vh; overflow: hidden; }
-        
         .sidebar { width: 280px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
-        .nav-item { padding: 12px 15px; border-radius: 8px; cursor: pointer; margin-bottom: 5px; color: var(--text); display: flex; align-items: center; gap: 10px; transition: 0.2s; }
-        .nav-item.active { background: var(--accent-soft); color: #4a4e69; font-weight: bold; }
-        .history-list { flex: 1; overflow-y: auto; margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px; }
-        .hist-card { font-size: 11px; padding: 8px; background: #fafafa; border-radius: 6px; margin-bottom: 6px; cursor: pointer; border: 1px solid transparent; }
-        .hist-card:hover { border-color: var(--accent); }
-
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-        .top-bar { height: 65px; background: white; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 30px; position: sticky; top: 0; z-index: 10; }
         .container { padding: 30px; max-width: 1400px; margin: 0 auto; width: 100%; }
-
-        .date-picker-area { background: #fff; padding: 15px; border-radius: 10px; margin-bottom: 20px; display: flex; gap: 15px; align-items: center; border: 1px solid var(--border); }
-        .h-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
-        .h-card { background: white; padding: 12px; border-radius: 10px; border-bottom: 4px solid var(--accent-soft); text-align: center; }
-
-        .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 40px; overflow: hidden; }
-        .table-header { padding: 15px 20px; background: #fcfdfe; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { text-align: left; padding: 12px; background: #fafbfc; cursor: pointer; }
-        td { padding: 12px; border-bottom: 1px solid #f8f9fa; }
-        .job-tag { padding: 2px 6px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; }
+        .nav-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; }
+        .nav-item.active { background: var(--accent-soft); font-weight: bold; }
+        .history-list { flex: 1; overflow-y: auto; margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px; }
+        .hist-card { font-size: 11px; padding: 10px; background: #fff; border-radius: 6px; margin-bottom: 8px; border: 1px solid var(--border); position: relative; cursor: pointer; }
+        .del-btn { position: absolute; top: 5px; right: 5px; color: var(--danger); border: none; background: none; cursor: pointer; font-weight: bold; }
         
+        .share-links { background: #eef2f7; padding: 12px; border-radius: 8px; margin-bottom: 15px; display: none; font-size: 12px; }
+        .share-links input { width: 100%; border: 1px solid #ddd; padding: 4px; margin-top: 4px; border-radius: 4px; font-family: monospace; }
+
+        .mvp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-bottom: 25px; }
+        .mvp-card { background: white; padding: 12px; border-radius: 12px; border-left: 4px solid var(--gold); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .mvp-label { font-size: 11px; color: #999; margin-bottom: 4px; }
+        .mvp-name { font-weight: bold; font-size: 14px; color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mvp-val { font-size: 12px; color: var(--accent); font-weight: bold; }
+
+        .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid #f8f9fa; }
+        th { background: #fafbfc; cursor: pointer; user-select: none; }
+        .job-tag { padding: 2px 6px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; }
         .btn { padding: 8px 16px; border-radius: 8px; border:none; cursor:pointer; font-size:13px; }
         .btn-primary { background:var(--accent); color:white; }
         .btn-outline { background:white; border:1px solid #ddd; }
-
+        .filter-btn { padding: 5px 12px; border-radius: 20px; font-size: 12px; border: 1px solid #ddd; background: #fff; cursor: pointer; margin-right: 5px; margin-bottom: 5px; }
+        .filter-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
         #modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); justify-content:center; align-items:center; z-index:1000; }
-        .modal-body { background:white; padding:30px; border-radius:20px; width:800px; display:flex; gap:25px; }
+        .modal-body { background:white; padding:30px; border-radius:20px; width:850px; display:flex; gap:25px; }
     </style>
 </head>
 <body>
-
     <div class="sidebar">
-        <h2 style="font-size: 20px; margin-bottom: 25px; color: #4a4e69;">戰績分析系統</h2>
-        <div class="nav-item active" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
-        <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員資料庫</div>
-        
-        <div class="history-list">
-            <div style="font-size:12px; color:#999; margin-bottom:10px;">歷史戰報存檔</div>
-            <div id="hist-items"></div>
-        </div>
-    </div>
-
-    <div class="main-content" id="capture-area">
-        <div class="top-bar">
-            <div id="meta-text">等待 CSV 導入...</div>
-            <div style="display:flex; gap:10px;">
-                <button class="btn btn-outline" onclick="exportImage()">📸 導出圖片</button>
-                <button class="btn btn-primary" onclick="shareLinks()">📤 分享連結</button>
+        <h2 style="font-size: 18px;" id="sys-title">NSH 戰績系統 Pro</h2>
+        <div class="nav-item active" onclick="switchPage('report')">📊 戰報解析</div>
+        <div class="nav-item" onclick="switchPage('db')">👥 成員資料庫</div>
+        <div class="history-list"><div id="hist-items">
+            <div class="hist-card" onclick="viewHistory('rep_1776850071520')">
+                <button class="del-btn" onclick="deleteHist(event, 'rep_1776850071520')">×</button>
+                <b>2026-04-19 20:00</b><br>醉仙居 VS ✵極楽淨土✵
             </div>
-        </div>
+            <div class="hist-card" onclick="viewHistory('rep_1776850093145')">
+                <button class="del-btn" onclick="deleteHist(event, 'rep_1776850093145')">×</button>
+                <b>2026-04-19 20:00</b><br>醉仙居 VS ✵極楽淨土✵
+            </div></div></div>
+    </div>
+    <div class="main-content" id="capture-area">
+        <div class="container" id="page-report">
+            <div id="share-area" class="share-links">
+                <div>🔗 <b>幫眾分享鏈接 (唯讀)：</b><input type="text" id="link-view" readonly="" onclick="this.select()"></div>
+                <div id="admin-link-box" style="margin-top:8px;">🔗 <b>管理分享鏈接 (完整)：</b><input type="text" id="link-admin" readonly="" onclick="this.select()"></div>
+            </div>
 
-        <div id="page-report" class="container">
-            <div class="date-picker-area">
+            <div style="background:#fff; padding:15px; border-radius:12px; margin-bottom:20px; display:flex; gap:15px; align-items:center; border: 1px solid var(--border);">
                 <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
-                <button class="btn btn-primary" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
-                <div>日期：<input type="date" id="match-date"></div>
-                <div>時間：<input type="time" id="match-time" value="20:00"></div>
-                <div style="font-size:12px; color:#999;">*系統將自動儲存至雲端歷史</div>
+                <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
+                <input type="date" id="match-date" class="admin-only">
+                <button class="btn btn-outline admin-only" onclick="saveHistoryToDB()" id="save-btn" style="display:none; color:var(--accent);">💾 儲存戰報</button>
+                <button class="btn btn-outline" onclick="exportImage()">📸 導出圖片</button>
             </div>
 
             <div id="report-view" style="display:none;">
-                <div id="job-filters" style="margin-bottom:15px; display:flex; gap:6px; flex-wrap:wrap;"></div>
-                
-                <div class="table-header">
-                    <h3 id="name-a" style="margin:0; color:var(--accent);"></h3>
-                    <button class="btn btn-primary" onclick="batchSave('A')">一鍵記錄 A 幫成員資料</button>
-                </div>
-                <div class="h-grid" id="high-a"></div>
-                <div class="table-card"><table id="table-a"><thead><tr class="th-row"></tr></thead><tbody></tbody></table></div>
-
-                <div class="table-header">
-                    <h3 id="name-b" style="margin:0; color:var(--accent);"></h3>
-                    <button class="btn btn-primary" onclick="batchSave('B')">一鍵記錄 B 幫成員資料</button>
-                </div>
-                <div class="h-grid" id="high-b"></div>
-                <div class="table-card"><table id="table-b"><thead><tr class="th-row"></tr></thead><tbody></tbody></table></div>
+                <div id="job-filters" style="margin-bottom:20px;"></div>
+                <h3 id="name-a"></h3><div id="mvp-a" class="mvp-grid"></div>
+                <div class="table-card"><table><thead><tr id="th-a"></tr></thead><tbody id="tbody-a"></tbody></table></div>
+                <h3 id="name-b"></h3><div id="mvp-b" class="mvp-grid"></div>
+                <div class="table-card"><table><thead><tr id="th-b"></tr></thead><tbody id="tbody-b"></tbody></table></div>
             </div>
         </div>
-
-        <div id="page-db" class="container" style="display:none;">
-            <h3>幫會成員雲端資料庫</h3>
-            <div class="table-card">
-                <table id="db-table">
-                    <thead><tr><th>玩家ID</th><th>職業</th><th>總出場</th><th>備註評語</th><th>管理</th></tr></thead>
-                    <tbody></tbody>
-                </table>
-            </div>
+        <div class="container" id="page-db" style="display:none;">
+            <div class="table-card"><table id="db-table"><thead><tr><th>玩家</th><th>職業</th><th>次數</th><th>累計傷</th><th>備註</th><th class="admin-only">操作</th></tr></thead><tbody></tbody></table></div>
         </div>
     </div>
 
@@ -110,52 +93,55 @@
         <div class="modal-body" onclick="event.stopPropagation()">
             <div style="flex:1.2;"><canvas id="radarChart"></canvas></div>
             <div style="flex:1;">
-                <h3 id="m-name"></h3>
-                <div id="m-job-box"></div>
-                <p style="font-size:12px; color:var(--accent); margin-top:10px;">💡 修改評語不會增加出場次數</p>
-                <textarea id="m-note" style="width:100%; height:150px; border:1px solid #ddd; padding:10px; margin-top:5px;"></textarea>
-                <button class="btn btn-primary" style="width:100%; margin-top:15px;" onclick="saveNoteOnly()">💾 僅更新評語</button>
-                <button class="btn btn-outline" style="width:100%; margin-top:8px; border-color:var(--accent);" onclick="saveWithMatch()">同步資料並場次 +1</button>
+                <h3 id="m-name"></h3><div id="m-job-box"></div>
+                <textarea id="m-note" style="width:100%; height:150px; border:1px solid #ddd; padding:10px; margin-top:20px; border-radius:8px;"></textarea>
+                <button class="btn btn-primary admin-only" style="width:100%; margin-top:15px;" onclick="saveNoteOnly()">💾 儲存評語</button>
             </div>
         </div>
     </div>
 
 <script>
-    const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev"; // 務必替換
-    let gA = [], gB = [], full = [];
-    let nameA = "", nameB = "";
-    let filterJob = "all";
-    let chart = null, focusPlayer = null;
+    const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev"; // 改這裡
+    let gA = [], gB = [], full = [], nameA = "", nameB = "", focusPlayer = null, chart = null, currentJobFilter = "all";
+    
+    // 權限檢查邏輯
+    const urlParams = new URLSearchParams(window.location.search);
+    const isViewMode = urlParams.get('mode') === 'view';
+    const reportIdFromUrl = urlParams.get('id');
 
-    const columns = [
-        {l:'玩家', k:'name'}, {l:'職業', k:'job'}, {l:'擊敗', k:'kill'}, {l:'助攻', k:'assist'},
-        {l:'資源', k:'resource'}, {l:'對玩家', k:'pDmg'}, {l:'對建築', k:'bDmg'}, 
-        {l:'治療', k:'heal'}, {l:'承受', k:'takeDmg'}, {l:'重傷', k:'death'},
-        {l:'化羽', k:'spring'}, {l:'焚骨', k:'bone'}
-    ];
+    const radarCols = [{l:'擊敗', k:'kill'}, {l:'助攻', k:'assist'}, {l:'對人', k:'pDmg'}, {l:'對建', k:'bDmg'}, {l:'治療', k:'heal'}, {l:'承受', k:'takeDmg'}];
+    const metrics = [{l:'擊殺最高', k:'kill'}, {l:'傷害最高', k:'pDmg'}, {l:'對建最高', k:'bDmg'}, {l:'治療最高', k:'heal'}, {l:'助攻最高', k:'assist'}, {l:'資源最高', k:'assist'}, {l:'化羽最高', k:'spring'}, {l:'承傷最高', k:'takeDmg'}];
+    const cols = [{l:'玩家', k:'name'}, {l:'職業', k:'job'}, ...radarCols, {l:'重傷', k:'death'}, {l:'化羽', k:'spring'}];
 
-    // --- 1. 初始化與頁面切換 ---
     window.onload = () => {
-        loadHistory();
+        if(isViewMode) {
+            document.querySelectorAll('.admin-only').forEach(el => el.remove());
+            document.getElementById('m-note').readOnly = true;
+            document.getElementById('sys-title').innerText = "NSH 戰績查看器";
+            document.getElementById('admin-link-box').remove();
+        }
         document.getElementById('match-date').valueAsDate = new Date();
+        loadHistoryList().then(() => {
+            if(reportIdFromUrl) viewHistory(reportIdFromUrl);
+        });
     };
+
+    function generateShareLinks(reportId) {
+        const baseUrl = window.location.origin + window.location.pathname;
+        document.getElementById('share-area').style.display = 'block';
+        document.getElementById('link-view').value = `${baseUrl}?id=${reportId}&mode=view`;
+        if(!isViewMode) {
+            document.getElementById('link-admin').value = `${baseUrl}?id=${reportId}`;
+        }
+    }
 
     function switchPage(p) {
         document.getElementById('page-report').style.display = p==='report'?'block':'none';
         document.getElementById('page-db').style.display = p==='db'?'block':'none';
-        document.querySelectorAll('.nav-item').forEach(i => i.classList.toggle('active', i.id===`nav-${p}`));
         if(p==='db') fetchMembers();
     }
 
-    // --- 2. CSV 處理與日期偵測 ---
     function handleCSV(file) {
-        // 嘗試偵測檔名日期 (格式如 20260419)
-        const dateMatch = file.name.match(/\d{8}/);
-        if(dateMatch) {
-            const dStr = dateMatch[0];
-            document.getElementById('match-date').value = `${dStr.slice(0,4)}-${dStr.slice(4,6)}-${dStr.slice(6,8)}`;
-        }
-
         const reader = new FileReader();
         reader.onload = e => {
             const lines = e.target.result.split('\n');
@@ -163,168 +149,120 @@
             let mode = 'A'; gA = []; gB = [];
             for(let i=2; i<lines.length; i++){
                 const row = lines[i].trim();
-                if(!row) {
-                    if(lines[i+2] && lines[i+2].includes(',')) {
-                        mode = 'B'; nameB = lines[i+2].split(',')[0].replace(/"/g,''); i+=3;
-                    }
-                    continue;
-                }
+                if(!row) { if(lines[i+2] && lines[i+2].includes(',')) { mode = 'B'; nameB = lines[i+2].split(',')[0].replace(/"/g,''); i+=3; } continue; }
                 const c = row.split(',').map(v => v.replace(/"/g,''));
-                const p = { name:c[0], job:c[1], kill:+c[2], assist:+c[3], resource:+c[4], pDmg:+c[5], bDmg:+c[6], heal:+c[7], takeDmg:+c[8], death:+c[9], spring:+c[10], bone:+c[11]||0 };
+                const p = { name:c[0], job:c[1], kill:+c[2], assist:+c[3], pDmg:+c[5], bDmg:+c[6], heal:+c[7], takeDmg:+c[8], death:+c[9], spring:+c[10] };
                 if(mode==='A') gA.push(p); else gB.push(p);
             }
-            full = [...gA, ...gB];
-            saveThisHistory(); // 自動儲存歷史
-            renderAll();
+            full = [...gA, ...gB]; currentJobFilter = "all";
+            document.getElementById('save-btn').style.display = 'block';
+            renderFilterButtons(); renderReport();
         };
         reader.readAsText(file);
     }
 
-    async function saveThisHistory() {
-        const dt = document.getElementById('match-date').value + " " + document.getElementById('match-time').value;
-        const id = "rep_" + Date.now();
-        await fetch(`${WORKER_URL}/api/save-history`, {
-            method:'POST', body: JSON.stringify({ id, fullDateTime: dt, nameA, nameB, rawData: {nameA, nameB, gA, gB} })
-        });
-        loadHistory();
-    }
-
-    // --- 3. 渲染與排序 ---
-    function renderAll() {
-        document.getElementById('report-view').style.display = 'block';
-        document.getElementById('name-a').innerText = nameA;
-        document.getElementById('name-b').innerText = nameB;
-        document.getElementById('meta-text').innerText = `${nameA} VS ${nameB} (${document.getElementById('match-date').value})`;
-
-        const avg = full.reduce((a,b)=>a+b.pDmg,0)/full.length;
-        renderFilterButtons();
-
-        ['a','b'].forEach(t => {
-            const data = (t==='a'?gA:gB).filter(p => filterJob==='all' || p.job === filterJob);
-            document.querySelector(`#table-${t} .th-row`).innerHTML = columns.map(c => `<th onclick="sortT('${t}','${c.k}')">${c.l}</th>`).join('');
-            document.querySelector(`#table-${t} tbody`).innerHTML = data.map(p => `
-                <tr onclick="openModal('${p.name}')">
-                    <td>${p.name} ${p.pDmg > avg*3 ? '🔥':''}</td>
-                    <td><span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span></td>
-                    <td>${p.kill}</td><td>${p.assist}</td><td>${p.resource}</td>
-                    <td>${(p.pDmg/10000).toFixed(1)}w</td><td>${(p.bDmg/10000).toFixed(1)}w</td>
-                    <td>${(p.heal/10000).toFixed(1)}w</td><td>${(p.takeDmg/10000).toFixed(1)}w</td>
-                    <td>${p.death}</td><td>${p.spring}</td><td>${p.bone}</td>
-                </tr>
-            `).join('');
-            renderHigh(t, (t==='a'?gA:gB));
-        });
-    }
-
-    function sortT(t, k) { (t==='a'?gA:gB).sort((a,b)=>b[k]-a[k]); renderAll(); }
     function renderFilterButtons() {
-        const jobs = ['all', ...new Set(full.map(p => p.job))];
-        document.getElementById('job-filters').innerHTML = jobs.map(j => `
-            <button class="btn ${filterJob===j?'btn-primary':'btn-outline'}" onclick="setFilter('${j}')">${j==='all'?'全職':j}</button>
-        `).join('');
+        const jobs = ["all", ...new Set(full.map(p => p.job))];
+        document.getElementById('job-filters').innerHTML = jobs.map(j => `<button class="filter-btn ${currentJobFilter===j?'active':''}" onclick="setJobFilter('${j}')">${j==='all'?'全部':j}</button>`).join('');
     }
-    function setFilter(j){ filterJob = j; renderAll(); }
+    function setJobFilter(j) { currentJobFilter = j; renderFilterButtons(); renderReport(); }
+    function sortBy(team, key) { (team==='a'?gA:gB).sort((a,b)=>b[key]-a[key]); renderReport(); }
 
-    function renderHigh(t, data) {
-        const top = (k) => [...data].sort((a,b)=>b[k]-a[k])[0];
-        const items = [ {l:'輸出',k:'pDmg'}, {l:'治療',k:'heal'}, {l:'承傷',k:'takeDmg'}, {l:'助攻',k:'assist'}, {l:'資源',k:'resource'} ];
-        document.getElementById(`high-${t}`).innerHTML = items.map(i => `
-            <div class="h-card"><div style="font-size:10px;color:#999;">${i.l}最高</div><b>${top(i.k)?top(i.k).name:'-'}</b></div>
-        `).join('');
+    function renderReport() {
+        document.getElementById('report-view').style.display = 'block';
+        document.getElementById('name-a').innerText = "幫會: " + nameA;
+        document.getElementById('name-b').innerText = "幫會: " + nameB;
+        renderMVPs('a', gA); renderMVPs('b', gB);
+        const avg = full.reduce((a,b)=>a+b.pDmg,0)/full.length;
+        ['a','b'].forEach(t => {
+            const data = (t==='a'?gA:gB).filter(p => currentJobFilter==='all' || p.job===currentJobFilter);
+            document.getElementById('th-'+t).innerHTML = cols.map(c => `<th onclick="sortBy('${t}', '${c.k}')">${c.l}</th>`).join('');
+            document.getElementById('tbody-'+t).innerHTML = data.map(p => `
+                <tr onclick="openModal('${p.name}')" style="cursor:pointer;">
+                    <td>${p.name} ${p.pDmg > avg*2.5 ? '🔥':''}</td>
+                    <td><span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span></td>
+                    <td>${p.kill}</td><td>${p.assist}</td><td>${(p.pDmg/10000).toFixed(1)}w</td><td>${(p.bDmg/10000).toFixed(1)}w</td>
+                    <td>${(p.heal/10000).toFixed(1)}w</td><td>${(p.takeDmg/10000).toFixed(1)}w</td><td>${p.death}</td><td>${p.spring}</td>
+                </tr>`).join('');
+        });
     }
 
-    // --- 4. 雷達圖與單獨更新邏輯 ---
+    function renderMVPs(team, players) {
+        document.getElementById('mvp-' + team).innerHTML = metrics.map(m => {
+            const top = [...players].sort((a,b) => b[m.k] - a[m.k])[0];
+            let val = top[m.k]; if(val >= 10000) val = (val/10000).toFixed(1) + 'w';
+            return `<div class="mvp-card"><div class="mvp-label">${m.l}</div><div class="mvp-name">${top.name}</div><div class="mvp-val">${val}</div></div>`;
+        }).join('');
+    }
+
+    async function saveHistoryToDB() {
+        const dt = document.getElementById('match-date').value;
+        const id = "rep_" + Date.now();
+        await fetch(WORKER_URL + "/api/save-history", { method:'POST', body: JSON.stringify({ id, fullDateTime: dt, nameA, nameB, rawData: {nameA, nameB, gA, gB} }) });
+        alert("儲存成功"); 
+        generateShareLinks(id);
+        loadHistoryList();
+    }
+
+    async function loadHistoryList() {
+        const res = await fetch(WORKER_URL + "/api/histories");
+        const data = await res.json();
+        document.getElementById('hist-items').innerHTML = data.map(h => `
+            <div class="hist-card" onclick="viewHistory('${h.id}')">
+                ${!isViewMode ? `<button class="del-btn" onclick="deleteHist(event, '${h.id}')">×</button>` : ''}
+                <b>${h.date}</b><br>${h.guild_a} VS ${h.guild_b}
+            </div>`).join('');
+    }
+
+    async function viewHistory(id) {
+        const res = await fetch(WORKER_URL + "/api/histories");
+        const list = await res.json();
+        const hist = list.find(x => x.id === id);
+        if(hist) {
+            const d = JSON.parse(hist.raw_json);
+            gA = d.gA; gB = d.gB; nameA = d.nameA; nameB = d.nameB; full = [...gA, ...gB];
+            currentJobFilter = "all"; switchPage('report'); renderFilterButtons(); renderReport();
+            generateShareLinks(id);
+        }
+    }
+
+    async function deleteHist(e, id) { e.stopPropagation(); if(confirm("確定刪除？")) { await fetch(WORKER_URL + "/api/delete-history", { method:'POST', body: JSON.stringify({ id }) }); loadHistoryList(); } }
+
+    async function fetchMembers() {
+        const res = await fetch(WORKER_URL + "/api/members");
+        const data = await res.json();
+        document.querySelector('#db-table tbody').innerHTML = data.map(m => `
+            <tr>
+                <td><b>${m.id}</b></td><td>${m.job}</td><td>${m.matches}</td><td>${(m.total_dmg/10000).toFixed(0)}w</td><td>${m.note||''}</td>
+                ${!isViewMode ? `<td><button onclick="renameP('${m.id}')">更名</button></td>` : ''}
+            </tr>`).join('');
+    }
+
     function openModal(n) {
         focusPlayer = full.find(x => x.name === n);
         document.getElementById('modal').style.display='flex';
         document.getElementById('m-name').innerText = focusPlayer.name;
         document.getElementById('m-job-box').innerHTML = `<span class="job-tag" style="background:var(--color-${focusPlayer.job})">${focusPlayer.job}</span>`;
-        
-        // 雷達圖動態計算 (全場對比)
-        const stats = {};
-        columns.slice(2).forEach(c => {
-            const vals = full.map(x => x[c.k]);
-            stats[c.k] = { max: Math.max(...vals), min: Math.min(...vals) };
-        });
-        const getS = (k, v) => {
-            const {max, min} = stats[k];
-            let s = max===min ? 50 : ((v-min)/(max-min))*100;
-            return k==='death'?100-s:s;
-        };
-
-        let cfg;
-        if(['素問','潮光'].includes(focusPlayer.job)) cfg = { l:['助攻','資源','治療','承受','重傷','化羽'], d:['assist','resource','heal','takeDmg','death','spring'] };
-        else if(focusPlayer.job === '九靈') cfg = { l:['擊敗','助攻','資源','對人','對建','承受','重傷','焚骨'], d:['kill','assist','resource','pDmg','bDmg','takeDmg','death','bone'] };
-        else cfg = { l:['擊敗','助攻','資源','對人','對建','承受','重傷'], d:['kill','assist','resource','pDmg','bDmg','takeDmg','death'] };
-
+        document.getElementById('m-note').value = focusPlayer.note || ""; 
+        const stats = {}; radarCols.forEach(c => { const vals = full.map(x => x[c.k]); stats[c.k] = { max: Math.max(...vals), min: Math.min(...vals) }; });
+        const getS = (k, v) => (stats[k].max === stats[k].min) ? 50 : ((v - stats[k].min) / (stats[k].max - stats[k].min)) * 100;
         if(chart) chart.destroy();
         chart = new Chart(document.getElementById('radarChart'), {
             type:'radar',
-            data:{ labels:cfg.l, datasets:[{ data:cfg.d.map(k=>getS(k,focusPlayer[k])), backgroundColor:'rgba(142,154,175,0.2)', borderColor:'#8e9aaf' }] },
-            options:{ scales:{ r:{ min:0, max:100, ticks:{display:false} } } }
+            data:{ labels: radarCols.map(c => c.l), datasets:[{ label:'個人表現', data: radarCols.map(c => getS(c.k, focusPlayer[c.k])), backgroundColor:'rgba(142,154,175,0.2)', borderColor:'#8e9aaf' }] },
+            options:{ scales:{ r:{ min:0, max:100, ticks:{display:false} } },
+                plugins: { tooltip: { callbacks: { label: function(ctx) {
+                    const key = radarCols[ctx.dataIndex].k; const val = focusPlayer[key];
+                    return ctx.label + ': ' + (val >= 10000 ? (val/10000).toFixed(1) + 'w' : val);
+                } } } }
+            }
         });
     }
 
-    // --- 5. 數據庫操作 (修復 Match+1 問題) ---
-    async function saveNoteOnly() {
-        const note = document.getElementById('m-note').value;
-        await fetch(`${WORKER_URL}/api/update-note`, {
-            method:'POST', body: JSON.stringify({ id: focusPlayer.name, note })
-        });
-        alert('評語已更新（不計入場次）');
-        closeModal();
-    }
-
-    async function saveWithMatch() {
-        await fetch(`${WORKER_URL}/api/save-batch`, {
-            method:'POST', body: JSON.stringify({ players: [{name:focusPlayer.name, job:focusPlayer.job, pDmg:focusPlayer.pDmg}] })
-        });
-        alert('同步成功，場次 +1');
-        closeModal();
-    }
-
-    async function batchSave(guild) {
-        const list = (guild==='A'?gA:gB);
-        if(!confirm(`將 ${list.length} 名成員批量場次 +1？`)) return;
-        await fetch(`${WORKER_URL}/api/save-batch`, {
-            method:'POST', body: JSON.stringify({ players: list.map(p=>({name:p.name, job:p.job, pDmg:p.pDmg})) })
-        });
-        alert('批量同步完成');
-    }
-
-    // --- 6. 其他 UI 功能 ---
-    async function fetchMembers() {
-        const res = await fetch(`${WORKER_URL}/api/members`);
-        const data = await res.json();
-        document.querySelector('#db-table tbody').innerHTML = data.map(m => `
-            <tr>
-                <td onclick="renameP('${m.id}')" style="color:var(--accent); cursor:pointer;"><b>${m.id}</b></td>
-                <td>${m.job}</td><td>${m.matches}</td><td>${m.note||''}</td>
-                <td><button class="btn btn-outline" onclick="renameP('${m.id}')">更名</button></td>
-            </tr>
-        `).join('');
-    }
-
-    async function loadHistory() {
-        const res = await fetch(`${WORKER_URL}/api/histories`);
-        const data = await res.json();
-        document.getElementById('hist-items').innerHTML = data.map(h => `
-            <div class="hist-card" onclick="loadHistReport('${h.id}')">
-                <b>${h.date}</b><br>${h.guild_a}
-            </div>
-        `).join('');
-    }
-
-    function exportImage() {
-        html2canvas(document.getElementById('capture-area')).then(canvas => {
-            const a = document.createElement('a'); a.download = '戰報.png'; a.href = canvas.toDataURL(); a.click();
-        });
-    }
+    async function saveNoteOnly() { await fetch(WORKER_URL + "/api/update-note", { method:'POST', body: JSON.stringify({ id: focusPlayer.name, note: document.getElementById('m-note').value }) }); alert("已更新"); closeModal(); }
     function closeModal() { document.getElementById('modal').style.display='none'; }
-    function renameP(old) {
-        const n = prompt("新名字:", old);
-        if(n && n!==old) fetch(`${WORKER_URL}/api/rename`,{method:'POST', body:JSON.stringify({oldId:old, newId:n})}).then(()=>fetchMembers());
-    }
+    function exportImage() { html2canvas(document.getElementById('capture-area')).then(c => { const a = document.createElement('a'); a.download='戰報.png'; a.href=c.toDataURL(); a.click(); }); }
+    function renameP(old) { const n = prompt("新名字:", old); if(n) fetch(WORKER_URL + "/api/rename", { method:'POST', body: JSON.stringify({oldId:old, newId:n}) }).then(()=>fetchMembers()); }
 </script>
 
 </body></html>
