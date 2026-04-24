@@ -273,6 +273,13 @@
             border-radius: 5px;
         }
 
+        #radarChart,
+        #memberRadarChart {
+            width: 100% !important;
+            height: auto !important;
+            max-height: 300px;
+        }
+
         #modal,
         #member-modal,
         #auth-modal,
@@ -526,28 +533,26 @@
             #radarChart,
             #memberRadarChart {
                 width: 100% !important;
-                max-height: 280px;
-                display: block;
-                /* ← 消除 inline 元素底部空隙 */
+                height: auto !important;
+                max-height: 300px;
             }
-        }
 
-        .controls-row {
-            flex-direction: column;
-            gap: 10px;
-        }
+            .controls-row {
+                flex-direction: column;
+                gap: 10px;
+            }
 
-        .search-input,
-        .select-input {
-            width: 100% !important;
-        }
+            .search-input,
+            .select-input {
+                width: 100% !important;
+            }
 
-        .close-modal-btn {
-            top: 10px;
-            right: 15px;
-            font-size: 28px;
-            /* 手機版稍微大一點好點擊 */
-        }
+            .close-modal-btn {
+                top: 10px;
+                right: 15px;
+                font-size: 28px;
+                /* 手機版稍微大一點好點擊 */
+            }
         }
 
         /* 彈窗關閉按鈕樣式 */
@@ -1584,20 +1589,31 @@
             const newCanvas = document.createElement('canvas');
             newCanvas.id = 'radarChart';
             oldCanvas.parentNode.replaceChild(newCanvas, oldCanvas);
+            newCanvas.style.imageRendering = 'crisp-edges'; // ← 加這行
 
-            setTimeout(() => {
-                chart = new Chart(newCanvas, {
-                    type: 'radar',
-                    data: { ... },
-                    options: {
-                        animation: false,          // ← 關掉動畫，消除抖動
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        devicePixelRatio: window.devicePixelRatio || 2,  // ← 修復模糊
-                        scales: { r: { min: 0, max: 100, ticks: { display: false } } }
-                    }
-                });
-            }, 100);  // ← 等 modal 展開後再畫
+            chart = new Chart(newCanvas, {
+                type: 'radar',
+                data: {
+                    labels: rCols.map(c => c.l),
+                    datasets: [{
+                        label: '單場職業內分佈',
+                        data: rCols.map(c => {
+                            const max = stats[c.k].max;
+                            const min = stats[c.k].min;
+                            const val = focusPlayer[c.k];
+                            if (c.k === 'death') return ((max - val) / (max - min || 1)) * 100;
+                            return ((val - min) / (max - min || 1)) * 100;
+                        }),
+                        backgroundColor: 'rgba(142,154,175,0.2)',
+                        borderColor: '#8e9aaf'
+                    }]
+                },
+                options: {
+                    animation: false,                              // ← 新增
+                    devicePixelRatio: window.devicePixelRatio || 2, // ← 新增
+                    scales: { r: { min: 0, max: 100, ticks: { display: false } } }
+                }
+            });
         }
 
         // =====================================================
@@ -1662,20 +1678,33 @@
             const newMCanvas = document.createElement('canvas');
             newMCanvas.id = 'memberRadarChart';
             oldMCanvas.parentNode.replaceChild(newMCanvas, oldMCanvas);
+            newMCanvas.style.imageRendering = 'crisp-edges'; // ← 加這行
 
-            setTimeout(() => {
-                memberChart = new Chart(newMCanvas, {
-                    type: 'radar',
-                    data: { ... },
-                    options: {
-                        animation: false,
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        devicePixelRatio: window.devicePixelRatio || 2,
-                        scales: { r: { min: 0, max: 100, ticks: { display: false } } }
-                    }
-                });
-            }, 100);
+            memberChart = new Chart(newMCanvas, {
+                type: 'radar',
+                data: {
+                    labels: rCols.map(c => c.l),
+                    datasets: [{
+                        label: '綜合能力分佈',
+                        data: rCols.map(c => {
+                            const max = globalStats[c.k].max;
+                            const min = globalStats[c.k].min;
+                            const val = avgStats[c.k];
+                            if (c.k === 'death') return ((max - val) / (max - min || 1)) * 100;
+                            return ((val - min) / (max - min || 1)) * 100;
+                        }),
+                        backgroundColor: 'rgba(251,192,45,0.2)',
+                        borderColor: '#fbc02d'
+                    }]
+                },
+                options: {
+                    animation: false,
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    devicePixelRatio: window.devicePixelRatio || 2,
+                    scales: { r: { min: 0, max: 100, ticks: { display: false } } }
+                }
+            });
         }
 
         // =====================================================
