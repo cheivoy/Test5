@@ -1757,47 +1757,43 @@
             const filteredHistories = allHistories.filter(h => isWithinDays(h.date, timeFilter));
             totalReportsInTimeframe = filteredHistories.length;
 
-            let dbRaw = [];
-            const infoMap = {};
+            // ⭐ 只從後端拿備註/標籤，不再依賴後端的累計數字
+            let noteMap = {};
             const jobSet = new Set();
 
-            // ⭐⭐⭐ 這段是重點（已整合 share 模式）
-            if (shareId) {
-                let apiUrl = WORKER_URL + "/api/members?t=" + Date.now() + "&share=" + shareId;
+            try {
+                let dbRaw = [];
 
-                const res = await fetch(apiUrl, {
-                    cache: "no-store"
+                if (shareId) {
+                    const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now() + "&share=" + shareId, { cache: "no-store" });
+                    dbRaw = await res.json();
+                } else if (storageMode === 'cloud' && currentUser) {
+                    const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now(), {
+                        cache: "no-store",
+                        headers: { 'Authorization': 'Bearer ' + currentUser.token }
+                    });
+                    dbRaw = await res.json();
+                } else {
+                    const membersMap = getLocalMembers();
+                    dbRaw = Object.values(membersMap);
+                }
+
+                dbRaw.forEach(m => {
+                    let noteStr = "", tagStr = "none";
+                    try { const p = JSON.parse(m.note); noteStr = p.text || ""; tagStr = p.tag || "none"; }
+                    catch (e) { noteStr = m.note || ""; }
+                    noteMap[m.id] = { note: noteStr, tag: tagStr, lastJob: m.last_job };
+                    if (m.last_job) jobSet.add(m.last_job);
                 });
-
-                dbRaw = await res.json();
-            }
-            else if (storageMode === 'cloud' && currentUser) {
-                const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now(), {
-                    cache: "no-store",
-                    headers: { 'Authorization': 'Bearer ' + currentUser.token }
-                });
-
-                dbRaw = await res.json();
-            }
-            else {
-                const membersMap = getLocalMembers();
-                dbRaw = Object.values(membersMap);
+            } catch (e) {
+                console.error("載入成員備註失敗", e);
             }
 
-
-            dbRaw.forEach(m => {
-                let noteStr = "", tagStr = "none";
-                try { const p = JSON.parse(m.note); noteStr = p.text || ""; tagStr = p.tag || "none"; }
-                catch (e) { noteStr = m.note || ""; tagStr = "none"; }
-                infoMap[m.id] = { note: noteStr, tag: tagStr, lastJob: m.last_job };
-                if (m.last_job) jobSet.add(m.last_job);
-            });
-
+            // ⭐ 職業下拉選單：先從備註表拿，之後 histories 會補充
             const jobSelect = document.getElementById('db-job');
             const currJob = jobSelect.value;
-            jobSelect.innerHTML = '<option value="all">全部職業</option>' + [...jobSet].map(j => `<option value="${j}">${j}</option>`).join('');
-            jobSelect.value = currJob || 'all';
 
+            // ⭐ 從 histories 前端即時計算累計（這段邏輯和原本一樣）
             const map = {};
             filteredHistories.forEach(h => {
                 try {
@@ -1820,6 +1816,7 @@
                         map[p.name].counts[type] = (map[p.name].counts[type] || 0) + 1;
                         map[p.name].histories.push({ date: h.date, title: aName, stats: p, type: type, session: session });
                         map[p.name].last_job = p.job;
+                        jobSet.add(p.job);
 
                         cols.slice(2).forEach(c => {
                             map[p.name].aggr[c.k] = (map[p.name].aggr[c.k] || 0) + (p[c.k] || 0);
@@ -1828,13 +1825,19 @@
                 } catch (e) { }
             });
 
+            // ⭐ 更新職業下拉選單（合併 noteMap 和 histories 的職業）
+            jobSelect.innerHTML = '<option value="all">全部職業</option>' + [...jobSet].map(j => `<option value="${j}">${j}</option>`).join('');
+            jobSelect.value = currJob || 'all';
+
+            // ⭐ 組合最終資料
             dbMembersMap = Object.values(map).map(m => {
-                m.note = infoMap[m.id]?.note || "";
-                m.tag = infoMap[m.id]?.tag || "none";
-                m.last_job = m.last_job || infoMap[m.id]?.lastJob || "未知";
+                m.note = noteMap[m.id]?.note || "";
+                m.tag = noteMap[m.id]?.tag || "none";
+                m.last_job = m.last_job || noteMap[m.id]?.lastJob || "未知";
                 m.rate = totalReportsInTimeframe > 0 ? (m.matches / totalReportsInTimeframe * 100) : 0;
                 return m;
             });
+
             renderDbTable();
         }
 
