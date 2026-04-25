@@ -855,9 +855,10 @@
                 <input type="password" id="login-password" class="search-input" style="width:100%; margin-bottom:16px;"
                     placeholder="輸入密碼">
                 <button class="btn btn-primary" style="width:100%;" onclick="doLogin()">登入</button>
-                <div style="margin-top:10px; font-size:12px; text-align:center; color:#aaa;">
-                    忘記密碼？請聯絡 🍒 櫻桃白蘭地協助重置<br>
-                    DC：cherrycywong </div>
+                <div
+                    style="margin-top:12px; padding-top:12px; border-top:1px solid #f0f0f0; font-size:11px; text-align:center; color:#c0c5ce;">
+                    <span style="cursor:pointer; color:#8e9aaf;" onclick="showAuthTab('change')">重置密碼</span>
+                </div>
             </div>
             <div id="auth-form-register" style="display:none;">
                 <label style="font-size:13px; font-weight:bold;">帳號（英數字）</label>
@@ -870,6 +871,21 @@
                 <input type="text" id="reg-guild" class="search-input" style="width:100%; margin-bottom:16px;"
                     placeholder="你的幫會名稱">
                 <button class="btn btn-primary" style="width:100%;" onclick="doRegister()">建立帳號</button>
+            </div>
+            <div id="auth-form-change" style="display:none;">
+                <label style="font-size:13px; font-weight:bold;">帳號</label>
+                <input type="text" id="change-username" class="search-input" style="width:100%; margin-bottom:10px;"
+                    placeholder="輸入帳號">
+                <label style="font-size:13px; font-weight:bold;">註冊時的幫會名稱</label>
+                <input type="text" id="change-guild" class="search-input" style="width:100%; margin-bottom:10px;"
+                    placeholder="輸入幫會名稱驗證身份">
+                <label style="font-size:13px; font-weight:bold;">新密碼</label>
+                <input type="password" id="change-newpassword" class="search-input"
+                    style="width:100%; margin-bottom:16px;" placeholder="輸入新密碼">
+                <button class="btn btn-primary" style="width:100%;" onclick="doChangePassword()">確認修改</button>
+                <div style="margin-top:10px; font-size:11px; text-align:center; color:#c0c5ce;">
+                    忘記帳號？聯絡 🍒 櫻桃白蘭地 · DC：cherrycywong
+                </div>
             </div>
             <div id="auth-msg" style="margin-top:10px; font-size:13px; color:var(--danger);"></div>
         </div>
@@ -969,6 +985,7 @@
         function showAuthTab(tab) {
             document.getElementById('auth-form-login').style.display = tab === 'login' ? '' : 'none';
             document.getElementById('auth-form-register').style.display = tab === 'register' ? '' : 'none';
+            document.getElementById('auth-form-change').style.display = tab === 'change' ? '' : 'none';
             document.getElementById('tab-login').className = tab === 'login' ? 'btn btn-primary' : 'btn btn-outline';
             document.getElementById('tab-register').className = tab === 'register' ? 'btn btn-primary' : 'btn btn-outline';
         }
@@ -989,6 +1006,26 @@
                 if (!res.ok) { msgEl.textContent = data.error || '註冊失敗'; return; }
                 msgEl.style.color = 'green';
                 msgEl.textContent = '註冊成功！請登入。';
+                showAuthTab('login');
+            } catch (e) { msgEl.textContent = '連線失敗: ' + e.message; }
+        }
+
+        async function doChangePassword() {
+            const username = document.getElementById('change-username').value.trim();
+            const guild = document.getElementById('change-guild').value.trim();
+            const newPassword = document.getElementById('change-newpassword').value.trim();
+            const msgEl = document.getElementById('auth-msg');
+            if (!username || !guild || !newPassword) { msgEl.textContent = '所有欄位不能為空'; return; }
+            try {
+                const res = await fetch(WORKER_URL + "/api/change-password", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, guild, newPassword })
+                });
+                const data = await res.json();
+                if (!res.ok) { msgEl.textContent = data.error; return; }
+                msgEl.style.color = 'green';
+                msgEl.textContent = '密碼修改成功！請重新登入。';
                 showAuthTab('login');
             } catch (e) { msgEl.textContent = '連線失敗: ' + e.message; }
         }
