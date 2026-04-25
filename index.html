@@ -853,6 +853,9 @@
                 <input type="password" id="login-password" class="search-input" style="width:100%; margin-bottom:16px;"
                     placeholder="輸入密碼">
                 <button class="btn btn-primary" style="width:100%;" onclick="doLogin()">登入</button>
+                <div style="margin-top:10px; font-size:12px; text-align:center; color:#aaa;">
+                    忘記密碼？請聯絡 🍒 櫻桃白蘭地協助重置<br>
+                    DC：cherrycywong </div>
             </div>
             <div id="auth-form-register" style="display:none;">
                 <label style="font-size:13px; font-weight:bold;">帳號（英數字）</label>
@@ -891,7 +894,7 @@
         const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev";
 
         const metrics = [
-            { l: '人頭狗', k: 'kill' }, { l: '傷害狗', k: 'pDmg' }, { l: '拆遷大隊', k: 'bDmg' },
+            { l: '人頭汪', k: 'kill' }, { l: '傷害汪', k: 'pDmg' }, { l: '拆家哈士奇', k: 'bDmg' },
             { l: '媽媽', k: 'heal' }, { l: '快樂助攻', k: 'assist' }, { l: '化羽大帝', k: 'spring' },
             { l: '對啦我最會抗', k: 'takeDmg' }, { l: '頂級黑奴', k: 'resource' }, { l: '起來重睡', k: 'death' }
         ];
@@ -938,23 +941,16 @@
             const shareNote = document.getElementById('share-local-note');
 
             if (storageMode === 'cloud' && currentUser) {
-                if (banner) {
-                    banner.className = 'cloud';
-                    banner.textContent = `☁️ 雲端模式 — ${currentUser.username}（${currentUser.guild || ''}）`;
-                }
+                if (banner) { banner.className = 'cloud'; banner.textContent = `☁️ 雲端模式 — ${currentUser.username}（${currentUser.guild || ''}）`; }
                 if (authBtn) authBtn.style.display = 'none';
                 if (logoutBtn) logoutBtn.style.display = '';
-                if (syncBtn) syncBtn.style.display = 'none';
+                if (syncBtn && !isViewMode) syncBtn.style.display = '';  // ← 修復：雲端模式才顯示
                 if (shareNote) shareNote.style.display = 'none';
             } else {
-                if (banner) {
-                    banner.className = 'local';
-                    banner.textContent = '💾 本地模式（未登入）';
-                }
+                if (banner) { banner.className = 'local'; banner.textContent = '💾 本地模式（未登入）'; }
                 if (authBtn) authBtn.style.display = '';
                 if (logoutBtn) logoutBtn.style.display = 'none';
-                // 加上 syncBtn 存在的防呆判斷
-                if (syncBtn && !isViewMode) syncBtn.style.display = '';
+                if (syncBtn) syncBtn.style.display = 'none';  // ← 本地模式隱藏
                 if (shareNote) shareNote.style.display = '';
             }
         }
@@ -1019,6 +1015,13 @@
                 storageMode = 'cloud';
                 closeModal('auth-modal');
                 updateModeBanner();
+                // ⭐ 登入後偵測本地資料
+                const localHists = getLocalHistories();
+                if (localHists.length > 0) {
+                    if (confirm(`⚠️ 偵測到本地有 ${localHists.length} 場戰報尚未同步！\n是否立即同步到雲端？\n（取消可稍後手動點「☁️ 同步到雲端」）`)) {
+                        await syncLocalToCloud();
+                    }
+                }
                 await fetchAllHistories();
                 if (document.getElementById('page-db').style.display !== 'none') loadDbData();
             } catch (e) { msgEl.textContent = '連線失敗: ' + e.message; }
@@ -2046,7 +2049,18 @@
         };
 
     </script>
-
+    <footer style="
+    text-align: center;
+    padding: 20px;
+    font-size: 12px;
+    color: #aaa;
+    border-top: 1px solid var(--border);
+    background: white;
+    margin-top: 20px;
+">
+        有問題可聯絡 🍒 櫻桃白蘭地<br>
+        DC：cherrycywong
+    </footer>
 </body>
 
 </html>
