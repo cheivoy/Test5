@@ -1,10 +1,8 @@
 <html lang="zh-TW"><head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NSH 戰績系統 Pro v7.0</title>
+    <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-    <!-- ✅ 樣式獨立成一個檔案，方便修改外觀 -->
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -21,32 +19,42 @@
         <div id="mode-banner" class="local">💾 本地模式（未登入）</div>
 
         <div style="margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn btn-outline" id="auth-btn" onclick="openAuthModal()" style="flex:1; font-size:12px;">🔑
-                登入 / 註冊</button>
+            <button class="btn btn-outline" id="auth-btn" onclick="openAuthModal()" style="flex:1; font-size:12px;">🔑 登入 / 註冊</button>
             <button class="btn btn-outline" id="logout-btn" onclick="logoutUser()" style="flex:1; font-size:12px; display:none;">🚪 登出</button>
-            <button class="btn btn-outline admin-only" id="sync-btn" onclick="syncLocalToCloud()" style="flex:1; font-size:12px; display:none; background:#e8f5e9; border-color:#a5d6a7; color:#2e7d32;">☁️
-                同步到雲端</button>
+            <button class="btn btn-outline admin-only" id="sync-btn" onclick="syncLocalToCloud()" style="flex:1; font-size:12px; display:none; background:#e8f5e9; border-color:#a5d6a7; color:#2e7d32;">☁️ 同步到雲端</button>
         </div>
 
         <div class="nav-item active" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
         <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員檔案室</div>
 
         <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+            <!-- 歷史記錄搜索區域 -->
             <div class="controls-row">
                 <input type="text" id="hist-search" class="search-input" placeholder="搜索幫會..." onkeyup="renderHistoryList()">
             </div>
             <div class="controls-row">
-                <select id="hist-time" class="select-input" style="flex:1;" onchange="renderHistoryList()">
+                <!-- 時間篩選：改為快捷+自訂日期範圍 -->
+                <select id="hist-time" class="select-input" style="flex:1;" onchange="onHistTimeChange()">
                     <option value="all">全部時間</option>
                     <option value="7">最近一周</option>
                     <option value="30">最近一個月</option>
                     <option value="90">最近三個月</option>
+                    <option value="365">最近一年</option>
+                    <option value="custom">自訂範圍...</option>
                 </select>
                 <select id="hist-winloss" class="select-input" style="flex:1;" onchange="renderHistoryList()">
                     <option value="all">勝負</option>
                     <option value="win">勝利</option>
                     <option value="loss">失敗</option>
                 </select>
+            </div>
+            <!-- 自訂日期範圍（預設隱藏） -->
+            <div id="hist-date-range" style="display:none; gap:6px; margin-bottom:6px; flex-wrap:wrap;">
+                <input type="date" id="hist-date-from" class="select-input" style="flex:1; min-width:110px;" onchange="renderHistoryList()" title="開始日期">
+                <span style="line-height:32px; color:#aaa; font-size:12px;">至</span>
+                <input type="date" id="hist-date-to" class="select-input" style="flex:1; min-width:110px;" onchange="renderHistoryList()" title="結束日期">
+            </div>
+            <div class="controls-row">
                 <select id="hist-type" class="select-input" style="flex:1;" onchange="renderHistoryList()">
                     <option value="all">類型</option>
                     <option value="幫戰">幫戰</option>
@@ -64,8 +72,7 @@
         <div class="container" id="page-report">
             <div style="background:#fff; padding:15px; border-radius:12px; margin-bottom:20px; display:flex; gap:12px; align-items:center; border: 1px solid var(--border); flex-wrap: wrap;">
                 <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
-                <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入
-                    CSV</button>
+                <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
                 <input type="text" id="custom-title" placeholder="戰報標題" style="padding:7px; border:1px solid #ddd; border-radius:5px; width:220px;">
                 <input type="date" id="match-date" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
                 <select id="match-session" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
@@ -88,6 +95,10 @@
                 <p style="margin:0 0 10px 0; font-weight:bold; font-size:13px;">🔗 戰報分享鏈結：</p>
                 <button class="btn btn-outline" onclick="copyShareLink('view')">📋 複製幫眾版 (唯讀)</button>
                 <button class="btn btn-outline admin-only" onclick="copyShareLink('admin')">📋 複製管理版 (可編輯)</button>
+                <!--
+                測試中，暫時隱藏
+                <button class="btn btn-outline admin-only" onclick="openShareTransfer()" style="background:#fff8e1; border-color:#ffd54f; color:#f57c00;">🔀 共享給其他帳號</button>
+                -->
                 <div id="share-local-note" style="margin-top:8px; font-size:12px; color:#e65100; display:none;">
                     ⚠️ 目前為本地模式，分享鏈結需先同步到雲端才能讓他人開啟。
                 </div>
@@ -110,12 +121,7 @@
                 </div>
                 <div class="section-body" id="sec-table-a">
                     <div class="table-card" style="overflow-x: auto;">
-                        <table>
-                            <thead>
-                                <tr id="th-a"></tr>
-                            </thead>
-                            <tbody id="tbody-a"></tbody>
-                        </table>
+                        <table><thead><tr id="th-a"></tr></thead><tbody id="tbody-a"></tbody></table>
                     </div>
                 </div>
 
@@ -133,19 +139,22 @@
                 </div>
                 <div class="section-body" id="sec-table-b">
                     <div class="table-card" style="overflow-x: auto;">
-                        <table>
-                            <thead>
-                                <tr id="th-b"></tr>
-                            </thead>
-                            <tbody id="tbody-b"></tbody>
-                        </table>
+                        <table><thead><tr id="th-b"></tr></thead><tbody id="tbody-b"></tbody></table>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="container" id="page-db" style="display:none;">
-            <h3>幫會成員檔案室</h3>
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
+                <h3 style="margin:0;">幫會成員檔案室</h3>
+                <!-- 成員同步按鈕 -->
+                <button class="btn admin-only" id="member-sync-btn" onclick="syncMemberData()"
+                    style="background:#e3f2fd; border:1px solid #90caf9; color:#1565c0; font-size:12px; padding:6px 14px; border-radius:8px; display:none;">
+                    🔄 同步成員資料
+                </button>
+                <span id="db-last-sync" style="font-size:11px; color:#aaa;"></span>
+            </div>
             <div style="margin-bottom: 15px; display:flex; gap:10px; flex-wrap: wrap;">
                 <input type="text" id="db-search" class="search-input" placeholder="搜索成員 ID..." onkeyup="renderDbTable()">
                 <select id="db-time" class="select-input" onchange="loadDbData()">
@@ -153,6 +162,7 @@
                     <option value="7">最近一周</option>
                     <option value="30">最近一個月</option>
                     <option value="90">最近三個月</option>
+                    <option value="365">最近一年</option>
                 </select>
                 <select id="db-job" class="select-input" onchange="renderDbTable()">
                     <option value="all">全部職業</option>
@@ -193,8 +203,7 @@
             <div style="flex:1;">
                 <h2 id="m-name" style="margin:0;"></h2>
                 <div id="m-job-box" style="margin:10px 0;"></div>
-                <div id="m-stats-box" style="padding:15px; background:#f8f9fa; border-radius:10px; font-size:13px; line-height:1.6;">
-                </div>
+                <div id="m-stats-box" style="padding:15px; background:#f8f9fa; border-radius:10px; font-size:13px; line-height:1.6;"></div>
                 <p style="margin-top:20px; font-weight:bold;">單場管理備註：</p>
                 <textarea id="m-note" style="width:100%; height:100px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
                 <button id="save-note-btn" class="btn btn-primary admin-only" style="width:100%; margin-top:15px;" onclick="saveNoteOnly()">💾 儲存修改</button>
@@ -212,7 +221,7 @@
             </div>
             <div style="flex:1;">
                 <h2 id="mm-name" style="margin:0;"></h2>
-                <div style="margin:10px 0; display:flex; gap:10px; align-items:center;">
+                <div style="margin:10px 0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     職業：<select id="mm-job" class="select-input admin-only"></select>
                     <span id="mm-job-view" style="display:none;" class="job-tag"></span>
                     標籤：<select id="mm-tag" class="select-input admin-only">
@@ -223,10 +232,8 @@
                     </select>
                     <span id="mm-tag-view" style="display:none;" class="hash-tag"></span>
                 </div>
-
                 <p style="margin-top:15px; font-weight:bold;">數據快照（最近5場）：</p>
                 <div id="mm-history-list" class="scroll-list"></div>
-
                 <p style="margin-top:15px; font-weight:bold;">統戰綜合評語：</p>
                 <textarea id="mm-note" style="width:100%; height:80px; border:1px solid #ddd; padding:10px; border-radius:8px;"></textarea>
                 <button class="btn btn-primary admin-only" style="width:100%; margin-top:10px;" onclick="saveMemberProfile()">💾 儲存檔案修改</button>
@@ -282,8 +289,7 @@
         <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:460px;">
             <h3 style="margin-top:0;">☁️ 同步確認</h3>
             <p id="sync-confirm-msg" style="font-size:13px; line-height:1.7;"></p>
-            <div id="sync-conflict-list" style="max-height:180px; overflow-y:auto; margin-bottom:12px; font-size:12px;">
-            </div>
+            <div id="sync-conflict-list" style="max-height:180px; overflow-y:auto; margin-bottom:12px; font-size:12px;"></div>
             <div style="display:flex; gap:8px;">
                 <button class="btn btn-primary" style="flex:1;" onclick="confirmSync()">確認同步</button>
                 <button class="btn btn-outline" style="flex:1;" onclick="closeModal('sync-confirm-modal')">取消</button>
@@ -291,10 +297,38 @@
         </div>
     </div>
 
-    <!-- ✅ 所有 JS 邏輯獨立成一個檔案，方便修改功能 -->
+    <!-- ✅ 成員資料清洗報告 Modal -->
+    <div id="sync-report-modal" onclick="closeModal('sync-report-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:400px; text-align:center;">
+            <div id="sync-report-loading" style="padding:20px 0;">
+                <div class="sync-spinner"></div>
+                <p id="sync-report-status" style="margin-top:16px; font-size:14px; color:#555;">正在掃描戰報資料…</p>
+            </div>
+            <div id="sync-report-result" style="display:none;">
+                <div style="font-size:28px; margin-bottom:12px;">✅</div>
+                <h3 style="margin:0 0 16px; color:#2e7d32;">清洗完成！</h3>
+                <div id="sync-report-content" style="text-align:left; background:#f8f9fa; border-radius:10px; padding:16px; font-size:13px; line-height:2;"></div>
+                <button class="btn btn-primary" style="width:100%; margin-top:16px;" onclick="closeModal('sync-report-modal')">確認</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✅ 接收共享戰報 Modal -->
+    <div id="receive-transfer-modal" onclick="closeModal('receive-transfer-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:480px; max-height:85vh; overflow-y:auto;">
+            <h3 style="margin-top:0;">📥 接收共享戰報</h3>
+            <p style="font-size:13px; color:#666;">有人共享了以下戰報給你，選擇要接收的場次：</p>
+            <div id="receive-transfer-list" style="max-height:300px; overflow-y:auto; border:1px solid #eee; border-radius:8px; margin-bottom:16px;"></div>
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="toggleAllReceive(true)">全選</button>
+                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="toggleAllReceive(false)">取消全選</button>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-outline" style="flex:1;" onclick="closeModal('receive-transfer-modal')">取消</button>
+                <button class="btn btn-primary" style="flex:1;" onclick="confirmReceiveTransfer()">📥 確認接收</button>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
-
-
-
-
 </body></html>
