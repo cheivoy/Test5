@@ -20,12 +20,14 @@
 
         <div style="margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap;">
             <button class="btn btn-outline" id="auth-btn" onclick="openAuthModal()" style="flex:1; font-size:12px;">🔑 登入 / 註冊</button>
+            <button class="btn btn-outline admin-only" id="sessions-btn" onclick="openSessionsModal()" style="flex:1; font-size:12px; display:none;">💻 裝置</button>
             <button class="btn btn-outline" id="logout-btn" onclick="logoutUser()" style="flex:1; font-size:12px; display:none;">🚪 登出</button>
             <button class="btn btn-outline admin-only" id="sync-btn" onclick="syncLocalToCloud()" style="flex:1; font-size:12px; display:none; background:#e8f5e9; border-color:#a5d6a7; color:#2e7d32;">☁️ 同步到雲端</button>
         </div>
 
         <div class="nav-item active" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
         <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員檔案室</div>
+        <div class="nav-item admin-only" id="nav-leave" onclick="switchPage('leave')">🗓️ 請假管理</div>
 
         <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
             <!-- 歷史記錄搜索區域 -->
@@ -152,6 +154,10 @@
                     style="background:#e3f2fd; border:1px solid #90caf9; color:#1565c0; font-size:12px; padding:6px 14px; border-radius:8px; display:none;">
                     🔄 同步成員資料
                 </button>
+                <button class="btn admin-only" id="roster-check-btn" onclick="checkUnresolvedRoster()"
+                    style="background:#fff8e1; border:1px solid #ffd54f; color:#f57c00; font-size:12px; padding:6px 14px; border-radius:8px; display:none;">
+                    🆕 檢查待確認名字
+                </button>
                 <span id="db-last-sync" style="font-size:11px; color:#aaa;"></span>
             </div>
             <div style="margin-bottom: 15px; display:flex; gap:10px; flex-wrap: wrap;">
@@ -183,6 +189,7 @@
                             <th onclick="sortDb('tag')">所屬分類 ↕</th>
                             <th onclick="sortDb('matches')">總場次 ↕</th>
                             <th>幫戰/約戰/其他</th>
+                            <th title="出席次數 / 請假次數 / 後備次數">出席/請假/後備</th>
                             <th onclick="sortDb('rate')">出席率 ↕</th>
                             <th>管理員評語</th>
                             <th class="admin-only">操作</th>
@@ -191,6 +198,94 @@
                     <tbody id="db-table-body"></tbody>
                 </table>
             </div>
+        </div>
+
+        <div class="container" id="page-leave" style="display:none;">
+            <h3 style="margin-top:0;">🗓️ 請假管理</h3>
+
+            <div class="leave-block">
+                <div class="leave-block-title">🔗 公開請假連結</div>
+                <p style="font-size:12px; color:#97a0ad; margin:4px 0 10px;">把這個連結給幫眾，他們無需登入即可搜尋自己名字、打勾請假。只有「開放中」的場次會顯示。</p>
+                <button class="btn btn-primary" onclick="copyLeaveLink()">📋 複製請假連結</button>
+                <span id="leave-link-preview" style="font-size:11px; color:#aaa; margin-left:8px; word-break:break-all;"></span>
+            </div>
+
+            <div class="leave-block">
+                <div class="leave-block-title">📅 請假場次</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+                    <input type="date" id="lw-date" class="select-input">
+                    <select id="lw-session" class="select-input">
+                        <option value="第一場">第一場</option>
+                        <option value="第二場">第二場</option>
+                    </select>
+                    <input type="text" id="lw-title" class="search-input" style="max-width:220px;" placeholder="場次備註（選填）">
+                    <button class="btn btn-primary" onclick="createLeaveWindow()">➕ 開放請假</button>
+                </div>
+                <div id="leave-windows-list"></div>
+            </div>
+
+            <div class="leave-block">
+                <div class="leave-block-title">👥 人員名單</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; margin-bottom:12px;">
+                    <textarea id="roster-import-text" placeholder="一行一個名字，可一次貼多個" style="flex:1; min-width:200px; height:70px; border:1px solid #ddd; border-radius:8px; padding:8px;"></textarea>
+                    <button class="btn btn-primary" onclick="importRoster()">📥 批次匯入</button>
+                </div>
+                <div style="display:flex; gap:8px; margin-bottom:12px;">
+                    <input type="text" id="roster-search" class="search-input" placeholder="搜尋名單…" oninput="renderRosterList()">
+                </div>
+                <div id="roster-list" class="table-card" style="max-height:340px; overflow-y:auto;"></div>
+            </div>
+
+            <div class="leave-block">
+                <div class="leave-block-title">🤖 Discord 通知設定</div>
+                <p style="font-size:12px; color:#97a0ad; margin:4px 0 10px;">貼上 Discord 頻道的 Incoming Webhook 網址，有人請假／開放場次時會自動在頻道發訊息。留空即關閉。</p>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <input type="text" id="discord-webhook" class="search-input" style="flex:1; min-width:240px;" placeholder="https://discord.com/api/webhooks/...">
+                    <button class="btn btn-primary" onclick="saveDiscordSettings()">💾 儲存</button>
+                </div>
+            </div>
+
+            <div class="leave-block">
+                <div class="leave-block-title">🧾 操作紀錄</div>
+                <button class="btn btn-outline" onclick="loadAuditLog()" style="margin-bottom:10px;">🔄 重新整理</button>
+                <div id="audit-log-list" class="table-card" style="max-height:360px; overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 出席/請假/後備 人工覆蓋 Modal -->
+    <div id="override-modal" onclick="closeModal('override-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:420px;">
+            <h3 style="margin-top:0;">✏️ 手動調整次數 · <span id="ov-name"></span></h3>
+            <p style="font-size:12px; color:#97a0ad;">留空＝使用系統自動計算值。填數字＝強制覆蓋（不會影響戰報與請假原始紀錄）。</p>
+            <label style="font-size:13px; font-weight:bold;">出席次數（自動：<span id="ov-auto-att">0</span>）</label>
+            <input type="number" id="ov-att" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="留空＝自動">
+            <label style="font-size:13px; font-weight:bold;">請假次數（自動：<span id="ov-auto-leave">0</span>）</label>
+            <input type="number" id="ov-leave" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="留空＝自動">
+            <label style="font-size:13px; font-weight:bold;">後備次數（自動：<span id="ov-auto-reserve">0</span>）</label>
+            <input type="number" id="ov-reserve" class="search-input" style="width:100%; margin-bottom:16px;" placeholder="留空＝自動">
+            <button class="btn btn-primary" style="width:100%;" onclick="saveOverride()">💾 儲存</button>
+            <div id="ov-msg" style="margin-top:10px; font-size:13px; color:var(--danger);"></div>
+        </div>
+    </div>
+
+    <!-- 場次請假名單 Modal（管理員） -->
+    <div id="window-detail-modal" onclick="closeModal('window-detail-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:480px; max-height:85vh; overflow-y:auto;">
+            <h3 style="margin-top:0;" id="wd-title">場次名單</h3>
+            <div style="display:flex; gap:8px; margin-bottom:10px;">
+                <input type="text" id="wd-search" class="search-input" placeholder="搜尋名字…" oninput="renderWindowDetail()">
+            </div>
+            <div id="wd-list"></div>
+        </div>
+    </div>
+
+    <!-- 登入裝置 Modal -->
+    <div id="sessions-modal" onclick="closeModal('sessions-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:420px;">
+            <h3 style="margin-top:0;">💻 目前登入的裝置</h3>
+            <p style="font-size:12px; color:#97a0ad;">允許多台裝置同時登入。可個別踢除其他裝置。</p>
+            <div id="sessions-list"></div>
         </div>
     </div>
 

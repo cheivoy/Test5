@@ -1,0 +1,7 @@
+-- 參考用：目前正式環境已存在的資料表結構（從 worker/index.js 的查詢語句反推，非實際建表語句）
+-- 這個檔案不需要、也不應該執行——只是讓之後看這個 repo 的人知道基礎 schema 長什麼樣。
+--
+-- users (username TEXT PRIMARY KEY, password TEXT, token TEXT, share_id TEXT, guild TEXT)
+-- reports (id TEXT, date TEXT, guild_a TEXT, guild_b TEXT, raw_json TEXT, owner TEXT, PRIMARY KEY (id, owner))
+-- members (id TEXT, last_job TEXT, matches INTEGER, total_dmg INTEGER, note TEXT, owner TEXT, PRIMARY KEY (id, owner))
+-- transfers (token TEXT PRIMARY KEY, owner TEXT, ids_json TEXT, expires_at INTEGER)

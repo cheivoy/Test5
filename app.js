@@ -19,6 +19,9 @@ let chart = null, memberChart = null, currentJobFilter = "all";
 let allHistories = [], dbMembersMap = [], dbSort = { key: 'matches', asc: false };
 let totalReportsInTimeframe = 0, currentReportId = null;
 
+// ✅ 身分系統：name -> member_id -> 目前顯示名稱（改名不用重寫歷史戰報）
+let aliasToMemberId = {}, memberIdToDisplayName = {};
+
 // =====================================================
 // ===  模式管理（本地 / 雲端）
 // =====================================================
@@ -48,6 +51,8 @@ function updateModeBanner() {
     const logoutBtn = document.getElementById('logout-btn');
     const syncBtn = document.getElementById('sync-btn');
     const memberSyncBtn = document.getElementById('member-sync-btn');
+    const rosterCheckBtn = document.getElementById('roster-check-btn');
+    const sessionsBtn = document.getElementById('sessions-btn');
     const shareNote = document.getElementById('share-local-note');
 
     if (storageMode === 'cloud' && currentUser) {
@@ -56,6 +61,8 @@ function updateModeBanner() {
         if (logoutBtn) logoutBtn.style.display = '';
         if (syncBtn && !isViewMode) syncBtn.style.display = '';
         if (memberSyncBtn && !isViewMode) memberSyncBtn.style.display = '';
+        if (rosterCheckBtn && !isViewMode) rosterCheckBtn.style.display = '';
+        if (sessionsBtn && !isViewMode) sessionsBtn.style.display = '';
         if (shareNote) shareNote.style.display = 'none';
     } else {
         if (banner) { banner.className = 'local'; banner.textContent = '💾 本地模式（未登入）'; }
@@ -63,6 +70,8 @@ function updateModeBanner() {
         if (logoutBtn) logoutBtn.style.display = 'none';
         if (syncBtn) syncBtn.style.display = 'none';
         if (memberSyncBtn) memberSyncBtn.style.display = 'none';
+        if (rosterCheckBtn) rosterCheckBtn.style.display = 'none';
+        if (sessionsBtn) sessionsBtn.style.display = 'none';
         if (shareNote) shareNote.style.display = '';
     }
 }
@@ -153,12 +162,65 @@ async function doLogin() {
     } catch (e) { msgEl.textContent = '連線失敗: ' + e.message; }
 }
 
-function logoutUser() {
+async function logoutUser() {
+    // 只登出「這台裝置」，其他裝置的登入不受影響
+    if (currentUser?.token) {
+        try {
+            await fetch(WORKER_URL + "/api/auth/logout", {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + currentUser.token }
+            });
+        } catch (e) { }
+    }
     currentUser = null;
     storageMode = 'local';
     localStorage.removeItem(LOCALSTORAGE_USER_KEY);
     updateModeBanner();
     fetchAllHistories();
+}
+
+// =====================================================
+// ===  登入裝置管理（多重登入）
+// =====================================================
+async function openSessionsModal() {
+    if (!currentUser) return;
+    document.getElementById('sessions-modal').style.display = 'flex';
+    const listEl = document.getElementById('sessions-list');
+    listEl.innerHTML = '<div style="color:#aaa; font-size:13px;">載入中…</div>';
+    try {
+        const res = await fetch(WORKER_URL + "/api/auth/sessions?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const list = await res.json();
+        if (!Array.isArray(list) || list.length === 0) {
+            listEl.innerHTML = '<div style="color:#aaa; font-size:13px;">目前沒有其他登入紀錄（可能是舊版登入，重新登入後就會顯示）。</div>';
+            return;
+        }
+        listEl.innerHTML = list.map(s => {
+            const when = new Date(s.last_seen_at).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            return `<div class="roster-row">
+                <div style="font-size:13px;">
+                    ${s.is_current ? '🟢 <b>目前這台</b>' : '💻 其他裝置'}<br>
+                    <span style="font-size:11px; color:#97a0ad;">${(s.device_label || '未知裝置').slice(0, 40)} · 最近 ${when}</span>
+                </div>
+                ${s.is_current ? '' : `<button class="btn btn-outline" style="font-size:12px; padding:4px 10px; color:var(--danger);" onclick="revokeSession('${s.id}')">踢除</button>`}
+            </div>`;
+        }).join('');
+    } catch (e) {
+        listEl.innerHTML = '<div style="color:var(--danger); font-size:13px;">載入失敗：' + e.message + '</div>';
+    }
+}
+
+async function revokeSession(sessionId) {
+    if (!confirm('確定要踢除這台裝置的登入？')) return;
+    try {
+        await fetch(WORKER_URL + "/api/auth/revoke-session", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ session_id: sessionId })
+        });
+        openSessionsModal();
+    } catch (e) { alert('踢除失敗：' + e.message); }
 }
 
 // =====================================================
@@ -311,10 +373,123 @@ async function saveHistory() {
     };
 
     if (storageMode === 'cloud' && currentUser) {
+        const names = [...new Set(gA.map(p => p.name))];
+        let unresolved = [];
+        try {
+            const res = await fetch(WORKER_URL + "/api/roster/check-names", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify({ names })
+            });
+            const data = await res.json();
+            unresolved = data.unresolved || [];
+        } catch (e) { console.error("檢查名冊失敗", e); }
+
+        if (unresolved.length > 0) {
+            openRosterResolveModal(unresolved, async () => { await saveHistoryToCloud(payload); });
+            return;
+        }
         await saveHistoryToCloud(payload);
     } else {
         saveHistoryToLocal(payload);
     }
+}
+
+// =====================================================
+// ===  陌生名字確認 Modal：既有成員改名 / 全新成員
+// =====================================================
+async function openRosterResolveModal(names, onDone) {
+    const existingModal = document.getElementById('roster-resolve-modal');
+    if (existingModal) existingModal.remove();
+
+    let roster = [];
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        roster = await res.json();
+    } catch (e) { }
+
+    const rosterOptions = roster.map(m => `<option value="${m.member_id}">${m.display_name}</option>`).join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'roster-resolve-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);display:flex;justify-content:center;align-items:center;z-index:2200;';
+    modal.innerHTML = `
+        <div style="background:white;padding:28px;border-radius:16px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px;">
+            <h3 style="margin:0;">🆕 發現 ${names.length} 個陌生名字</h3>
+            <p style="font-size:13px;color:#666;margin:0;">請確認每個名字是既有成員改名，還是全新成員。確認後出席次數才會正確歸戶，歷史戰報資料不會被改寫。</p>
+            <div style="display:flex;gap:8px;">
+                <button type="button" class="btn btn-outline" style="font-size:12px;" onclick="document.querySelectorAll('.roster-resolve-row .rr-new').forEach(r=>{r.checked=true; r.dispatchEvent(new Event('change'));})">全部視為新成員</button>
+            </div>
+            <div id="roster-resolve-list" style="display:flex;flex-direction:column;gap:10px;">
+                ${names.map((n, i) => `
+                    <div class="roster-resolve-row" data-name="${n}" style="border:1px solid #eee;border-radius:8px;padding:10px;">
+                        <div style="font-weight:bold;margin-bottom:6px;">${n}</div>
+                        <label style="margin-right:12px;font-size:13px;"><input type="radio" name="rr-choice-${i}" class="rr-new" checked onchange="updateRosterResolveRow(${i})"> 全新成員</label>
+                        <label style="font-size:13px;"><input type="radio" name="rr-choice-${i}" class="rr-existing" onchange="updateRosterResolveRow(${i})"> 既有成員改名</label>
+                        <div class="rr-existing-box" id="rr-existing-box-${i}" style="display:none;margin-top:8px;">
+                            <select class="select-input rr-member-select" style="width:100%;margin-bottom:6px;"><option value="">選擇成員…</option>${rosterOptions}</select>
+                            <label style="font-size:12px;"><input type="checkbox" class="rr-set-current" checked> 設為此成員目前顯示名稱</label>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" class="btn btn-outline" onclick="document.getElementById('roster-resolve-modal').remove();">取消（不儲存這場戰報）</button>
+                <button type="button" class="btn btn-primary" onclick="confirmRosterResolve()">✅ 確認並繼續儲存</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    window._rosterResolveOnDone = onDone;
+}
+
+function updateRosterResolveRow(i) {
+    const row = document.querySelectorAll('.roster-resolve-row')[i];
+    const isExisting = row.querySelector('.rr-existing').checked;
+    row.querySelector('.rr-existing-box').style.display = isExisting ? 'block' : 'none';
+}
+
+async function confirmRosterResolve() {
+    const rows = document.querySelectorAll('.roster-resolve-row');
+    for (const row of rows) {
+        const name = row.dataset.name;
+        const isExisting = row.querySelector('.rr-existing').checked;
+        if (isExisting) {
+            const memberId = row.querySelector('.rr-member-select').value;
+            if (!memberId) { alert(`請幫「${name}」選擇對應的既有成員，或改選「全新成員」`); return; }
+            const setCurrent = row.querySelector('.rr-set-current').checked;
+            await fetch(WORKER_URL + "/api/roster/resolve-name", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify({ alias_name: name, target: 'existing', member_id: memberId, set_as_current_name: setCurrent })
+            });
+        } else {
+            await fetch(WORKER_URL + "/api/roster/resolve-name", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify({ alias_name: name, target: 'new' })
+            });
+        }
+    }
+    document.getElementById('roster-resolve-modal').remove();
+    const onDone = window._rosterResolveOnDone;
+    window._rosterResolveOnDone = null;
+    if (onDone) await onDone();
+}
+
+// 名冊頁「待確認名單」：掃全部歷史戰報，補處理任何漏網的陌生名字
+async function checkUnresolvedRoster() {
+    if (storageMode !== 'cloud' || !currentUser) { alert('請先登入雲端帳號'); return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster/unresolved?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const data = await res.json();
+        const unresolved = data.unresolved || [];
+        if (unresolved.length === 0) { alert('✅ 目前沒有待確認的陌生名字。'); return; }
+        openRosterResolveModal(unresolved, async () => { await fetchRosterAliasMap(); await loadDbData(); });
+    } catch (e) { alert('檢查失敗：' + e.message); }
 }
 
 function saveHistoryToLocal(payload) {
@@ -803,9 +978,32 @@ async function openMemberDetail(id) {
 }
 
 // =====================================================
+// ===  身分對照表：把歷史戰報裡的名字 resolve 成穩定 member_id
+// =====================================================
+async function fetchRosterAliasMap() {
+    aliasToMemberId = {};
+    memberIdToDisplayName = {};
+    try {
+        let apiUrl = WORKER_URL + "/api/roster/aliases?t=" + Date.now();
+        let res;
+        if (shareId) {
+            res = await fetch(apiUrl + "&share=" + shareId, { cache: "no-store" });
+        } else if (storageMode === 'cloud' && currentUser) {
+            res = await fetch(apiUrl, { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+        } else {
+            return; // 本地模式沒有雲端名冊可對照
+        }
+        const data = await res.json();
+        (data.roster || []).forEach(r => { memberIdToDisplayName[r.member_id] = r.display_name; });
+        (data.aliases || []).forEach(a => { aliasToMemberId[a.alias_name] = a.member_id; });
+    } catch (e) { console.error("載入身分對照表失敗", e); }
+}
+
+// =====================================================
 // ===  成員檔案室：loadDbData
 // =====================================================
 async function loadDbData() {
+    await fetchRosterAliasMap();
     const timeFilter = document.getElementById('db-time').value;
     const filteredHistories = allHistories.filter(h => {
         if (timeFilter === 'all') return true;
@@ -849,6 +1047,11 @@ async function loadDbData() {
     // ✅ 前端計算：從 allHistories 重新計算成員資料
     const map = {};
 
+    // ✅ 名冊優先：先把所有在職成員放進去（即使 0 場次，也要能顯示請假/後備數字）
+    Object.keys(memberIdToDisplayName).forEach(mid => {
+        map[mid] = { id: memberIdToDisplayName[mid], member_id: mid, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' };
+    });
+
     filteredHistories.forEach(h => {
         try {
             const d = JSON.parse(h.raw_json);
@@ -856,20 +1059,24 @@ async function loadDbData() {
             const type = d.matchType || "幫戰";
             const session = d.session || "第一場";
             d.gA.forEach(p => {
-                if (!map[p.name]) {
-                    map[p.name] = { id: p.name, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' };
+                // ✅ 改名/合併安全：有對照到穩定 member_id 就用它分組，顯示名稱取當下最新名稱
+                const resolvedId = aliasToMemberId[p.name];
+                const key = resolvedId || p.name;
+                const displayName = resolvedId ? (memberIdToDisplayName[resolvedId] || p.name) : p.name;
+                if (!map[key]) {
+                    map[key] = { id: displayName, member_id: resolvedId || null, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' };
                 }
-                map[p.name].matches++;
-                map[p.name].counts[type] = (map[p.name].counts[type] || 0) + 1;
-                map[p.name].histories.push({ date: h.date, title: aName, stats: p, type, session });
+                map[key].matches++;
+                map[key].counts[type] = (map[key].counts[type] || 0) + 1;
+                map[key].histories.push({ date: h.date, title: aName, stats: p, type, session });
                 // ✅ 判定最新職業：比較日期，取最新的
-                if (!map[p.name].latestDate || h.date > map[p.name].latestDate) {
-                    map[p.name].latestDate = h.date;
-                    map[p.name].last_job = p.job;
+                if (!map[key].latestDate || h.date > map[key].latestDate) {
+                    map[key].latestDate = h.date;
+                    map[key].last_job = p.job;
                 }
                 if (p.job) jobSet.add(p.job);
                 cols.slice(2).forEach(c => {
-                    map[p.name].aggr[c.k] = (map[p.name].aggr[c.k] || 0) + (p[c.k] || 0);
+                    map[key].aggr[c.k] = (map[key].aggr[c.k] || 0) + (p[c.k] || 0);
                 });
             });
         } catch (e) { }
@@ -903,13 +1110,53 @@ async function loadDbData() {
         return m;
     });
 
-    // ✅ 修復：新登入或有備份 lastJob 的成員，若前端算不出來才用 noteMap 的
-    // （已在上面處理，last_job 為空才 fallback）
+    // ✅ 合併請假/後備次數（來自請假系統）與人工覆蓋
+    await mergeLeaveAndOverrides();
 
     const syncEl = document.getElementById('db-last-sync');
     if (syncEl) syncEl.textContent = `最後計算：${new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`;
 
     renderDbTable();
+}
+
+// =====================================================
+// ===  合併請假/後備次數 + 人工覆蓋
+// =====================================================
+async function mergeLeaveAndOverrides() {
+    let leaveStats = {}, overrides = [];
+    try {
+        const base = shareId
+            ? `?share=${shareId}&t=${Date.now()}`
+            : `?t=${Date.now()}`;
+        const headers = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
+        if (shareId || (storageMode === 'cloud' && currentUser)) {
+            const [ls, ov] = await Promise.all([
+                fetch(WORKER_URL + "/api/leave/stats" + base, { cache: "no-store", headers }).then(r => r.json()).catch(() => ({})),
+                fetch(WORKER_URL + "/api/overrides" + base, { cache: "no-store", headers }).then(r => r.json()).catch(() => ([]))
+            ]);
+            leaveStats = ls || {};
+            overrides = Array.isArray(ov) ? ov : [];
+        }
+    } catch (e) { console.error("載入請假/覆蓋資料失敗", e); }
+
+    const ovMap = {};
+    overrides.forEach(o => { ovMap[o.member_id] = o; });
+
+    dbMembersMap.forEach(m => {
+        const mid = m.member_id;
+        const auto = {
+            attendance: m.matches,
+            leave: mid && leaveStats[mid] ? (leaveStats[mid].leave || 0) : 0,
+            reserve: mid && leaveStats[mid] ? (leaveStats[mid].reserve || 0) : 0
+        };
+        m.autoStats = auto;
+        const ov = mid ? ovMap[mid] : null;
+        m.overrideVersion = ov ? ov.version : null;
+        m.attendance = (ov && ov.attendance_override != null) ? ov.attendance_override : auto.attendance;
+        m.leaveCount = (ov && ov.leave_override != null) ? ov.leave_override : auto.leave;
+        m.reserveCount = (ov && ov.reserve_override != null) ? ov.reserve_override : auto.reserve;
+        m.hasOverride = !!(ov && (ov.attendance_override != null || ov.leave_override != null || ov.reserve_override != null));
+    });
 }
 
 function renderDbTable() {
@@ -937,6 +1184,7 @@ function renderDbTable() {
             <td>${m.tag !== 'none' ? `<span class="hash-tag">${m.tag}</span>` : ''}</td>
             <td>${m.matches} 場</td>
             <td style="font-size:11px; color:#666;">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 📝${m.counts['其他'] || 0}</td>
+            <td>${renderStatBadge(m)}</td>
             <td>${m.rate.toFixed(1)}%</td>
             <td>${m.note || ''}</td>
             <td class="admin-only">
@@ -951,6 +1199,69 @@ function sortDb(key) {
     if (dbSort.key === key) dbSort.asc = !dbSort.asc;
     else { dbSort.key = key; dbSort.asc = false; }
     renderDbTable();
+}
+
+// 出席/請假/後備 徽章（3/3/2），點擊可手動覆蓋（僅管理員）
+function renderStatBadge(m) {
+    const att = m.attendance != null ? m.attendance : m.matches;
+    const lv = m.leaveCount || 0;
+    const rs = m.reserveCount || 0;
+    const star = m.hasOverride ? '*' : '';
+    const clickable = (!isViewMode && !shareId && storageMode === 'cloud' && currentUser && m.member_id);
+    if (clickable) {
+        return `<span class="stat-badge" title="出席/請假/後備（點擊可手動調整，*=已覆蓋）" onclick="event.stopPropagation(); openOverrideModal('${m.member_id}')">${att}/${lv}/${rs}${star}</span>`;
+    }
+    return `<span class="stat-badge" title="出席/請假/後備">${att}/${lv}/${rs}${star}</span>`;
+}
+
+// =====================================================
+// ===  出席/請假/後備 人工覆蓋 Modal
+// =====================================================
+function openOverrideModal(memberId) {
+    const m = dbMembersMap.find(x => x.member_id === memberId);
+    if (!m) return;
+    window._overrideTarget = m;
+    document.getElementById('ov-name').textContent = m.id;
+    document.getElementById('ov-msg').textContent = '';
+    const auto = m.autoStats || { attendance: m.matches, leave: 0, reserve: 0 };
+    document.getElementById('ov-auto-att').textContent = auto.attendance;
+    document.getElementById('ov-auto-leave').textContent = auto.leave;
+    document.getElementById('ov-auto-reserve').textContent = auto.reserve;
+    // 只有「有覆蓋」的欄位才預填數字，沒覆蓋就留空表示用自動值
+    document.getElementById('ov-att').value = (m.attendance !== auto.attendance) ? m.attendance : '';
+    document.getElementById('ov-leave').value = (m.leaveCount !== auto.leave) ? m.leaveCount : '';
+    document.getElementById('ov-reserve').value = (m.reserveCount !== auto.reserve) ? m.reserveCount : '';
+    document.getElementById('override-modal').style.display = 'flex';
+}
+
+async function saveOverride() {
+    const m = window._overrideTarget;
+    if (!m) return;
+    const payload = {
+        member_id: m.member_id,
+        attendance_override: document.getElementById('ov-att').value,
+        leave_override: document.getElementById('ov-leave').value,
+        reserve_override: document.getElementById('ov-reserve').value,
+        expected_version: m.overrideVersion
+    };
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster/override", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.status === 409) {
+            document.getElementById('ov-msg').textContent = '⚠️ ' + (data.error || '資料已被其他人更新') + '，正在重新載入…';
+            await loadDbData();
+            const fresh = dbMembersMap.find(x => x.member_id === m.member_id);
+            if (fresh) openOverrideModal(m.member_id);
+            return;
+        }
+        if (!res.ok) { document.getElementById('ov-msg').textContent = '⚠️ ' + (data.error || '儲存失敗'); return; }
+        closeModal('override-modal');
+        await loadDbData();
+    } catch (e) { document.getElementById('ov-msg').textContent = '⚠️ 連線失敗：' + e.message; }
 }
 
 // =====================================================
@@ -1123,7 +1434,7 @@ async function renameP(old) {
             });
             const data = await res.json();
             if (!res.ok) { alert("更名失敗：" + (data.error || res.status)); return; }
-            alert(`更名成功！已同步更新 ${data.updated || 0} 場戰報。`);
+            alert(`更名成功！歷史戰報資料已自動歸戶到新名字，無需重寫。`);
             await fetchAllHistories();
             loadDbData();
         } catch (e) { alert("更名失敗，請稍後再試：" + e.message); }
@@ -1169,7 +1480,7 @@ async function mergeP(fromId) {
                 });
             }
 
-            alert(`合併成功！已同步更新 ${data.updated} 場戰報，職業已按最新一場自動判定。`);
+            alert(`合併成功！歷史戰報資料已自動歸戶，職業已按最新一場自動判定。`);
         } else {
             let db = getLocalMembers();
             if (!db[toId]) db[toId] = { id: toId, last_job: '', matches: 0, total_dmg: 0, note: '' };
@@ -1634,14 +1945,346 @@ async function confirmReceiveTransfer() {
 }
 
 // =====================================================
+// ===  請假管理頁（管理員）
+// =====================================================
+let leaveWindowsCache = [], rosterCache = [];
+
+async function loadLeavePage() {
+    if (storageMode !== 'cloud' || !currentUser) {
+        alert('請先登入雲端帳號才能使用請假管理。');
+        switchPage('report');
+        return;
+    }
+    // 預設日期為今天
+    const dateEl = document.getElementById('lw-date');
+    if (dateEl && !dateEl.value) dateEl.valueAsDate = new Date();
+    updateLeaveLinkPreview();
+    await Promise.all([loadLeaveWindows(), loadRoster(), loadDiscordSettings()]);
+    loadAuditLog();
+}
+
+function buildLeaveLink() {
+    const base = window.location.href.split('?')[0].replace(/index\.html$/, '').replace(/[^/]*$/, '');
+    const origin = base.endsWith('/') ? base : base + '/';
+    const share = currentUser?.share_id || '';
+    return origin + 'leave.html?share=' + encodeURIComponent(share);
+}
+
+function updateLeaveLinkPreview() {
+    const el = document.getElementById('leave-link-preview');
+    if (el) el.textContent = buildLeaveLink();
+}
+
+function copyLeaveLink() {
+    const link = buildLeaveLink();
+    navigator.clipboard.writeText(link).then(() => {
+        alert('✅ 請假連結已複製！\n把它貼給幫眾即可，無需登入就能請假。');
+    }).catch(() => { prompt('請手動複製以下連結：', link); });
+}
+
+// ---- 請假場次 ----
+async function loadLeaveWindows() {
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/windows?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        leaveWindowsCache = await res.json();
+    } catch (e) { leaveWindowsCache = []; }
+    renderLeaveWindows();
+}
+
+function renderLeaveWindows() {
+    const el = document.getElementById('leave-windows-list');
+    if (!el) return;
+    if (!leaveWindowsCache.length) {
+        el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:10px;">尚未開放任何請假場次。</div>';
+        return;
+    }
+    el.innerHTML = leaveWindowsCache.map(w => `
+        <div class="lw-card">
+            <div>
+                <b>${w.event_date}　${w.session}</b>
+                <span class="status-pill ${w.status === 'open' ? 'status-open' : 'status-closed'}">${w.status === 'open' ? '開放中' : '已關閉'}</span>
+                <div style="font-size:12px; color:#97a0ad; margin-top:2px;">
+                    ${w.title || ''} · 🙋 請假 ${w.leave_count} 人 · 🔶 後備 ${w.reserve_count} 人
+                </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="openWindowDetail('${w.window_id}')">管理名單</button>
+                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="toggleLeaveWindow('${w.window_id}', '${w.status === 'open' ? 'closed' : 'open'}', ${w.version})">${w.status === 'open' ? '關閉' : '開放'}</button>
+                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px; color:var(--danger);" onclick="deleteLeaveWindow('${w.window_id}')">刪除</button>
+            </div>
+        </div>`).join('');
+}
+
+async function createLeaveWindow() {
+    const event_date = document.getElementById('lw-date').value;
+    const session = document.getElementById('lw-session').value;
+    const title = document.getElementById('lw-title').value;
+    if (!event_date) { alert('請選擇日期'); return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/windows/create", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ event_date, session, title })
+        });
+        const data = await res.json();
+        if (!res.ok) { alert('開放失敗：' + (data.error || res.status)); return; }
+        document.getElementById('lw-title').value = '';
+        await loadLeaveWindows();
+    } catch (e) { alert('開放失敗：' + e.message); }
+}
+
+async function toggleLeaveWindow(windowId, status, version) {
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/windows/toggle", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ window_id: windowId, status, expected_version: version })
+        });
+        const data = await res.json();
+        if (res.status === 409) { alert('⚠️ ' + (data.error || '場次已被更新') + '，將重新載入'); await loadLeaveWindows(); return; }
+        if (!res.ok) { alert('操作失敗：' + (data.error || res.status)); return; }
+        await loadLeaveWindows();
+    } catch (e) { alert('操作失敗：' + e.message); }
+}
+
+async function deleteLeaveWindow(windowId) {
+    if (!confirm('確定刪除這個場次？該場所有請假/後備紀錄也會一併刪除。')) return;
+    try {
+        await fetch(WORKER_URL + "/api/leave/windows/delete", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ window_id: windowId })
+        });
+        await loadLeaveWindows();
+    } catch (e) { alert('刪除失敗：' + e.message); }
+}
+
+// ---- 場次名單管理 Modal ----
+async function openWindowDetail(windowId) {
+    const w = leaveWindowsCache.find(x => x.window_id === windowId);
+    if (!w) return;
+    window._wdWindow = w;
+    document.getElementById('wd-title').textContent = `${w.event_date} ${w.session} · 名單管理`;
+    document.getElementById('wd-search').value = '';
+    document.getElementById('window-detail-modal').style.display = 'flex';
+    document.getElementById('wd-list').innerHTML = '<div style="color:#aaa;">載入中…</div>';
+    try {
+        if (!rosterCache.length) await loadRoster();
+        const res = await fetch(WORKER_URL + "/api/leave/window-members?window_id=" + encodeURIComponent(windowId) + "&t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const data = await res.json();
+        window._wdLeave = new Set(data.leave || []);
+        window._wdReserve = new Set(data.reserve || []);
+        renderWindowDetail();
+    } catch (e) {
+        document.getElementById('wd-list').innerHTML = '<div style="color:var(--danger);">載入失敗：' + e.message + '</div>';
+    }
+}
+
+function renderWindowDetail() {
+    const q = (document.getElementById('wd-search').value || '').toLowerCase().trim();
+    const leaveSet = window._wdLeave || new Set();
+    const reserveSet = window._wdReserve || new Set();
+    const list = rosterCache.filter(m => !q || m.display_name.toLowerCase().includes(q));
+    document.getElementById('wd-list').innerHTML = list.map(m => {
+        const onLeave = leaveSet.has(m.member_id);
+        const onReserve = reserveSet.has(m.member_id);
+        return `<div class="roster-row">
+            <div style="font-size:13px;">${m.display_name}
+                ${onLeave ? '<span class="status-pill status-closed">請假</span>' : ''}
+                ${onReserve ? '<span class="badge-reserve" style="display:inline-block;">後備</span>' : ''}
+            </div>
+            <div style="display:flex; gap:6px;">
+                <button class="btn btn-outline" style="font-size:11px; padding:3px 8px;" onclick="wdAction('${m.member_id}', '${onLeave ? 'leave_cancel' : 'leave_request'}')">${onLeave ? '取消請假' : '設請假'}</button>
+                <button class="btn btn-outline" style="font-size:11px; padding:3px 8px; color:#e65100;" onclick="wdAction('${m.member_id}', '${onReserve ? 'reserve_unset' : 'reserve_set'}')">${onReserve ? '取消後備' : '設後備'}</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function wdAction(memberId, action) {
+    const w = window._wdWindow;
+    if (!w) return;
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/actions", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ window_id: w.window_id, member_id: memberId, action })
+        });
+        if (!res.ok) { const d = await res.json(); alert('操作失敗：' + (d.error || res.status)); return; }
+        // 本地更新狀態
+        if (action === 'leave_request') window._wdLeave.add(memberId);
+        else if (action === 'leave_cancel') window._wdLeave.delete(memberId);
+        else if (action === 'reserve_set') window._wdReserve.add(memberId);
+        else if (action === 'reserve_unset') window._wdReserve.delete(memberId);
+        renderWindowDetail();
+        loadLeaveWindows();
+    } catch (e) { alert('操作失敗：' + e.message); }
+}
+
+// ---- 名單管理 ----
+async function loadRoster() {
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        rosterCache = await res.json();
+    } catch (e) { rosterCache = []; }
+    renderRosterList();
+}
+
+function renderRosterList() {
+    const el = document.getElementById('roster-list');
+    if (!el) return;
+    const q = (document.getElementById('roster-search')?.value || '').toLowerCase().trim();
+    const list = rosterCache.filter(m => !q || m.display_name.toLowerCase().includes(q));
+    if (!list.length) {
+        el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:12px;">名單是空的，用上方批次匯入加入成員。</div>';
+        return;
+    }
+    el.innerHTML = `<div style="padding:8px 12px; font-size:12px; color:#97a0ad;">共 ${rosterCache.length} 人</div>` + list.map(m => `
+        <div class="roster-row">
+            <span style="font-size:14px;">${m.display_name}</span>
+            <div style="display:flex; gap:6px;">
+                <button class="btn btn-outline" style="font-size:12px; padding:3px 10px;" onclick="renameRosterMember('${m.member_id}', '${(m.display_name || '').replace(/'/g, "\\'")}')">更名</button>
+                <button class="btn btn-outline" style="font-size:12px; padding:3px 10px; color:var(--danger);" onclick="deleteRosterMember('${m.member_id}', '${(m.display_name || '').replace(/'/g, "\\'")}')">移除</button>
+            </div>
+        </div>`).join('');
+}
+
+async function importRoster() {
+    const text = document.getElementById('roster-import-text').value || '';
+    const names = text.split('\n').map(s => s.trim()).filter(Boolean);
+    if (!names.length) { alert('請先貼上名字（一行一個）'); return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster/import", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ names })
+        });
+        const data = await res.json();
+        if (!res.ok) { alert('匯入失敗：' + (data.error || res.status)); return; }
+        document.getElementById('roster-import-text').value = '';
+        alert(`✅ 匯入完成：新增 ${data.added} 人，略過重複 ${data.skipped} 人。`);
+        await loadRoster();
+    } catch (e) { alert('匯入失敗：' + e.message); }
+}
+
+async function renameRosterMember(memberId, oldName) {
+    const n = prompt('請輸入新名稱：', oldName);
+    if (!n || n === oldName) return;
+    try {
+        const res = await fetch(WORKER_URL + "/api/rename", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ oldId: oldName, newId: n })
+        });
+        const data = await res.json();
+        if (!res.ok) { alert('更名失敗：' + (data.error || res.status)); return; }
+        await loadRoster();
+    } catch (e) { alert('更名失敗：' + e.message); }
+}
+
+async function deleteRosterMember(memberId, name) {
+    if (!confirm(`確定把「${name}」從名單移除？\n（歷史戰報與出席紀錄會保留，只是不再出現在請假名單）`)) return;
+    try {
+        await fetch(WORKER_URL + "/api/roster/delete", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ member_id: memberId })
+        });
+        await loadRoster();
+    } catch (e) { alert('移除失敗：' + e.message); }
+}
+
+// ---- Discord 設定 ----
+async function loadDiscordSettings() {
+    try {
+        const res = await fetch(WORKER_URL + "/api/settings/discord?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const data = await res.json();
+        const el = document.getElementById('discord-webhook');
+        if (el) el.value = data.discord_webhook_url || '';
+    } catch (e) { }
+}
+
+async function saveDiscordSettings() {
+    const webhook_url = document.getElementById('discord-webhook').value.trim();
+    try {
+        const res = await fetch(WORKER_URL + "/api/settings/discord", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ webhook_url })
+        });
+        if (!res.ok) { const d = await res.json(); alert('儲存失敗：' + (d.error || res.status)); return; }
+        alert('✅ Discord 設定已儲存' + (webhook_url ? '' : '（已關閉通知）'));
+    } catch (e) { alert('儲存失敗：' + e.message); }
+}
+
+// ---- 操作紀錄 ----
+const AUDIT_LABELS = {
+    'roster/create': '新增成員', 'roster/delete': '移除成員', 'roster/rename': '成員更名',
+    'roster/merge': '合併成員', 'roster/alias_link': '連結名字', 'roster/import': '批次匯入名單',
+    'leave_window/create': '開放請假場次', 'leave_window/toggle': '開關場次', 'leave_window/delete': '刪除場次',
+    'leave_action/leave_request': '登記請假', 'leave_action/leave_cancel': '取消請假',
+    'leave_action/reserve_set': '設為後備', 'leave_action/reserve_unset': '取消後備',
+    'override/create': '調整次數', 'override/update': '調整次數', 'session/discord_settings': '更新Discord設定'
+};
+
+async function loadAuditLog() {
+    const el = document.getElementById('audit-log-list');
+    if (el) el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:12px;">載入中…</div>';
+    try {
+        const res = await fetch(WORKER_URL + "/api/audit?limit=200&t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const list = await res.json();
+        if (!Array.isArray(list) || !list.length) {
+            el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:12px;">尚無操作紀錄。</div>';
+            return;
+        }
+        el.innerHTML = list.map(a => {
+            const when = new Date(a.created_at).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            const label = AUDIT_LABELS[a.entity_type + '/' + a.action] || (a.entity_type + '/' + a.action);
+            let detail = '';
+            try {
+                const d = JSON.parse(a.detail || '{}');
+                if (d.member_id) {
+                    const nm = memberIdToDisplayName[d.member_id] || d.member_id.slice(0, 8);
+                    detail = ' · ' + nm;
+                } else if (d.from && d.to) detail = ` · ${d.from} → ${d.to}`;
+                else if (d.display_name) detail = ' · ' + d.display_name;
+                else if (d.added != null) detail = ` · +${d.added}`;
+                else if (d.event_date) detail = ` · ${d.event_date} ${d.session || ''}`;
+            } catch (e) { }
+            const who = a.actor === 'public' ? '👥 幫眾' : '🛡️ ' + a.actor;
+            return `<div class="audit-row">
+                <span class="audit-time">${when}</span> · <b>${label}</b>${detail}
+                <span style="color:#97a0ad;"> — ${who}</span>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        if (el) el.innerHTML = '<div style="color:var(--danger); font-size:13px; padding:12px;">載入失敗：' + e.message + '</div>';
+    }
+}
+
+// =====================================================
 // ===  UI 工具函數
 // =====================================================
 function switchPage(p) {
     document.getElementById('page-report').style.display = p === 'report' ? 'block' : 'none';
     document.getElementById('page-db').style.display = p === 'db' ? 'block' : 'none';
+    const leavePage = document.getElementById('page-leave');
+    if (leavePage) leavePage.style.display = p === 'leave' ? 'block' : 'none';
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    document.getElementById('nav-' + p).classList.add('active');
+    const nav = document.getElementById('nav-' + p);
+    if (nav) nav.classList.add('active');
     if (p === 'db') loadDbData();
+    if (p === 'leave') loadLeavePage();
 }
 
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }

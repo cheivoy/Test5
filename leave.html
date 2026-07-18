@@ -1,0 +1,48 @@
+<html lang="zh-TW"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>請假登記</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; background: #f5f6f8; color: #5a6473; padding: 16px; max-width: 640px; margin: 0 auto; }
+        h1 { font-size: 20px; margin: 8px 0 4px; }
+        .sub { font-size: 13px; color: #97a0ad; margin-bottom: 16px; }
+        .card { background: #fff; border: 1px solid #edf0f2; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+        .search-input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+        .name-btn { display: inline-block; margin: 4px; padding: 8px 14px; border: 1px solid #d1d9e6; border-radius: 20px; background: #fff; cursor: pointer; font-size: 14px; }
+        .name-btn:hover { background: #eef2f7; }
+        .name-btn.active { background: #8e9aaf; color: #fff; border-color: #8e9aaf; }
+        .win-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 4px; border-bottom: 1px solid #f0f0f0; gap: 10px; }
+        .win-row:last-child { border-bottom: none; }
+        .win-info b { font-size: 15px; }
+        .win-info .meta { font-size: 12px; color: #97a0ad; margin-top: 2px; }
+        .toggle-btn { padding: 10px 16px; border-radius: 8px; border: none; font-size: 14px; cursor: pointer; white-space: nowrap; min-width: 96px; }
+        .toggle-leave { background: #e57373; color: #fff; }
+        .toggle-cancel { background: #fff; color: #e57373; border: 1px solid #e57373; }
+        .badge-reserve { font-size: 11px; background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+        .muted { color: #97a0ad; font-size: 13px; text-align: center; padding: 20px; }
+        .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #323a45; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
+        .toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <h1 id="guild-title">請假登記</h1>
+    <div class="sub" id="sub-line">無需登入，找到自己的名字即可登記請假</div>
+
+    <div class="card">
+        <input type="text" id="name-search" class="search-input" placeholder="🔍 輸入你的名字搜尋…" oninput="renderNames()">
+        <div id="name-list" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card" id="window-card" style="display:none;">
+        <div style="font-weight:bold; margin-bottom:6px;">👤 <span id="selected-name"></span></div>
+        <div style="font-size:12px; color:#97a0ad; margin-bottom:10px;">點右側按鈕即可請假或取消。後備由管理員安排。</div>
+        <div id="window-list"></div>
+    </div>
+
+    <div id="empty-state" class="muted" style="display:none;">目前沒有開放中的請假場次。</div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="leave.js"></script>
+</body></html>
