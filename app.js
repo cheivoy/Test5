@@ -2377,6 +2377,14 @@ async function openWindowDetail(windowId) {
     window._wdWindow = w;
     document.getElementById('wd-title').textContent = `${w.event_date} ${w.session} · 名單管理`;
     document.getElementById('wd-search').value = '';
+    // 職業篩選選單（用名冊職業）
+    const jobFilter = document.getElementById('wd-job-filter');
+    if (jobFilter) {
+        const jobs = [...new Set(rosterCache.map(m => m.job).filter(Boolean))].sort();
+        jobFilter.innerHTML = '<option value="all">全部職業</option>' + jobs.map(j => `<option value="${j}">${j}</option>`).join('');
+        jobFilter.value = 'all';
+    }
+    const stF = document.getElementById('wd-status-filter'); if (stF) stF.value = 'all';
     document.getElementById('window-detail-modal').style.display = 'flex';
     document.getElementById('wd-list').innerHTML = '<div style="color:#aaa;">載入中…</div>';
     try {
@@ -2400,7 +2408,18 @@ function renderWindowDetail() {
     const q = (document.getElementById('wd-search').value || '').toLowerCase().trim();
     const leaveSet = window._wdLeave || new Set();
     const reserveSet = window._wdReserve || new Set();
-    const list = rosterCache.filter(m => !q || m.display_name.toLowerCase().includes(q));
+    const jobF = document.getElementById('wd-job-filter')?.value || 'all';
+    const statusF = document.getElementById('wd-status-filter')?.value || 'all';
+    const list = rosterCache.filter(m => {
+        if (q && !m.display_name.toLowerCase().includes(q)) return false;
+        const bm = boardMemberById[m.member_id];
+        const job = m.job || (bm && bm.job) || '未知';
+        if (jobF !== 'all' && job !== jobF) return false;
+        if (statusF === 'leave' && !leaveSet.has(m.member_id)) return false;
+        if (statusF === 'reserve' && !reserveSet.has(m.member_id)) return false;
+        if (statusF === 'none' && (leaveSet.has(m.member_id) || reserveSet.has(m.member_id))) return false;
+        return true;
+    });
     // 依職業分組（優先用名冊自身的 job，退而用看板資料）
     const groups = {};
     list.forEach(m => {

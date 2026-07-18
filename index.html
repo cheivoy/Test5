@@ -320,8 +320,17 @@
     <div id="window-detail-modal" onclick="closeModal('window-detail-modal')">
         <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:480px; max-height:85vh; overflow-y:auto;">
             <h3 style="margin-top:0;" id="wd-title">場次名單</h3>
-            <div style="display:flex; gap:8px; margin-bottom:10px;">
+            <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
                 <input type="text" id="wd-search" class="search-input" placeholder="搜尋名字…" oninput="renderWindowDetail()">
+                <select id="wd-job-filter" class="select-input" onchange="renderWindowDetail()">
+                    <option value="all">全部職業</option>
+                </select>
+                <select id="wd-status-filter" class="select-input" onchange="renderWindowDetail()">
+                    <option value="all">全部狀態</option>
+                    <option value="leave">已請假</option>
+                    <option value="reserve">後備</option>
+                    <option value="none">未表態</option>
+                </select>
             </div>
             <div id="wd-list"></div>
         </div>
