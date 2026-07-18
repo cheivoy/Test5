@@ -21,6 +21,8 @@ let totalReportsInTimeframe = 0, currentReportId = null;
 
 // ✅ 身分系統：name -> member_id -> 目前顯示名稱（改名不用重寫歷史戰報）
 let aliasToMemberId = {}, memberIdToDisplayName = {};
+let memberIdToCategory = {};
+const CATEGORY_PRESETS = ['主幫', '副幫', '俱樂部'];
 
 // 對戰類型顯示：內部值仍用「其他」（相容舊資料），顯示一律為「領地戰」
 function fmtType(t) { return t === '其他' ? '領地戰' : (t || '幫戰'); }
@@ -902,6 +904,21 @@ async function openMemberDetail(id) {
     const tagViewEl = document.getElementById('mm-tag-view');
     if (tagViewEl) tagViewEl.innerText = (m.tag !== 'none' ? m.tag : '無標籤');
 
+    // 身份類別
+    const catEl = document.getElementById('mm-category');
+    if (catEl) {
+        const cats = [...new Set([...CATEGORY_PRESETS, ...dbMembersMap.map(x => x.category).filter(Boolean)])];
+        catEl.innerHTML = '<option value="">未分類</option>'
+            + cats.map(c => `<option value="${c}" ${c === m.category ? 'selected' : ''}>${c}</option>`).join('')
+            + '<option value="__new__">➕ 新增類別…</option>';
+        catEl.value = m.category || '';
+    }
+    const catViewEl = document.getElementById('mm-category-view');
+    if (catViewEl) catViewEl.innerText = m.category || '未分類';
+
+    // 管理員專屬：no-show / 臨時請假 紀錄（唯讀版不顯示）
+    renderMemberFlags(m);
+
     const jobEl = document.getElementById('mm-job');
     if (jobEl) {
         const jobSet = new Set(dbMembersMap.map(x => x.last_job).filter(Boolean));
@@ -987,6 +1004,7 @@ async function openMemberDetail(id) {
 async function fetchRosterAliasMap() {
     aliasToMemberId = {};
     memberIdToDisplayName = {};
+    memberIdToCategory = {};
     try {
         let apiUrl = WORKER_URL + "/api/roster/aliases?t=" + Date.now();
         let res;
@@ -998,7 +1016,10 @@ async function fetchRosterAliasMap() {
             return; // 本地模式沒有雲端名冊可對照
         }
         const data = await res.json();
-        (data.roster || []).forEach(r => { memberIdToDisplayName[r.member_id] = r.display_name; });
+        (data.roster || []).forEach(r => {
+            memberIdToDisplayName[r.member_id] = r.display_name;
+            memberIdToCategory[r.member_id] = r.category || '';
+        });
         (data.aliases || []).forEach(a => { aliasToMemberId[a.alias_name] = a.member_id; });
     } catch (e) { console.error("載入身分對照表失敗", e); }
 }
@@ -1110,6 +1131,7 @@ async function loadDbData() {
         m.tag = noteMap[m.id]?.tag || "none";
         // last_job 以前端計算（最新一場）為主
         if (!m.last_job) m.last_job = noteMap[m.id]?.lastJob || "未知";
+        m.category = m.member_id ? (memberIdToCategory[m.member_id] || '') : '';
         m.rate = totalReportsInTimeframe > 0 ? (m.matches / totalReportsInTimeframe * 100) : 0;
         return m;
     });
@@ -1148,20 +1170,46 @@ async function mergeLeaveAndOverrides() {
 
     dbMembersMap.forEach(m => {
         const mid = m.member_id;
-        const auto = {
-            attendance: m.matches,
-            leave: mid && leaveStats[mid] ? (leaveStats[mid].leave || 0) : 0,
-            reserve: mid && leaveStats[mid] ? (leaveStats[mid].reserve || 0) : 0
-        };
-        m.autoStats = auto;
-        m.leaveByType = (mid && leaveStats[mid]) ? (leaveStats[mid].leaveByType || {}) : {};
-        m.reserveByType = (mid && leaveStats[mid]) ? (leaveStats[mid].reserveByType || {}) : {};
+        const s = (mid && leaveStats[mid]) ? leaveStats[mid] : {};
+        // 各類型自動值：出席取 m.counts（戰報，受時間篩選），請假/後備取請假系統
+        const autoAtt = m.counts || {};
+        const autoLeave = s.leaveByType || {};
+        const autoReserve = s.reserveByType || {};
+        m.autoByType = { attendance: autoAtt, leave: autoLeave, reserve: autoReserve };
+
         const ov = mid ? ovMap[mid] : null;
         m.overrideVersion = ov ? ov.version : null;
-        m.attendance = (ov && ov.attendance_override != null) ? ov.attendance_override : auto.attendance;
-        m.leaveCount = (ov && ov.leave_override != null) ? ov.leave_override : auto.leave;
-        m.reserveCount = (ov && ov.reserve_override != null) ? ov.reserve_override : auto.reserve;
-        m.hasOverride = !!(ov && (ov.attendance_override != null || ov.leave_override != null || ov.reserve_override != null));
+        let perType = null;
+        if (ov && ov.overrides_json) { try { perType = JSON.parse(ov.overrides_json); } catch (e) { } }
+        m.overridesJson = perType;
+
+        const attByType = {}, leaveByType = {}, reserveByType = {};
+        let hasOv = false;
+        TYPE_ORDER.forEach(t => {
+            const otx = (perType && perType[t]) ? perType[t] : {};
+            const a = (otx.attendance != null) ? otx.attendance : (autoAtt[t] || 0);
+            const l = (otx.leave != null) ? otx.leave : (autoLeave[t] || 0);
+            const r = (otx.reserve != null) ? otx.reserve : (autoReserve[t] || 0);
+            if (otx.attendance != null || otx.leave != null || otx.reserve != null) hasOv = true;
+            attByType[t] = a; leaveByType[t] = l; reserveByType[t] = r;
+        });
+        let attendance = TYPE_ORDER.reduce((x, t) => x + attByType[t], 0);
+        let leave = TYPE_ORDER.reduce((x, t) => x + leaveByType[t], 0);
+        let reserve = TYPE_ORDER.reduce((x, t) => x + reserveByType[t], 0);
+        // 舊版整體覆蓋相容
+        if (!perType && ov) {
+            if (ov.attendance_override != null) { attendance = ov.attendance_override; hasOv = true; }
+            if (ov.leave_override != null) { leave = ov.leave_override; hasOv = true; }
+            if (ov.reserve_override != null) { reserve = ov.reserve_override; hasOv = true; }
+        }
+
+        m.attendance = attendance;
+        m.leaveCount = leave;
+        m.reserveCount = reserve;
+        m.attByTypeEff = attByType;
+        m.leaveByType = leaveByType;
+        m.reserveByType = reserveByType;
+        m.hasOverride = hasOv;
     });
 }
 
@@ -1169,12 +1217,23 @@ function renderDbTable() {
     const search = document.getElementById('db-search').value.toLowerCase();
     const jobF = document.getElementById('db-job').value;
     const tagF = document.getElementById('db-tag').value;
+    const catF = document.getElementById('db-category')?.value || 'all';
+
+    // 身份類別下拉：預設 + 現有資料裡出現過的
+    const catSel = document.getElementById('db-category');
+    if (catSel) {
+        const cats = [...new Set([...CATEGORY_PRESETS, ...dbMembersMap.map(m => m.category).filter(Boolean)])];
+        const cur = catSel.value;
+        catSel.innerHTML = '<option value="all">全部身份</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('') + '<option value="none">未分類</option>';
+        catSel.value = cur || 'all';
+    }
 
     let data = dbMembersMap.filter(m => {
         const matchS = m.id.toLowerCase().includes(search);
         const matchJ = jobF === 'all' || m.last_job === jobF;
         const matchT = tagF === 'all' || m.tag === tagF;
-        return matchS && matchJ && matchT;
+        const matchC = catF === 'all' || (catF === 'none' ? !m.category : m.category === catF);
+        return matchS && matchJ && matchT && matchC;
     });
 
     data.sort((a, b) => {
@@ -1187,6 +1246,7 @@ function renderDbTable() {
         <tr onclick="openMemberDetail('${m.id}')" style="cursor:pointer">
             <td><b>${m.id}</b></td>
             <td><span class="job-tag" style="background:var(--color-${m.last_job})">${m.last_job}</span></td>
+            <td>${m.category ? `<span class="hash-tag" style="background:#e3ecf7;">${m.category}</span>` : '<span style="color:#ccc;">—</span>'}</td>
             <td>${m.tag !== 'none' ? `<span class="hash-tag">${m.tag}</span>` : ''}</td>
             <td>${m.matches} 場</td>
             <td style="font-size:11px; color:#666;" title="幫戰/約戰/領地戰 出席次數">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 🏰${m.counts['其他'] || 0}</td>
@@ -1210,8 +1270,9 @@ function sortDb(key) {
 
 // 出席/請假/後備 徽章（3/3/2），滑鼠移上去顯示各類型明細，點擊可手動覆蓋（僅管理員）
 function statBreakdownTooltip(m) {
+    const att = m.attByTypeEff || m.counts || {};
     const lines = TYPE_ORDER.map(t => {
-        const a = (m.counts && m.counts[t]) || 0;
+        const a = att[t] || 0;
         const l = (m.leaveByType && m.leaveByType[t]) || 0;
         const r = (m.reserveByType && m.reserveByType[t]) || 0;
         return `${fmtType(t)}：出席 ${a} / 請假 ${l} / 後備 ${r}`;
@@ -1241,27 +1302,54 @@ function openOverrideModal(memberId) {
     window._overrideTarget = m;
     document.getElementById('ov-name').textContent = m.id;
     document.getElementById('ov-msg').textContent = '';
-    const auto = m.autoStats || { attendance: m.matches, leave: 0, reserve: 0 };
-    document.getElementById('ov-auto-att').textContent = auto.attendance;
-    document.getElementById('ov-auto-leave').textContent = auto.leave;
-    document.getElementById('ov-auto-reserve').textContent = auto.reserve;
-    // 只有「有覆蓋」的欄位才預填數字，沒覆蓋就留空表示用自動值
-    document.getElementById('ov-att').value = (m.attendance !== auto.attendance) ? m.attendance : '';
-    document.getElementById('ov-leave').value = (m.leaveCount !== auto.leave) ? m.leaveCount : '';
-    document.getElementById('ov-reserve').value = (m.reserveCount !== auto.reserve) ? m.reserveCount : '';
+    const auto = m.autoByType || { attendance: {}, leave: {}, reserve: {} };
+    const ov = m.overridesJson || {};
+    // 每個類型一列，三個欄位；placeholder=自動值，value=覆蓋值（沒覆蓋留空）
+    document.getElementById('ov-grid').innerHTML = TYPE_ORDER.map(t => {
+        const ot = ov[t] || {};
+        const cell = (field) => {
+            const autoVal = (auto[field] && auto[field][t]) || 0;
+            const ovVal = (ot[field] != null) ? ot[field] : '';
+            return `<td style="padding:4px 6px; text-align:center;"><input type="number" class="ov-cell search-input" data-type="${t}" data-field="${field}" style="width:64px; padding:5px; text-align:center;" placeholder="${autoVal}" value="${ovVal}" oninput="recalcOverrideTotals()"></td>`;
+        };
+        return `<tr>
+            <td style="padding:4px 6px; font-weight:bold;">${fmtType(t)}</td>
+            ${cell('attendance')}${cell('leave')}${cell('reserve')}
+        </tr>`;
+    }).join('');
+    recalcOverrideTotals();
     document.getElementById('override-modal').style.display = 'flex';
+}
+
+function recalcOverrideTotals() {
+    const m = window._overrideTarget;
+    if (!m) return;
+    const auto = m.autoByType || { attendance: {}, leave: {}, reserve: {} };
+    const totals = { attendance: 0, leave: 0, reserve: 0 };
+    TYPE_ORDER.forEach(t => {
+        ['attendance', 'leave', 'reserve'].forEach(field => {
+            const input = document.querySelector(`.ov-cell[data-type="${t}"][data-field="${field}"]`);
+            const raw = input && input.value !== '' ? Number(input.value) : ((auto[field] && auto[field][t]) || 0);
+            totals[field] += (isNaN(raw) ? 0 : raw);
+        });
+    });
+    document.getElementById('ov-total-att').textContent = totals.attendance;
+    document.getElementById('ov-total-leave').textContent = totals.leave;
+    document.getElementById('ov-total-reserve').textContent = totals.reserve;
 }
 
 async function saveOverride() {
     const m = window._overrideTarget;
     if (!m) return;
-    const payload = {
-        member_id: m.member_id,
-        attendance_override: document.getElementById('ov-att').value,
-        leave_override: document.getElementById('ov-leave').value,
-        reserve_override: document.getElementById('ov-reserve').value,
-        expected_version: m.overrideVersion
-    };
+    const overrides = {};
+    TYPE_ORDER.forEach(t => {
+        overrides[t] = {};
+        ['attendance', 'leave', 'reserve'].forEach(field => {
+            const input = document.querySelector(`.ov-cell[data-type="${t}"][data-field="${field}"]`);
+            overrides[t][field] = (input && input.value !== '') ? input.value : '';
+        });
+    });
+    const payload = { member_id: m.member_id, overrides, expected_version: m.overrideVersion };
     try {
         const res = await fetch(WORKER_URL + "/api/roster/override", {
             method: 'POST',
@@ -1272,8 +1360,7 @@ async function saveOverride() {
         if (res.status === 409) {
             document.getElementById('ov-msg').textContent = '⚠️ ' + (data.error || '資料已被其他人更新') + '，正在重新載入…';
             await loadDbData();
-            const fresh = dbMembersMap.find(x => x.member_id === m.member_id);
-            if (fresh) openOverrideModal(m.member_id);
+            if (dbMembersMap.find(x => x.member_id === m.member_id)) openOverrideModal(m.member_id);
             return;
         }
         if (!res.ok) { document.getElementById('ov-msg').textContent = '⚠️ ' + (data.error || '儲存失敗'); return; }
@@ -1355,10 +1442,55 @@ async function syncMemberData() {
 // =====================================================
 // ===  saveMemberProfile
 // =====================================================
+// 管理員專屬：顯示成員的 No-show / 臨時請假 紀錄（唯讀分享/查看模式不顯示）
+async function renderMemberFlags(m) {
+    const box = document.getElementById('mm-flags');
+    if (!box) return; // view 模式下 admin-only 已被移除
+    if (isViewMode || shareId || storageMode !== 'cloud' || !currentUser || !m.member_id) {
+        const wrap = document.getElementById('mm-flags-box');
+        if (wrap) wrap.style.display = 'none';
+        return;
+    }
+    box.innerHTML = '<span style="color:#aaa;">載入中…</span>';
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/member-flags?member_id=" + encodeURIComponent(m.member_id) + "&t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const list = await res.json();
+        if (!Array.isArray(list) || !list.length) {
+            box.innerHTML = '<span style="color:#aaa;">目前沒有紀錄。</span>';
+            return;
+        }
+        box.innerHTML = list.map(f => {
+            const label = f.type === 'noshow'
+                ? '<span class="status-pill status-closed">No-show</span>'
+                : '<span class="badge-reserve" style="display:inline-block;">臨時請假</span>';
+            return `<div style="padding:4px 0; border-bottom:1px solid #f5f5f5;"><b>${f.date}</b> ${f.session || ''} ${label}</div>`;
+        }).join('');
+    } catch (e) { box.innerHTML = '<span style="color:var(--danger);">載入失敗</span>'; }
+}
+
+function onCategorySelectChange(sel) {
+    if (sel.value === '__new__') {
+        const name = (prompt('輸入新的身份類別名稱：') || '').trim();
+        if (name) {
+            // 插入為選項並選中
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            sel.insertBefore(opt, sel.querySelector('option[value="__new__"]'));
+            sel.value = name;
+        } else {
+            sel.value = focusPlayer?.category || '';
+        }
+    }
+}
+
 async function saveMemberProfile() {
     const newNote = document.getElementById('mm-note').value;
     const newTag = document.getElementById('mm-tag').value;
     const newJob = document.getElementById('mm-job')?.value || focusPlayer.last_job;
+    const catEl = document.getElementById('mm-category');
+    const newCategory = (catEl && catEl.value !== '__new__') ? catEl.value : (focusPlayer.category || '');
 
     if (storageMode === 'cloud' && currentUser) {
         const payload = { id: focusPlayer.id, note: JSON.stringify({ text: newNote, tag: newTag, last_job: newJob }) };
@@ -1367,12 +1499,22 @@ async function saveMemberProfile() {
             headers: { 'Authorization': 'Bearer ' + currentUser.token },
             body: JSON.stringify(payload)
         });
+        // 身份類別存到 members_roster（穩定身分）
+        if (focusPlayer.member_id) {
+            await fetch(WORKER_URL + "/api/roster/category", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify({ member_id: focusPlayer.member_id, category: newCategory })
+            });
+            memberIdToCategory[focusPlayer.member_id] = newCategory;
+        }
         // ✅ 修復：同步更新前端 dbMembersMap，不需要重新拉取
         const target = dbMembersMap.find(x => x.id === focusPlayer.id);
         if (target) {
             target.last_job = newJob;
             target.note = newNote;
             target.tag = newTag;
+            target.category = newCategory;
         }
     } else {
         const membersMap = getLocalMembers();
@@ -2069,14 +2211,46 @@ async function loadLeaveWindows() {
     renderLeaveWindows();
 }
 
+function clearLeaveWindowFilter() {
+    document.getElementById('lw-filter-status').value = 'all';
+    document.getElementById('lw-filter-from').value = '';
+    document.getElementById('lw-filter-to').value = '';
+    renderLeaveWindows();
+}
+
 function renderLeaveWindows() {
     const el = document.getElementById('leave-windows-list');
+    const hint = document.getElementById('lw-filter-hint');
     if (!el) return;
     if (!leaveWindowsCache.length) {
         el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:10px;">尚未開放任何請假場次。</div>';
+        if (hint) hint.textContent = '';
         return;
     }
-    el.innerHTML = leaveWindowsCache.map(w => `
+    const statusF = document.getElementById('lw-filter-status')?.value || 'all';
+    const fromF = document.getElementById('lw-filter-from')?.value || '';
+    const toF = document.getElementById('lw-filter-to')?.value || '';
+    const hasFilter = statusF !== 'all' || fromF || toF;
+
+    let list = leaveWindowsCache.filter(w => {
+        if (statusF !== 'all' && w.status !== statusF) return false;
+        if (fromF && w.event_date < fromF) return false;
+        if (toF && w.event_date > toF) return false;
+        return true;
+    });
+    // 沒有任何篩選時，只顯示最近 5 場，避免場次多了難管理
+    let truncated = false;
+    if (!hasFilter && list.length > 5) { list = list.slice(0, 5); truncated = true; }
+    if (hint) {
+        hint.textContent = hasFilter
+            ? `符合 ${list.length} 場`
+            : (truncated ? `顯示最近 5 場（共 ${leaveWindowsCache.length} 場，用上方日期搜尋更早的）` : '');
+    }
+    if (!list.length) {
+        el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:10px;">沒有符合條件的場次。</div>';
+        return;
+    }
+    el.innerHTML = list.map(w => `
         <div class="lw-card">
             <div>
                 <b>${w.event_date}　${w.session}</b>
@@ -2107,6 +2281,19 @@ async function createLeaveWindow() {
             body: JSON.stringify({ event_date, session, title, match_type })
         });
         const data = await res.json();
+        if (res.status === 409 && data.existing_window_id) {
+            // 同日期+場次已存在（可能是先前沒刪乾淨）→ 讓使用者選擇刪掉舊的重建
+            if (confirm(`「${event_date} ${session}」已經有一個場次了。\n是否刪除舊的、重新建立？\n（舊場次的請假/後備紀錄會一併清除）`)) {
+                await fetch(WORKER_URL + "/api/leave/windows/delete", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                    body: JSON.stringify({ window_id: data.existing_window_id })
+                });
+                return createLeaveWindow(); // 重試
+            }
+            await Promise.all([loadLeaveWindows(), loadLeaveBoard()]); // 刷新讓使用者看到那個舊場次
+            return;
+        }
         if (!res.ok) { alert('開放失敗：' + (data.error || res.status)); return; }
         document.getElementById('lw-title').value = '';
         await Promise.all([loadLeaveWindows(), loadLeaveBoard()]);
@@ -2130,12 +2317,17 @@ async function toggleLeaveWindow(windowId, status, version) {
 async function deleteLeaveWindow(windowId) {
     if (!confirm('確定刪除這個場次？該場所有請假/後備紀錄也會一併刪除。')) return;
     try {
-        await fetch(WORKER_URL + "/api/leave/windows/delete", {
+        const res = await fetch(WORKER_URL + "/api/leave/windows/delete", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
             body: JSON.stringify({ window_id: windowId })
         });
-        await loadLeaveWindows();
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            alert('刪除失敗：' + (d.error || res.status) + '\n（若你的後端還是舊版，請先更新 Worker 再試）');
+            return;
+        }
+        await Promise.all([loadLeaveWindows(), loadLeaveBoard()]);
     } catch (e) { alert('刪除失敗：' + e.message); }
 }
 
@@ -2156,6 +2348,8 @@ async function openWindowDetail(windowId) {
         const data = await res.json();
         window._wdLeave = new Set(data.leave || []);
         window._wdReserve = new Set(data.reserve || []);
+        window._wdNoshow = new Set(data.noshow || []);
+        window._wdLate = new Set(data.late || []);
         renderWindowDetail();
     } catch (e) {
         document.getElementById('wd-list').innerHTML = '<div style="color:var(--danger);">載入失敗：' + e.message + '</div>';
@@ -2167,23 +2361,43 @@ function renderWindowDetail() {
     const leaveSet = window._wdLeave || new Set();
     const reserveSet = window._wdReserve || new Set();
     const list = rosterCache.filter(m => !q || m.display_name.toLowerCase().includes(q));
-    document.getElementById('wd-list').innerHTML = list.map(m => {
-        const onLeave = leaveSet.has(m.member_id);
-        const onReserve = reserveSet.has(m.member_id);
+    // 依職業分組
+    const groups = {};
+    list.forEach(m => {
         const bm = boardMemberById[m.member_id];
-        const jobTag = bm && bm.job && bm.job !== '未知' ? `<span class="job-tag" style="background:var(--color-${bm.job}); margin-left:4px;">${bm.job}</span>` : '';
-        const statNum = bm ? `<span style="color:#97a0ad; font-size:11px; margin-left:4px;">${bm.attendance}/${bm.leave}/${bm.reserve}</span>` : '';
-        return `<div class="roster-row">
-            <div style="font-size:13px;">${m.display_name}${jobTag}${statNum}
-                ${onLeave ? '<span class="status-pill status-closed">請假</span>' : ''}
-                ${onReserve ? '<span class="badge-reserve" style="display:inline-block;">後備</span>' : ''}
+        const job = (bm && bm.job) ? bm.job : '未知';
+        (groups[job] = groups[job] || []).push(m);
+    });
+    const jobs = Object.keys(groups).sort();
+    if (!jobs.length) { document.getElementById('wd-list').innerHTML = '<div style="color:#aaa; padding:8px;">沒有符合的成員。</div>'; return; }
+    document.getElementById('wd-list').innerHTML = jobs.map(job => `
+        <div style="margin-bottom:10px;">
+            <div style="font-size:12px; font-weight:bold; color:#6b7684; border-bottom:1px solid #f0f0f0; padding-bottom:3px; margin-bottom:4px;">
+                <span class="job-tag" style="background:var(--color-${job})">${job}</span>（${groups[job].length}）
             </div>
-            <div style="display:flex; gap:6px;">
-                <button class="btn btn-outline" style="font-size:11px; padding:3px 8px;" onclick="wdAction('${m.member_id}', '${onLeave ? 'leave_cancel' : 'leave_request'}')">${onLeave ? '取消請假' : '設請假'}</button>
-                <button class="btn btn-outline" style="font-size:11px; padding:3px 8px; color:#e65100;" onclick="wdAction('${m.member_id}', '${onReserve ? 'reserve_unset' : 'reserve_set'}')">${onReserve ? '取消後備' : '設後備'}</button>
-            </div>
-        </div>`;
-    }).join('');
+            ${groups[job].map(m => {
+                const onLeave = leaveSet.has(m.member_id);
+                const onReserve = reserveSet.has(m.member_id);
+                const onNoshow = (window._wdNoshow || new Set()).has(m.member_id);
+                const onLate = (window._wdLate || new Set()).has(m.member_id);
+                const bm = boardMemberById[m.member_id];
+                const statNum = bm ? `<span style="color:#97a0ad; font-size:11px; margin-left:4px;">${bm.attendance}/${bm.leave}/${bm.reserve}</span>` : '';
+                return `<div class="roster-row" style="flex-wrap:wrap; gap:4px;">
+                    <div style="font-size:13px;">${m.display_name}${statNum}
+                        ${onLeave ? '<span class="status-pill status-closed">請假</span>' : ''}
+                        ${onReserve ? '<span class="badge-reserve" style="display:inline-block;">後備</span>' : ''}
+                        ${onNoshow ? '<span class="status-pill status-closed">No-show</span>' : ''}
+                        ${onLate ? '<span class="badge-reserve" style="display:inline-block;">臨時</span>' : ''}
+                    </div>
+                    <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                        <button class="btn btn-outline" style="font-size:11px; padding:3px 7px;" onclick="wdAction('${m.member_id}', '${onLeave ? 'leave_cancel' : 'leave_request'}')">${onLeave ? '取消請假' : '請假'}</button>
+                        <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#e65100;" onclick="wdAction('${m.member_id}', '${onReserve ? 'reserve_unset' : 'reserve_set'}')">${onReserve ? '取消後備' : '後備'}</button>
+                        <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:var(--danger);" onclick="wdAction('${m.member_id}', '${onNoshow ? 'noshow_unset' : 'noshow_set'}')">${onNoshow ? '取消No-show' : 'No-show'}</button>
+                        <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#8e6b00;" onclick="wdAction('${m.member_id}', '${onLate ? 'late_unset' : 'late_set'}')">${onLate ? '取消臨時' : '臨時請假'}</button>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>`).join('');
 }
 
 async function wdAction(memberId, action) {
@@ -2201,6 +2415,10 @@ async function wdAction(memberId, action) {
         else if (action === 'leave_cancel') window._wdLeave.delete(memberId);
         else if (action === 'reserve_set') window._wdReserve.add(memberId);
         else if (action === 'reserve_unset') window._wdReserve.delete(memberId);
+        else if (action === 'noshow_set') window._wdNoshow.add(memberId);
+        else if (action === 'noshow_unset') window._wdNoshow.delete(memberId);
+        else if (action === 'late_set') window._wdLate.add(memberId);
+        else if (action === 'late_unset') window._wdLate.delete(memberId);
         renderWindowDetail();
         loadLeaveWindows();
     } catch (e) { alert('操作失敗：' + e.message); }
@@ -2315,8 +2533,11 @@ const AUDIT_LABELS = {
     'roster/create': '新增成員', 'roster/delete': '移除成員', 'roster/rename': '成員更名',
     'roster/merge': '合併成員', 'roster/alias_link': '連結名字', 'roster/import': '批次匯入名單',
     'leave_window/create': '開放請假場次', 'leave_window/toggle': '開關場次', 'leave_window/delete': '刪除場次',
+    'roster/self_join': '自助建檔', 'roster/set_category': '設定身份類別',
     'leave_action/leave_request': '登記請假', 'leave_action/leave_cancel': '取消請假',
     'leave_action/reserve_set': '設為後備', 'leave_action/reserve_unset': '取消後備',
+    'leave_action/noshow_set': '標記No-show', 'leave_action/noshow_unset': '取消No-show',
+    'leave_action/late_set': '標記臨時請假', 'leave_action/late_unset': '取消臨時請假',
     'override/create': '調整次數', 'override/update': '調整次數', 'session/discord_settings': '更新Discord設定'
 };
 

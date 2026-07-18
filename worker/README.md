@@ -36,6 +36,7 @@
 | `003_leave_sessions.sql` | 里程碑 2–6 | `sessions`（多重登入）、`leave_windows` / `leave_actions`（請假）、`stat_overrides`（人工覆蓋次數）、`user_settings`（Discord 設定） |
 | `004_leave_window_type.sql` | 類型細分 | 幫 `leave_windows` 加 `match_type` 欄位（幫戰/約戰/領地戰），讓請假也能依類型分類與統計。**一句 ALTER，直接整段貼上執行即可**。 |
 | `005_roster_job.sql` | 自助建檔 | 幫 `members_roster` 加 `job` 欄位，讓公開頁自助建檔時可填職業。**一句 ALTER，直接整段貼上執行即可**。 |
+| `006_category_type_override.sql` | 身份類別 + 分類覆蓋 | 幫 `members_roster` 加 `category`（主幫/副幫/俱樂部…），幫 `stat_overrides` 加 `overrides_json`（依類型的人工覆蓋）。**兩句 ALTER，一句一句貼上執行**。若出現 `duplicate column name` 代表已加過，略過即可。 |
 
 ## 驗證資料表是否都建好了（貼到 D1 Console 執行）
 

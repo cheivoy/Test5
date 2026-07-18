@@ -141,18 +141,24 @@ async function computeMemberStats(env, owner) {
   let roster;
   try {
     ({ results: roster } = await env.DB.prepare(
-      "SELECT member_id, display_name, job FROM members_roster WHERE owner = ? AND status = 'active'"
+      "SELECT member_id, display_name, job, category FROM members_roster WHERE owner = ? AND status = 'active'"
     ).bind(owner).all());
   } catch (e) {
-    // job 欄位尚未建立（migration 005 還沒跑）
-    ({ results: roster } = await env.DB.prepare(
-      "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
-    ).bind(owner).all());
+    try {
+      ({ results: roster } = await env.DB.prepare(
+        "SELECT member_id, display_name, job FROM members_roster WHERE owner = ? AND status = 'active'"
+      ).bind(owner).all());
+    } catch (e2) {
+      // job / category 欄位尚未建立（migration 005/006 還沒跑）
+      ({ results: roster } = await env.DB.prepare(
+        "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
+      ).bind(owner).all());
+    }
   }
   const members = {};
   (roster || []).forEach(r => {
     // 職業預設用名冊自填值（自助建檔時填的），之後有戰報就以戰報實際職業為準
-    members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: r.job || '未知', attendance: 0, attendanceByType: {}, _latest: '' };
+    members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: r.job || '未知', category: r.category || '', attendance: 0, attendanceByType: {}, _latest: '' };
   });
 
   const { results: reports } = await env.DB.prepare(
@@ -176,22 +182,60 @@ async function computeMemberStats(env, owner) {
   }
 
   const stats = await computeLeaveStats(env, owner);
-  const { results: ovs } = await env.DB.prepare(
-    "SELECT member_id, attendance_override, leave_override, reserve_override FROM stat_overrides WHERE owner = ?"
-  ).bind(owner).all();
+  let ovs;
+  try {
+    ({ results: ovs } = await env.DB.prepare(
+      "SELECT member_id, attendance_override, leave_override, reserve_override, overrides_json FROM stat_overrides WHERE owner = ?"
+    ).bind(owner).all());
+  } catch (e) {
+    ({ results: ovs } = await env.DB.prepare(
+      "SELECT member_id, attendance_override, leave_override, reserve_override FROM stat_overrides WHERE owner = ?"
+    ).bind(owner).all());
+  }
   const ovMap = {};
   (ovs || []).forEach(o => { ovMap[o.member_id] = o; });
 
+  const TYPES = ['幫戰', '約戰', '其他'];
   Object.values(members).forEach(m => {
     const sm = stats.byMember[m.member_id];
-    const autoLeave = sm?.leave || 0;
-    const autoReserve = sm?.reserve || 0;
-    m.leaveByType = sm?.leaveByType || {};
-    m.reserveByType = sm?.reserveByType || {};
+    const autoAttByType = m.attendanceByType || {};
+    const autoLeaveByType = sm?.leaveByType || {};
+    const autoReserveByType = sm?.reserveByType || {};
+
     const o = ovMap[m.member_id];
-    m.leave = (o && o.leave_override != null) ? o.leave_override : autoLeave;
-    m.reserve = (o && o.reserve_override != null) ? o.reserve_override : autoReserve;
-    if (o && o.attendance_override != null) m.attendance = o.attendance_override;
+    let perType = null, hasOverride = false;
+    if (o && o.overrides_json) {
+      try { perType = JSON.parse(o.overrides_json); } catch (e) { perType = null; }
+    }
+
+    const attByType = {}, leaveByType = {}, reserveByType = {};
+    TYPES.forEach(t => {
+      const ot = (perType && perType[t]) ? perType[t] : {};
+      const a = (ot.attendance != null) ? ot.attendance : (autoAttByType[t] || 0);
+      const l = (ot.leave != null) ? ot.leave : (autoLeaveByType[t] || 0);
+      const r = (ot.reserve != null) ? ot.reserve : (autoReserveByType[t] || 0);
+      if (ot.attendance != null || ot.leave != null || ot.reserve != null) hasOverride = true;
+      attByType[t] = a; leaveByType[t] = l; reserveByType[t] = r;
+    });
+
+    let attendance = TYPES.reduce((s, t) => s + attByType[t], 0);
+    let leave = TYPES.reduce((s, t) => s + leaveByType[t], 0);
+    let reserve = TYPES.reduce((s, t) => s + reserveByType[t], 0);
+
+    // 舊版整體覆蓋（沒有 overrides_json 時才套用，向後相容）
+    if (!perType && o) {
+      if (o.attendance_override != null) { attendance = o.attendance_override; hasOverride = true; }
+      if (o.leave_override != null) { leave = o.leave_override; hasOverride = true; }
+      if (o.reserve_override != null) { reserve = o.reserve_override; hasOverride = true; }
+    }
+
+    m.attendance = attendance;
+    m.leave = leave;
+    m.reserve = reserve;
+    m.attendanceByType = attByType;
+    m.leaveByType = leaveByType;
+    m.reserveByType = reserveByType;
+    m.hasOverride = hasOverride;
     delete m._latest;
   });
   return members;
@@ -471,26 +515,30 @@ export default {
       // 🪪 身分對照表（member_id / alias），供前端把歷史戰報名字歸戶到同一個穩定成員
       // =========================
       if (url.pathname === "/api/roster/aliases") {
-        if (isShareMode) {
-          const owner = await getShareOwner();
-          if (!owner) return json({ aliases: [], roster: [] });
+        const loadAliasRoster = async (owner) => {
           const { results: aliases } = await env.DB.prepare(
             "SELECT alias_name, member_id FROM member_aliases WHERE owner = ?"
           ).bind(owner).all();
-          const { results: roster } = await env.DB.prepare(
-            "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
-          ).bind(owner).all();
-          return json({ aliases: aliases || [], roster: roster || [] });
+          let roster;
+          try {
+            ({ results: roster } = await env.DB.prepare(
+              "SELECT member_id, display_name, job, category FROM members_roster WHERE owner = ? AND status = 'active'"
+            ).bind(owner).all());
+          } catch (e) {
+            ({ results: roster } = await env.DB.prepare(
+              "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
+            ).bind(owner).all());
+          }
+          return { aliases: aliases || [], roster: roster || [] };
+        };
+        if (isShareMode) {
+          const owner = await getShareOwner();
+          if (!owner) return json({ aliases: [], roster: [] });
+          return json(await loadAliasRoster(owner));
         }
         requireAuth();
         await ensureRosterBackfilled(env, user);
-        const { results: aliases } = await env.DB.prepare(
-          "SELECT alias_name, member_id FROM member_aliases WHERE owner = ?"
-        ).bind(user).all();
-        const { results: roster } = await env.DB.prepare(
-          "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
-        ).bind(user).all();
-        return json({ aliases: aliases || [], roster: roster || [] });
+        return json(await loadAliasRoster(user));
       }
 
       // =========================
@@ -499,10 +547,33 @@ export default {
       if (url.pathname === "/api/roster" && request.method === "GET") {
         requireAuth();
         await ensureRosterBackfilled(env, user);
-        const { results } = await env.DB.prepare(
-          "SELECT member_id, display_name, status FROM members_roster WHERE owner = ? AND status = 'active' ORDER BY display_name"
-        ).bind(user).all();
+        let results;
+        try {
+          ({ results } = await env.DB.prepare(
+            "SELECT member_id, display_name, status, job, category FROM members_roster WHERE owner = ? AND status = 'active' ORDER BY display_name"
+          ).bind(user).all());
+        } catch (e) {
+          ({ results } = await env.DB.prepare(
+            "SELECT member_id, display_name, status FROM members_roster WHERE owner = ? AND status = 'active' ORDER BY display_name"
+          ).bind(user).all());
+        }
         return json(results || []);
+      }
+
+      // 設定成員身份類別（主幫/副幫/俱樂部/自訂）
+      if (url.pathname === "/api/roster/category" && request.method === "POST") {
+        requireAuth();
+        const { member_id, category } = await request.json();
+        if (!member_id) return json({ error: "參數錯誤" }, 400);
+        try {
+          await env.DB.prepare(
+            "UPDATE members_roster SET category=?, updated_at=? WHERE member_id=? AND owner=?"
+          ).bind(category || null, Date.now(), member_id, user).run();
+        } catch (e) {
+          return json({ error: "category 欄位尚未建立，請先執行 migration 006" }, 500);
+        }
+        await writeAudit(env, user, user, 'roster', member_id, 'set_category', { category: category || '' });
+        return json({ status: "OK" });
       }
 
       if (url.pathname === "/api/roster/add" && request.method === "POST") {
@@ -649,32 +720,44 @@ export default {
       if (url.pathname === "/api/roster/override" && request.method === "POST") {
         requireAuth();
         const b = await request.json();
-        const { member_id, attendance_override, leave_override, reserve_override, note, expected_version } = b;
+        const { member_id, overrides, note, expected_version } = b;
         if (!member_id) return json({ error: "參數錯誤" }, 400);
         const now = Date.now();
         const cur = await env.DB.prepare(
           "SELECT version FROM stat_overrides WHERE member_id = ? AND owner = ?"
         ).bind(member_id, user).first();
 
+        // overrides = { 幫戰:{attendance,leave,reserve}, 約戰:{...}, 其他:{...} }，空值＝用自動
         const norm = (v) => (v === '' || v === null || v === undefined) ? null : Number(v);
+        const cleaned = {};
+        ['幫戰', '約戰', '其他'].forEach(t => {
+          const o = (overrides && overrides[t]) ? overrides[t] : {};
+          const a = norm(o.attendance), l = norm(o.leave), r = norm(o.reserve);
+          if (a != null || l != null || r != null) cleaned[t] = { attendance: a, leave: l, reserve: r };
+        });
+        const ovJson = Object.keys(cleaned).length ? JSON.stringify(cleaned) : null;
 
         if (!cur) {
-          await env.DB.prepare(
-            "INSERT INTO stat_overrides (member_id, owner, attendance_override, leave_override, reserve_override, note, version, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)"
-          ).bind(member_id, user, norm(attendance_override), norm(leave_override), norm(reserve_override), note || null, now, user).run();
-          await writeAudit(env, user, user, 'override', member_id, 'create', b);
+          try {
+            await env.DB.prepare(
+              "INSERT INTO stat_overrides (member_id, owner, note, overrides_json, version, updated_at, updated_by) VALUES (?, ?, ?, ?, 1, ?, ?)"
+            ).bind(member_id, user, note || null, ovJson, now, user).run();
+          } catch (e) {
+            return json({ error: "overrides_json 欄位尚未建立，請先執行 migration 006" }, 500);
+          }
+          await writeAudit(env, user, user, 'override', member_id, 'create', { overrides: cleaned });
           return json({ status: "OK", version: 1 });
         }
         if (typeof expected_version === 'number' && expected_version !== cur.version) {
           return json({ error: "資料已被其他人更新，請重新整理後再改", current_version: cur.version }, 409);
         }
         const res = await env.DB.prepare(
-          "UPDATE stat_overrides SET attendance_override=?, leave_override=?, reserve_override=?, note=?, version=version+1, updated_at=?, updated_by=? WHERE member_id=? AND owner=? AND version=?"
-        ).bind(norm(attendance_override), norm(leave_override), norm(reserve_override), note || null, now, user, member_id, user, cur.version).run();
+          "UPDATE stat_overrides SET note=?, overrides_json=?, attendance_override=NULL, leave_override=NULL, reserve_override=NULL, version=version+1, updated_at=?, updated_by=? WHERE member_id=? AND owner=? AND version=?"
+        ).bind(note || null, ovJson, now, user, member_id, user, cur.version).run();
         if (!res.meta || res.meta.changes === 0) {
           return json({ error: "資料已被其他人更新，請重新整理後再改", current_version: cur.version }, 409);
         }
-        await writeAudit(env, user, user, 'override', member_id, 'update', b);
+        await writeAudit(env, user, user, 'override', member_id, 'update', { overrides: cleaned });
         return json({ status: "OK", version: cur.version + 1 });
       }
 
@@ -685,9 +768,16 @@ export default {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
         if (!owner) return json([]);
-        const { results } = await env.DB.prepare(
-          "SELECT member_id, attendance_override, leave_override, reserve_override, note, version FROM stat_overrides WHERE owner = ?"
-        ).bind(owner).all();
+        let results;
+        try {
+          ({ results } = await env.DB.prepare(
+            "SELECT member_id, attendance_override, leave_override, reserve_override, note, version, overrides_json FROM stat_overrides WHERE owner = ?"
+          ).bind(owner).all());
+        } catch (e) {
+          ({ results } = await env.DB.prepare(
+            "SELECT member_id, attendance_override, leave_override, reserve_override, note, version FROM stat_overrides WHERE owner = ?"
+          ).bind(owner).all());
+        }
         return json(results || []);
       }
 
@@ -725,9 +815,9 @@ export default {
         if (!event_date || !session) return json({ error: "請選擇日期與場次" }, 400);
         const mtype = match_type || '幫戰';
         const dup = await env.DB.prepare(
-          "SELECT window_id FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ?"
+          "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ?"
         ).bind(user, event_date, session).first();
-        if (dup) return json({ error: "這個日期＋場次已經開過請假了" }, 400);
+        if (dup) return json({ error: "這個日期＋場次已經開過請假了", existing_window_id: dup.window_id, existing_status: dup.status }, 409);
         const windowId = crypto.randomUUID();
         const now = Date.now();
         try {
@@ -789,7 +879,8 @@ export default {
       if (url.pathname === "/api/leave/actions" && request.method === "POST") {
         requireAuth();
         const { window_id, member_id, action } = await request.json();
-        const allowed = ['leave_request', 'leave_cancel', 'reserve_set', 'reserve_unset'];
+        const allowed = ['leave_request', 'leave_cancel', 'reserve_set', 'reserve_unset',
+          'noshow_set', 'noshow_unset', 'late_set', 'late_unset'];
         if (!window_id || !member_id || !allowed.includes(action)) return json({ error: "參數錯誤" }, 400);
         const win = await env.DB.prepare("SELECT window_id FROM leave_windows WHERE window_id = ? AND owner = ?").bind(window_id, user).first();
         if (!win) return json({ error: "找不到場次" }, 404);
@@ -800,16 +891,61 @@ export default {
         return json({ status: "OK" });
       }
 
-      // 單一場次目前的請假/後備名單（管理員用）
+      // 單一場次目前的請假/後備/No-show/臨時請假名單（管理員用）
       if (url.pathname === "/api/leave/window-members" && request.method === "GET") {
         requireAuth();
         const windowId = url.searchParams.get("window_id");
         if (!windowId) return json({ error: "參數錯誤" }, 400);
-        const stats = await computeLeaveStats(env, user);
-        return json({
-          leave: stats.byWindow[windowId]?.leave || [],
-          reserve: stats.byWindow[windowId]?.reserve || []
+        const { results } = await env.DB.prepare(
+          "SELECT member_id, action, created_at FROM leave_actions WHERE owner = ? AND window_id = ? ORDER BY created_at ASC"
+        ).bind(user, windowId).all();
+        const st = { leave: {}, reserve: {}, noshow: {}, late: {} };
+        for (const a of results || []) {
+          if (a.action === 'leave_request') st.leave[a.member_id] = true;
+          else if (a.action === 'leave_cancel') st.leave[a.member_id] = false;
+          else if (a.action === 'reserve_set') st.reserve[a.member_id] = true;
+          else if (a.action === 'reserve_unset') st.reserve[a.member_id] = false;
+          else if (a.action === 'noshow_set') st.noshow[a.member_id] = true;
+          else if (a.action === 'noshow_unset') st.noshow[a.member_id] = false;
+          else if (a.action === 'late_set') st.late[a.member_id] = true;
+          else if (a.action === 'late_unset') st.late[a.member_id] = false;
+        }
+        const collect = (o) => Object.keys(o).filter(k => o[k]);
+        return json({ leave: collect(st.leave), reserve: collect(st.reserve), noshow: collect(st.noshow), late: collect(st.late) });
+      }
+
+      // 某成員的 No-show / 臨時請假 紀錄（含日期，僅管理員；唯讀分享不提供）
+      if (url.pathname === "/api/leave/member-flags" && request.method === "GET") {
+        requireAuth();
+        const memberId = url.searchParams.get("member_id");
+        if (!memberId) return json([]);
+        const { results } = await env.DB.prepare(
+          "SELECT window_id, action, created_at FROM leave_actions WHERE owner = ? AND member_id = ? AND action IN ('noshow_set','noshow_unset','late_set','late_unset') ORDER BY created_at ASC"
+        ).bind(user, memberId).all();
+        const noshow = {}, late = {};
+        for (const a of results || []) {
+          if (a.action === 'noshow_set') noshow[a.window_id] = true;
+          else if (a.action === 'noshow_unset') noshow[a.window_id] = false;
+          else if (a.action === 'late_set') late[a.window_id] = true;
+          else if (a.action === 'late_unset') late[a.window_id] = false;
+        }
+        const winIds = [...new Set([...Object.keys(noshow), ...Object.keys(late)])].filter(w => noshow[w] || late[w]);
+        if (!winIds.length) return json([]);
+        const ph = winIds.map(() => "?").join(",");
+        const { results: wins } = await env.DB.prepare(
+          `SELECT window_id, event_date, session FROM leave_windows WHERE owner = ? AND window_id IN (${ph})`
+        ).bind(user, ...winIds).all();
+        const winMap = {};
+        (wins || []).forEach(w => { winMap[w.window_id] = w; });
+        const out = [];
+        winIds.forEach(w => {
+          const wi = winMap[w];
+          if (!wi) return;
+          if (noshow[w]) out.push({ date: wi.event_date, session: wi.session, type: 'noshow' });
+          if (late[w]) out.push({ date: wi.event_date, session: wi.session, type: 'late' });
         });
+        out.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        return json(out);
       }
 
       // 每個成員的請假/後備次數（share 唯讀 / 登入）

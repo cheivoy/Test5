@@ -179,6 +179,9 @@
                     <option value="機動團">機動團</option>
                     <option value="none">無標籤</option>
                 </select>
+                <select id="db-category" class="select-input" onchange="renderDbTable()">
+                    <option value="all">全部身份</option>
+                </select>
             </div>
             <div class="table-card">
                 <table>
@@ -186,6 +189,7 @@
                         <tr>
                             <th onclick="sortDb('id')">玩家 ID ↕</th>
                             <th onclick="sortDb('last_job')">最近職業 ↕</th>
+                            <th onclick="sortDb('category')">身份 ↕</th>
                             <th onclick="sortDb('tag')">所屬分類 ↕</th>
                             <th onclick="sortDb('matches')">總場次 ↕</th>
                             <th>幫戰/約戰/領地戰</th>
@@ -226,6 +230,19 @@
                     <input type="text" id="lw-title" class="search-input" style="max-width:220px;" placeholder="場次備註（選填）">
                     <button class="btn btn-primary" onclick="createLeaveWindow()">➕ 開放請假</button>
                 </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding-top:10px; border-top:1px dashed #eee;">
+                    <span style="font-size:12px; color:#97a0ad;">篩選：</span>
+                    <select id="lw-filter-status" class="select-input" onchange="renderLeaveWindows()">
+                        <option value="all">全部狀態</option>
+                        <option value="open">開放中</option>
+                        <option value="closed">已關閉</option>
+                    </select>
+                    <input type="date" id="lw-filter-from" class="select-input" onchange="renderLeaveWindows()" title="起始日期">
+                    <span style="color:#aaa; font-size:12px;">至</span>
+                    <input type="date" id="lw-filter-to" class="select-input" onchange="renderLeaveWindows()" title="結束日期">
+                    <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="clearLeaveWindowFilter()">清除</button>
+                    <span id="lw-filter-hint" style="font-size:11px; color:#aaa;"></span>
+                </div>
                 <div id="leave-windows-list"></div>
             </div>
 
@@ -263,18 +280,29 @@
         </div>
     </div>
 
-    <!-- 出席/請假/後備 人工覆蓋 Modal -->
+    <!-- 出席/請假/後備 人工覆蓋 Modal（依類型：幫戰/約戰/領地戰） -->
     <div id="override-modal" onclick="closeModal('override-modal')">
-        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:420px;">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:460px;">
             <h3 style="margin-top:0;">✏️ 手動調整次數 · <span id="ov-name"></span></h3>
-            <p style="font-size:12px; color:#97a0ad;">留空＝使用系統自動計算值。填數字＝強制覆蓋（不會影響戰報與請假原始紀錄）。</p>
-            <label style="font-size:13px; font-weight:bold;">出席次數（自動：<span id="ov-auto-att">0</span>）</label>
-            <input type="number" id="ov-att" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="留空＝自動">
-            <label style="font-size:13px; font-weight:bold;">請假次數（自動：<span id="ov-auto-leave">0</span>）</label>
-            <input type="number" id="ov-leave" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="留空＝自動">
-            <label style="font-size:13px; font-weight:bold;">後備次數（自動：<span id="ov-auto-reserve">0</span>）</label>
-            <input type="number" id="ov-reserve" class="search-input" style="width:100%; margin-bottom:16px;" placeholder="留空＝自動">
-            <button class="btn btn-primary" style="width:100%;" onclick="saveOverride()">💾 儲存</button>
+            <p style="font-size:12px; color:#97a0ad;">每個類型可分別調整。灰字＝系統自動值，留空即用自動；填數字＝強制覆蓋該類型（不影響戰報與請假原始紀錄）。總計＝三類型加總。</p>
+            <div style="overflow-x:auto;">
+                <table style="width:100%; font-size:13px;">
+                    <thead><tr>
+                        <th style="text-align:left; padding:6px;">類型</th>
+                        <th style="padding:6px;">出席</th>
+                        <th style="padding:6px;">請假</th>
+                        <th style="padding:6px;">後備</th>
+                    </tr></thead>
+                    <tbody id="ov-grid"></tbody>
+                    <tfoot><tr style="border-top:2px solid #eee;">
+                        <td style="padding:6px; font-weight:bold;">總計</td>
+                        <td style="padding:6px; text-align:center; font-weight:bold;" id="ov-total-att">0</td>
+                        <td style="padding:6px; text-align:center; font-weight:bold;" id="ov-total-leave">0</td>
+                        <td style="padding:6px; text-align:center; font-weight:bold;" id="ov-total-reserve">0</td>
+                    </tr></tfoot>
+                </table>
+            </div>
+            <button class="btn btn-primary" style="width:100%; margin-top:14px;" onclick="saveOverride()">💾 儲存</button>
             <div id="ov-msg" style="margin-top:10px; font-size:13px; color:var(--danger);"></div>
         </div>
     </div>
@@ -335,6 +363,12 @@
                         <option value="機動團">機動團</option>
                     </select>
                     <span id="mm-tag-view" style="display:none;" class="hash-tag"></span>
+                    身份：<select id="mm-category" class="select-input admin-only" onchange="onCategorySelectChange(this)"></select>
+                    <span id="mm-category-view" style="display:none;" class="hash-tag"></span>
+                </div>
+                <div class="admin-only" id="mm-flags-box" style="margin-top:12px;">
+                    <p style="font-weight:bold; margin-bottom:6px;">管理紀錄（No-show / 臨時請假）：</p>
+                    <div id="mm-flags" style="font-size:13px;"></div>
                 </div>
                 <p style="margin-top:15px; font-weight:bold;">數據快照（最近5場）：</p>
                 <div id="mm-history-list" class="scroll-list"></div>
