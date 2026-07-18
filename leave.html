@@ -38,6 +38,18 @@
     <div class="card">
         <input type="text" id="name-search" class="search-input" placeholder="🔍 輸入你的名字搜尋…" oninput="renderNames()">
         <div id="name-list" style="margin-top:12px;"></div>
+        <div style="margin-top:10px; border-top:1px dashed #e5e8ec; padding-top:10px;">
+            <div style="font-size:12px; color:#97a0ad;">找不到自己的名字？（改名了或還沒建檔）</div>
+            <button class="name-btn" style="margin-top:6px;" onclick="toggleJoinForm()">➕ 自助建檔</button>
+            <div id="join-form" style="display:none; margin-top:10px;">
+                <input type="text" id="join-name" class="search-input" style="margin-bottom:8px;" placeholder="你的遊戲名字">
+                <select id="join-job" class="search-input" style="margin-bottom:8px;">
+                    <option value="">選擇職業（選填）</option>
+                </select>
+                <button class="toggle-btn toggle-leave" style="width:100%;" onclick="submitJoin()">建立並找到我</button>
+                <div style="font-size:11px; color:#97a0ad; margin-top:6px;">送出後即可登記請假。若你其實是改名，管理員之後會幫你把舊紀錄合併過來。</div>
+            </div>
+        </div>
     </div>
 
     <div class="card" id="window-card" style="display:none;">

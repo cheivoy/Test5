@@ -10,6 +10,7 @@ let memberById = {};
 let selectedMemberId = null;
 
 const TYPE_ORDER = ['幫戰', '約戰', '其他'];
+const JOB_LIST = ['碎夢', '神相', '血河', '九靈', '玄機', '龍吟', '鐵衣', '素問', '潮光'];
 function fmtType(t) { return t === '其他' ? '領地戰' : (t || '幫戰'); }
 function memberTypeTooltip(m) {
     return TYPE_ORDER.map(t => {
@@ -33,18 +34,32 @@ async function loadBoard() {
         return;
     }
     try {
-        const res = await fetch(`${WORKER_URL}/api/leave/board?share=${encodeURIComponent(shareId)}&t=${Date.now()}`, { cache: "no-store" });
+        // 用 public/board（新舊後端都有這條路徑，避免版本不一致時卡「唯讀模式」）
+        const res = await fetch(`${WORKER_URL}/api/leave/public/board?share=${encodeURIComponent(shareId)}&t=${Date.now()}`, { cache: "no-store" });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             document.getElementById('sub-line').textContent = "⚠️ " + (err.error || "連結無效或已失效");
             return;
         }
         board = await res.json();
+        // 相容舊後端：只回傳 roster（沒有 members/統計）時，補成 members 結構
+        if ((!board.members || !board.members.length) && Array.isArray(board.roster)) {
+            board.members = board.roster.map(r => ({
+                member_id: r.member_id, display_name: r.display_name, job: '未知',
+                attendance: 0, leave: 0, reserve: 0,
+                attendanceByType: {}, leaveByType: {}, reserveByType: {}
+            }));
+        }
         memberById = {};
         (board.members || []).forEach(m => { memberById[m.member_id] = m; });
         if (board.guild) document.getElementById('guild-title').textContent = `${board.guild} · 請假登記`;
         if (!board.windows || board.windows.length === 0) {
             document.getElementById('empty-state').style.display = 'block';
+        }
+        // 職業下拉選單
+        const jobSel = document.getElementById('join-job');
+        if (jobSel && jobSel.options.length <= 1) {
+            jobSel.innerHTML = '<option value="">選擇職業（選填）</option>' + JOB_LIST.map(j => `<option value="${j}">${j}</option>`).join('');
         }
         renderNames();
         renderBoard();
@@ -52,6 +67,39 @@ async function loadBoard() {
     } catch (e) {
         document.getElementById('sub-line').textContent = "⚠️ 連線失敗，請稍後再試";
     }
+}
+
+// ---- 自助建檔 ----
+function toggleJoinForm() {
+    const f = document.getElementById('join-form');
+    f.style.display = f.style.display === 'none' ? 'block' : 'none';
+    if (f.style.display === 'block') {
+        const s = document.getElementById('name-search').value.trim();
+        if (s) document.getElementById('join-name').value = s;
+    }
+}
+
+async function submitJoin() {
+    const name = document.getElementById('join-name').value.trim();
+    const job = document.getElementById('join-job').value;
+    if (!name) { toast('請輸入名字'); return; }
+    try {
+        const res = await fetch(`${WORKER_URL}/api/leave/public/join?share=${encodeURIComponent(shareId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, job })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { toast('⚠️ ' + (data.error || '建立失敗')); return; }
+        toast(data.existed ? '已找到你的名字' : '✅ 建檔成功');
+        document.getElementById('join-form').style.display = 'none';
+        // 重新載入看板，並自動選中剛建立的自己
+        const newId = data.member_id;
+        await loadBoard();
+        document.getElementById('name-search').value = name;
+        renderNames();
+        if (newId && memberById[newId]) selectMember(newId);
+    } catch (e) { toast('⚠️ 連線失敗，請稍後再試'); }
 }
 
 // ---- 依職業分組 ----

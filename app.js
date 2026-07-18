@@ -1196,6 +1196,7 @@ function renderDbTable() {
             <td class="admin-only">
                 <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
                 <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); mergeP('${m.id}')">合併</button>
+                ${m.member_id ? `<button class="btn btn-outline" style="padding:2px 8px; color:var(--danger);" onclick="event.stopPropagation(); deleteRosterMember('${m.member_id}', '${(m.id || '').replace(/'/g, "\\'")}')">移除</button>` : ''}
             </td>
         </tr>
     `).join('');
@@ -2276,7 +2277,11 @@ async function deleteRosterMember(memberId, name) {
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
             body: JSON.stringify({ member_id: memberId })
         });
-        await loadRoster();
+        // 依目前所在頁面刷新
+        const leaveVisible = document.getElementById('page-leave')?.style.display !== 'none';
+        const dbVisible = document.getElementById('page-db')?.style.display !== 'none';
+        if (leaveVisible) await loadRoster();
+        if (dbVisible) await loadDbData();
     } catch (e) { alert('移除失敗：' + e.message); }
 }
 

@@ -138,12 +138,21 @@ async function computeMemberStats(env, owner) {
   const aliasMap = {};
   (aliases || []).forEach(a => { aliasMap[a.alias_name] = a.member_id; });
 
-  const { results: roster } = await env.DB.prepare(
-    "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
-  ).bind(owner).all();
+  let roster;
+  try {
+    ({ results: roster } = await env.DB.prepare(
+      "SELECT member_id, display_name, job FROM members_roster WHERE owner = ? AND status = 'active'"
+    ).bind(owner).all());
+  } catch (e) {
+    // job 欄位尚未建立（migration 005 還沒跑）
+    ({ results: roster } = await env.DB.prepare(
+      "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
+    ).bind(owner).all());
+  }
   const members = {};
   (roster || []).forEach(r => {
-    members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: '未知', attendance: 0, attendanceByType: {}, _latest: '' };
+    // 職業預設用名冊自填值（自助建檔時填的），之後有戰報就以戰報實際職業為準
+    members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: r.job || '未知', attendance: 0, attendanceByType: {}, _latest: '' };
   });
 
   const { results: reports } = await env.DB.prepare(
@@ -848,6 +857,53 @@ export default {
         // roster 欄位保留給舊版前端相容（只含 member_id + display_name）
         const roster = members.map(m => ({ member_id: m.member_id, display_name: m.display_name }));
         return json({ guild: u?.guild || "", windows: windows || [], members, roster, leaveByWindow, reserveByWindow });
+      }
+
+      // =========================
+      // 🌐 公開請假頁：自助建檔（找不到名字時，免登入輸入名字＋職業）
+      //     建立為「新成員」；若其實是改名，管理員之後可用「合併」歸戶
+      // =========================
+      if (url.pathname === "/api/leave/public/join" && request.method === "POST") {
+        if (!shareId) return json({ error: "缺少 share" }, 400);
+        const owner = await getShareOwner();
+        if (!owner) return json({ error: "連結無效" }, 404);
+        const { name, job } = await request.json();
+        const nm = (name || "").trim();
+        if (!nm) return json({ error: "請輸入名字" }, 400);
+        if (nm.length > 20) return json({ error: "名字太長" }, 400);
+
+        // 粗略限流
+        const since = Date.now() - 5000;
+        const recent = await env.DB.prepare(
+          "SELECT COUNT(*) c FROM audit_log WHERE owner = ? AND actor = 'public' AND created_at > ?"
+        ).bind(owner, since).first();
+        if ((recent?.c || 0) > 30) return json({ error: "操作太頻繁，請稍後再試" }, 429);
+
+        // 已存在 → 直接回傳，讓他找到自己就好（不重複建）
+        const exist = await env.DB.prepare(
+          "SELECT member_id FROM members_roster WHERE owner = ? AND display_name = ? AND status = 'active'"
+        ).bind(owner, nm).first();
+        if (exist) return json({ status: "OK", member_id: exist.member_id, existed: true });
+
+        const memberId = crypto.randomUUID();
+        const now = Date.now();
+        try {
+          await env.DB.prepare(
+            "INSERT INTO members_roster (member_id, owner, display_name, status, version, created_at, updated_at, job) VALUES (?, ?, ?, 'active', 1, ?, ?, ?)"
+          ).bind(memberId, owner, nm, now, now, job || null).run();
+        } catch (e) {
+          await env.DB.prepare(
+            "INSERT INTO members_roster (member_id, owner, display_name, status, version, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?)"
+          ).bind(memberId, owner, nm, now, now).run();
+        }
+        await env.DB.prepare(
+          "INSERT INTO member_aliases (alias_name, owner, member_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(alias_name, owner) DO NOTHING"
+        ).bind(nm, owner, memberId, now).run();
+        await writeAudit(env, owner, 'public', 'roster', memberId, 'self_join', { display_name: nm, job: job || '' });
+        await notifyDiscord(env, owner, {
+          embeds: [{ title: "🆕 自助建檔", description: `**${nm}**${job ? " · " + job : ""}`, color: 3066993 }]
+        });
+        return json({ status: "OK", member_id: memberId });
       }
 
       // =========================

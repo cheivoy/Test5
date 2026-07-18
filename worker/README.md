@@ -35,6 +35,7 @@
 | `002_identity_roster.sql` | 里程碑 1 | `members_roster` / `member_aliases`（穩定身分）+ `audit_log`（操作紀錄） |
 | `003_leave_sessions.sql` | 里程碑 2–6 | `sessions`（多重登入）、`leave_windows` / `leave_actions`（請假）、`stat_overrides`（人工覆蓋次數）、`user_settings`（Discord 設定） |
 | `004_leave_window_type.sql` | 類型細分 | 幫 `leave_windows` 加 `match_type` 欄位（幫戰/約戰/領地戰），讓請假也能依類型分類與統計。**一句 ALTER，直接整段貼上執行即可**。 |
+| `005_roster_job.sql` | 自助建檔 | 幫 `members_roster` 加 `job` 欄位，讓公開頁自助建檔時可填職業。**一句 ALTER，直接整段貼上執行即可**。 |
 
 ## 驗證資料表是否都建好了（貼到 D1 Console 執行）
 
