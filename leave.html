@@ -20,6 +20,12 @@
         .toggle-leave { background: #e57373; color: #fff; }
         .toggle-cancel { background: #fff; color: #e57373; border: 1px solid #e57373; }
         .badge-reserve { font-size: 11px; background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+        .job-group { margin: 8px 0; }
+        .job-head { font-size: 12px; font-weight: bold; color: #6b7684; margin-bottom: 4px; }
+        .job-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 3px 8px; border-radius: 12px; background: #eef2f7; font-size: 13px; }
+        .stat-num { font-size: 11px; color: #97a0ad; }
+        .win-block { border: 1px solid #f0f0f0; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+        .win-block-title { font-weight: bold; font-size: 14px; margin-bottom: 6px; }
         .muted { color: #97a0ad; font-size: 13px; text-align: center; padding: 20px; }
         .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #323a45; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
         .toast.show { opacity: 1; }
@@ -35,9 +41,20 @@
     </div>
 
     <div class="card" id="window-card" style="display:none;">
-        <div style="font-weight:bold; margin-bottom:6px;">👤 <span id="selected-name"></span></div>
+        <div style="font-weight:bold; margin-bottom:2px;">👤 <span id="selected-name"></span></div>
+        <div id="selected-stats" style="font-size:12px; color:#8e9aaf; margin-bottom:8px;"></div>
         <div style="font-size:12px; color:#97a0ad; margin-bottom:10px;">點右側按鈕即可請假或取消。後備由管理員安排。</div>
         <div id="window-list"></div>
+    </div>
+
+    <div class="card" id="board-card" style="display:none;">
+        <div style="font-weight:bold; margin-bottom:8px;">📋 各場次請假名單（依職業）</div>
+        <div id="board-list"></div>
+    </div>
+
+    <div class="card" id="roster-overview-card" style="display:none;">
+        <div style="font-weight:bold; cursor:pointer;" onclick="toggleOverview()">📊 全體出席/請假/後備記錄　<span id="overview-caret">▸</span></div>
+        <div id="roster-overview" style="display:none; margin-top:10px;"></div>
     </div>
 
     <div id="empty-state" class="muted" style="display:none;">目前沒有開放中的請假場次。</div>

@@ -69,12 +69,26 @@ async function ensureMemberFor(env, owner, name) {
 }
 
 // 從 leave_actions 算出每個成員目前的請假/後備狀態（最新一筆事件決定狀態）
-// 回傳 { byMember: {member_id: {leave, reserve}}, byWindow: {window_id: {leave:Set, reserve:Set}} }
+// 回傳 { byMember: {member_id: {leave, reserve, leaveByType, reserveByType}}, byWindow: {window_id: {leave:[], reserve:[]}} }
 async function computeLeaveStats(env, owner) {
+  // 每個場次的類型（幫戰/約戰/其他=領地戰），供請假/後備依類型細分
+  const winType = {};
+  try {
+    const { results: wins } = await env.DB.prepare(
+      "SELECT window_id, match_type FROM leave_windows WHERE owner = ?"
+    ).bind(owner).all();
+    (wins || []).forEach(w => { winType[w.window_id] = w.match_type || '幫戰'; });
+  } catch (e) {
+    // match_type 欄位尚未建立（migration 004 還沒跑）→ 全部視為幫戰
+    const { results: wins } = await env.DB.prepare(
+      "SELECT window_id FROM leave_windows WHERE owner = ?"
+    ).bind(owner).all();
+    (wins || []).forEach(w => { winType[w.window_id] = '幫戰'; });
+  }
+
   const { results } = await env.DB.prepare(
     "SELECT window_id, member_id, action, created_at FROM leave_actions WHERE owner = ? ORDER BY created_at ASC"
   ).bind(owner).all();
-  // 針對每個 (window, member) 分別記錄「請假類」與「後備類」的最新狀態
   const leaveState = {};   // key `${window}|${member}` -> bool
   const reserveState = {};
   for (const a of results || []) {
@@ -86,9 +100,9 @@ async function computeLeaveStats(env, owner) {
   }
   const byMember = {};
   const byWindow = {};
-  const bump = (mid, field) => {
-    if (!byMember[mid]) byMember[mid] = { leave: 0, reserve: 0 };
-    byMember[mid][field]++;
+  const ensureMember = (mid) => {
+    if (!byMember[mid]) byMember[mid] = { leave: 0, reserve: 0, leaveByType: {}, reserveByType: {} };
+    return byMember[mid];
   };
   const ensureWin = (wid) => {
     if (!byWindow[wid]) byWindow[wid] = { leave: [], reserve: [] };
@@ -97,16 +111,81 @@ async function computeLeaveStats(env, owner) {
   for (const key in leaveState) {
     if (!leaveState[key]) continue;
     const [wid, mid] = key.split("|");
-    bump(mid, 'leave');
+    const t = winType[wid] || '幫戰';
+    const m = ensureMember(mid);
+    m.leave++;
+    m.leaveByType[t] = (m.leaveByType[t] || 0) + 1;
     ensureWin(wid).leave.push(mid);
   }
   for (const key in reserveState) {
     if (!reserveState[key]) continue;
     const [wid, mid] = key.split("|");
-    bump(mid, 'reserve');
+    const t = winType[wid] || '幫戰';
+    const m = ensureMember(mid);
+    m.reserve++;
+    m.reserveByType[t] = (m.reserveByType[t] || 0) + 1;
     ensureWin(wid).reserve.push(mid);
   }
   return { byMember, byWindow };
+}
+
+// 彙整每個在職成員的：職業（依最新一場）、出席次數、請假次數、後備次數（含人工覆蓋）
+// 回傳 map: member_id -> { member_id, display_name, job, attendance, leave, reserve }
+async function computeMemberStats(env, owner) {
+  const { results: aliases } = await env.DB.prepare(
+    "SELECT alias_name, member_id FROM member_aliases WHERE owner = ?"
+  ).bind(owner).all();
+  const aliasMap = {};
+  (aliases || []).forEach(a => { aliasMap[a.alias_name] = a.member_id; });
+
+  const { results: roster } = await env.DB.prepare(
+    "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
+  ).bind(owner).all();
+  const members = {};
+  (roster || []).forEach(r => {
+    members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: '未知', attendance: 0, attendanceByType: {}, _latest: '' };
+  });
+
+  const { results: reports } = await env.DB.prepare(
+    "SELECT date, raw_json FROM reports WHERE owner = ?"
+  ).bind(owner).all();
+  for (const rep of reports || []) {
+    let d; try { d = JSON.parse(rep.raw_json); } catch { continue; }
+    const session = d.session || '第一場';
+    const type = d.matchType || '幫戰';
+    const sortKey = (rep.date || '') + '|' + (session === '第二場' ? '2' : '1');
+    (d.gA || []).forEach(p => {
+      const mid = aliasMap[p.name];
+      if (!mid || !members[mid]) return; // 只計入名冊內（已歸戶）的成員
+      members[mid].attendance++;
+      members[mid].attendanceByType[type] = (members[mid].attendanceByType[type] || 0) + 1;
+      if (sortKey >= members[mid]._latest) {
+        members[mid]._latest = sortKey;
+        if (p.job) members[mid].job = p.job;
+      }
+    });
+  }
+
+  const stats = await computeLeaveStats(env, owner);
+  const { results: ovs } = await env.DB.prepare(
+    "SELECT member_id, attendance_override, leave_override, reserve_override FROM stat_overrides WHERE owner = ?"
+  ).bind(owner).all();
+  const ovMap = {};
+  (ovs || []).forEach(o => { ovMap[o.member_id] = o; });
+
+  Object.values(members).forEach(m => {
+    const sm = stats.byMember[m.member_id];
+    const autoLeave = sm?.leave || 0;
+    const autoReserve = sm?.reserve || 0;
+    m.leaveByType = sm?.leaveByType || {};
+    m.reserveByType = sm?.reserveByType || {};
+    const o = ovMap[m.member_id];
+    m.leave = (o && o.leave_override != null) ? o.leave_override : autoLeave;
+    m.reserve = (o && o.reserve_override != null) ? o.reserve_override : autoReserve;
+    if (o && o.attendance_override != null) m.attendance = o.attendance_override;
+    delete m._latest;
+  });
+  return members;
 }
 
 // 把 IP 雜湊成短字串（只用來粗略辨識/限流，不還原真實 IP）
@@ -610,12 +689,20 @@ export default {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
         if (!owner) return json([]);
-        const { results } = await env.DB.prepare(
-          "SELECT window_id, event_date, session, title, status, version, created_at FROM leave_windows WHERE owner = ? ORDER BY event_date DESC, session ASC"
-        ).bind(owner).all();
+        let results;
+        try {
+          ({ results } = await env.DB.prepare(
+            "SELECT window_id, event_date, session, title, status, version, created_at, match_type FROM leave_windows WHERE owner = ? ORDER BY event_date DESC, session ASC"
+          ).bind(owner).all());
+        } catch (e) {
+          ({ results } = await env.DB.prepare(
+            "SELECT window_id, event_date, session, title, status, version, created_at FROM leave_windows WHERE owner = ? ORDER BY event_date DESC, session ASC"
+          ).bind(owner).all());
+        }
         const stats = await computeLeaveStats(env, owner);
         const list = (results || []).map(w => ({
           ...w,
+          match_type: w.match_type || '幫戰',
           leave_count: (stats.byWindow[w.window_id]?.leave || []).length,
           reserve_count: (stats.byWindow[w.window_id]?.reserve || []).length
         }));
@@ -625,22 +712,31 @@ export default {
       // 建立請假場次（日期+第幾場，唯一）
       if (url.pathname === "/api/leave/windows/create" && request.method === "POST") {
         requireAuth();
-        const { event_date, session, title } = await request.json();
+        const { event_date, session, title, match_type } = await request.json();
         if (!event_date || !session) return json({ error: "請選擇日期與場次" }, 400);
+        const mtype = match_type || '幫戰';
         const dup = await env.DB.prepare(
           "SELECT window_id FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ?"
         ).bind(user, event_date, session).first();
         if (dup) return json({ error: "這個日期＋場次已經開過請假了" }, 400);
         const windowId = crypto.randomUUID();
         const now = Date.now();
-        await env.DB.prepare(
-          "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?)"
-        ).bind(windowId, user, event_date, session, title || "", now, now).run();
-        await writeAudit(env, user, user, 'leave_window', windowId, 'create', { event_date, session, title });
+        try {
+          await env.DB.prepare(
+            "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at, match_type) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?, ?)"
+          ).bind(windowId, user, event_date, session, title || "", now, now, mtype).run();
+        } catch (e) {
+          // match_type 欄位尚未建立（migration 004 還沒跑）→ 退回不含類型
+          await env.DB.prepare(
+            "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?)"
+          ).bind(windowId, user, event_date, session, title || "", now, now).run();
+        }
+        const typeLabel = mtype === '其他' ? '領地戰' : mtype;
+        await writeAudit(env, user, user, 'leave_window', windowId, 'create', { event_date, session, title, match_type: mtype });
         await notifyDiscord(env, user, {
           embeds: [{
             title: "🗓️ 已開放請假",
-            description: `**${event_date}　${session}**${title ? "\n" + title : ""}\n請到請假連結登記。`,
+            description: `**${event_date}　${session}　[${typeLabel}]**${title ? "\n" + title : ""}\n請到請假連結登記。`,
             color: 3447003
           }]
         });
@@ -717,26 +813,41 @@ export default {
       }
 
       // =========================
-      // 🌐 公開請假頁：讀取看板（免登入，用 share_id）
+      // 🌐 請假看板（share=公開唯讀只看開放中場次 / 登入=管理員看全部場次）
+      //     含每個成員的 職業 + 出席/請假/後備 統計，供依職業分類顯示
       // =========================
-      if (url.pathname === "/api/leave/public/board") {
-        if (!shareId) return json({ error: "缺少 share" }, 400);
-        const owner = await getShareOwner();
-        if (!owner) return json({ error: "連結無效" }, 404);
-        const { results: windows } = await env.DB.prepare(
-          "SELECT window_id, event_date, session, title, status FROM leave_windows WHERE owner = ? AND status = 'open' ORDER BY event_date DESC, session ASC"
-        ).bind(owner).all();
-        const { results: roster } = await env.DB.prepare(
-          "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active' ORDER BY display_name"
-        ).bind(owner).all();
+      if (url.pathname === "/api/leave/board" || url.pathname === "/api/leave/public/board") {
+        let owner = user;
+        let openOnly = false;
+        if (isShareMode) { owner = await getShareOwner(); openOnly = true; }
+        if (!owner) return json({ guild: "", windows: [], members: [], roster: [], leaveByWindow: {}, reserveByWindow: {} });
+
+        const openClause = openOnly ? " AND status = 'open'" : "";
+        let windows;
+        try {
+          ({ results: windows } = await env.DB.prepare(
+            "SELECT window_id, event_date, session, title, status, match_type FROM leave_windows WHERE owner = ?" + openClause + " ORDER BY event_date DESC, session ASC"
+          ).bind(owner).all());
+        } catch (e) {
+          ({ results: windows } = await env.DB.prepare(
+            "SELECT window_id, event_date, session, title, status FROM leave_windows WHERE owner = ?" + openClause + " ORDER BY event_date DESC, session ASC"
+          ).bind(owner).all());
+        }
+        (windows || []).forEach(w => { if (!w.match_type) w.match_type = '幫戰'; });
+
         const stats = await computeLeaveStats(env, owner);
+        const membersMap = await computeMemberStats(env, owner);
+        const members = Object.values(membersMap).sort((a, b) => a.display_name.localeCompare(b.display_name));
+
         const leaveByWindow = {}, reserveByWindow = {};
         (windows || []).forEach(w => {
           leaveByWindow[w.window_id] = stats.byWindow[w.window_id]?.leave || [];
           reserveByWindow[w.window_id] = stats.byWindow[w.window_id]?.reserve || [];
         });
         const u = await env.DB.prepare("SELECT guild FROM users WHERE username = ?").bind(owner).first();
-        return json({ guild: u?.guild || "", windows: windows || [], roster: roster || [], leaveByWindow, reserveByWindow });
+        // roster 欄位保留給舊版前端相容（只含 member_id + display_name）
+        const roster = members.map(m => ({ member_id: m.member_id, display_name: m.display_name }));
+        return json({ guild: u?.guild || "", windows: windows || [], members, roster, leaveByWindow, reserveByWindow });
       }
 
       // =========================

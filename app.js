@@ -22,6 +22,10 @@ let totalReportsInTimeframe = 0, currentReportId = null;
 // ✅ 身分系統：name -> member_id -> 目前顯示名稱（改名不用重寫歷史戰報）
 let aliasToMemberId = {}, memberIdToDisplayName = {};
 
+// 對戰類型顯示：內部值仍用「其他」（相容舊資料），顯示一律為「領地戰」
+function fmtType(t) { return t === '其他' ? '領地戰' : (t || '幫戰'); }
+const TYPE_ORDER = ['幫戰', '約戰', '其他'];
+
 // =====================================================
 // ===  模式管理（本地 / 雲端）
 // =====================================================
@@ -747,7 +751,7 @@ function renderHistoryList() {
             const d = JSON.parse(h.raw_json);
             if (d.result === 'win') resTag = '<span class="result-tag win">勝</span>';
             if (d.result === 'loss') resTag = '<span class="result-tag loss">敗</span>';
-            typeLabel = `<span style="font-size:10px; color:#999;">[${d.matchType || '幫戰'}]</span>`;
+            typeLabel = `<span style="font-size:10px; color:#999;">[${fmtType(d.matchType)}]</span>`;
             sessionLabel = d.session ? `<span style="font-size:10px; color:#666; margin-left:3px;">${d.session}</span>` : '';
         } catch (e) { }
         if (h._source === 'local') sourceBadge = ' <span class="local-badge">本地</span>';
@@ -921,7 +925,7 @@ async function openMemberDetail(id) {
         return `<div style="padding:8px 6px; border-bottom:1px solid #eee;">
             <div style="margin-bottom:3px;">
                 <b>[${h.date}]</b>
-                <span style="color:var(--accent); font-size:11px;">[${h.type || '幫戰'}]</span>
+                <span style="color:var(--accent); font-size:11px;">[${fmtType(h.type)}]</span>
                 ${h.session ? `<span style="font-size:11px;">【${h.session}】</span>` : ''}
                 <span style="font-size:11px; color:#999;">${h.title}</span>
                 <span class="job-tag" style="background:var(--color-${hJob}); font-size:10px; margin-left:4px;">${hJob}</span>
@@ -1150,6 +1154,8 @@ async function mergeLeaveAndOverrides() {
             reserve: mid && leaveStats[mid] ? (leaveStats[mid].reserve || 0) : 0
         };
         m.autoStats = auto;
+        m.leaveByType = (mid && leaveStats[mid]) ? (leaveStats[mid].leaveByType || {}) : {};
+        m.reserveByType = (mid && leaveStats[mid]) ? (leaveStats[mid].reserveByType || {}) : {};
         const ov = mid ? ovMap[mid] : null;
         m.overrideVersion = ov ? ov.version : null;
         m.attendance = (ov && ov.attendance_override != null) ? ov.attendance_override : auto.attendance;
@@ -1183,7 +1189,7 @@ function renderDbTable() {
             <td><span class="job-tag" style="background:var(--color-${m.last_job})">${m.last_job}</span></td>
             <td>${m.tag !== 'none' ? `<span class="hash-tag">${m.tag}</span>` : ''}</td>
             <td>${m.matches} 場</td>
-            <td style="font-size:11px; color:#666;">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 📝${m.counts['其他'] || 0}</td>
+            <td style="font-size:11px; color:#666;" title="幫戰/約戰/領地戰 出席次數">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 🏰${m.counts['其他'] || 0}</td>
             <td>${renderStatBadge(m)}</td>
             <td>${m.rate.toFixed(1)}%</td>
             <td>${m.note || ''}</td>
@@ -1201,17 +1207,28 @@ function sortDb(key) {
     renderDbTable();
 }
 
-// 出席/請假/後備 徽章（3/3/2），點擊可手動覆蓋（僅管理員）
+// 出席/請假/後備 徽章（3/3/2），滑鼠移上去顯示各類型明細，點擊可手動覆蓋（僅管理員）
+function statBreakdownTooltip(m) {
+    const lines = TYPE_ORDER.map(t => {
+        const a = (m.counts && m.counts[t]) || 0;
+        const l = (m.leaveByType && m.leaveByType[t]) || 0;
+        const r = (m.reserveByType && m.reserveByType[t]) || 0;
+        return `${fmtType(t)}：出席 ${a} / 請假 ${l} / 後備 ${r}`;
+    });
+    return lines.join('\n');
+}
+
 function renderStatBadge(m) {
     const att = m.attendance != null ? m.attendance : m.matches;
     const lv = m.leaveCount || 0;
     const rs = m.reserveCount || 0;
     const star = m.hasOverride ? '*' : '';
+    const tip = statBreakdownTooltip(m) + (m.hasOverride ? '\n（*=有人工覆蓋）' : '');
     const clickable = (!isViewMode && !shareId && storageMode === 'cloud' && currentUser && m.member_id);
     if (clickable) {
-        return `<span class="stat-badge" title="出席/請假/後備（點擊可手動調整，*=已覆蓋）" onclick="event.stopPropagation(); openOverrideModal('${m.member_id}')">${att}/${lv}/${rs}${star}</span>`;
+        return `<span class="stat-badge" title="${tip}\n（點擊可手動調整）" onclick="event.stopPropagation(); openOverrideModal('${m.member_id}')">${att}/${lv}/${rs}${star}</span>`;
     }
-    return `<span class="stat-badge" title="出席/請假/後備">${att}/${lv}/${rs}${star}</span>`;
+    return `<span class="stat-badge" title="${tip}">${att}/${lv}/${rs}${star}</span>`;
 }
 
 // =====================================================
@@ -1596,7 +1613,7 @@ function buildShareListHTML() {
             resTag = rawResult === 'win'
                 ? '<span style="background:#4caf50;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold;">勝</span>'
                 : '<span style="background:#e57373;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold;">敗</span>';
-            matchType = `[${rawType}]${d.session ? '【' + d.session + '】' : ''}`;
+            matchType = `[${fmtType(rawType)}]${d.session ? '【' + d.session + '】' : ''}`;
         } catch (e) { }
         return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f5f5f5;cursor:pointer;" onmouseover="this.style.background='#f8f9fa'" onmouseout="this.style.background=''" class="share-item-row" data-date="${h.date}" data-type="${rawType}" data-result="${rawResult}" data-guild="${h.guild_a.toLowerCase()}">
             <input type="checkbox" class="share-check" value="${h.id}" checked style="width:16px;height:16px;cursor:pointer;" onchange="updateShareCount()">
@@ -1762,7 +1779,7 @@ function buildTransferListHTML() {
             resTag = rawResult === 'win'
                 ? '<span style="background:#4caf50;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">勝</span>'
                 : '<span style="background:#e57373;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">敗</span>';
-            matchType = `[${rawType}]${d.session ? '【' + d.session + '】' : ''}`;
+            matchType = `[${fmtType(rawType)}]${d.session ? '【' + d.session + '】' : ''}`;
         } catch (e) { }
         return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f5f5f5;cursor:pointer;" class="transfer-item-row" data-date="${h.date}" data-type="${rawType}" data-result="${rawResult}" data-guild="${h.guild_a.toLowerCase()}">
             <input type="checkbox" class="transfer-check" value="${h.id}" style="width:16px;height:16px;cursor:pointer;" onchange="updateTransferCount()">
@@ -1875,7 +1892,7 @@ async function checkIncomingTransfer(token) {
                 resTag = d.result === 'win'
                     ? '<span style="background:#4caf50;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">勝</span>'
                     : '<span style="background:#e57373;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">敗</span>';
-                matchType = `[${d.matchType || '幫戰'}]${d.session ? '【' + d.session + '】' : ''}`;
+                matchType = `[${fmtType(d.matchType)}]${d.session ? '【' + d.session + '】' : ''}`;
             } catch (e) { }
             return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f5f5f5;cursor:pointer;">
                 <input type="checkbox" class="receive-check" value="${h.id}" checked style="width:16px;height:16px;">
@@ -1959,8 +1976,66 @@ async function loadLeavePage() {
     const dateEl = document.getElementById('lw-date');
     if (dateEl && !dateEl.value) dateEl.valueAsDate = new Date();
     updateLeaveLinkPreview();
-    await Promise.all([loadLeaveWindows(), loadRoster(), loadDiscordSettings()]);
+    await Promise.all([loadLeaveWindows(), loadLeaveBoard(), loadRoster(), loadDiscordSettings()]);
     loadAuditLog();
+}
+
+// ---- 各場次請假名單（依職業） ----
+let leaveBoardCache = { members: [], windows: [], leaveByWindow: {}, reserveByWindow: {} };
+let boardMemberById = {};
+
+async function loadLeaveBoard() {
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/board?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        leaveBoardCache = await res.json();
+    } catch (e) { leaveBoardCache = { members: [], windows: [], leaveByWindow: {}, reserveByWindow: {} }; }
+    boardMemberById = {};
+    (leaveBoardCache.members || []).forEach(m => { boardMemberById[m.member_id] = m; });
+    renderLeaveBoardList();
+}
+
+function adminGroupByJob(memberIds, withStats) {
+    const groups = {};
+    (memberIds || []).forEach(mid => {
+        const m = boardMemberById[mid];
+        if (!m) return;
+        const job = m.job || '未知';
+        (groups[job] = groups[job] || []).push(m);
+    });
+    const jobs = Object.keys(groups).sort();
+    if (!jobs.length) return '<div style="color:#aaa; font-size:12px; padding:4px;">目前沒有人。</div>';
+    return jobs.map(job => `
+        <div style="margin:6px 0;">
+            <span class="job-tag" style="background:var(--color-${job})">${job}</span>
+            <span style="font-size:12px; color:#6b7684;">（${groups[job].length}）</span>
+            <div style="margin-top:4px;">
+                ${groups[job].map(m => `<span class="hash-tag" style="margin:2px 4px 2px 0; display:inline-block;">${m.display_name}${withStats ? ` <span style="color:#97a0ad;">${m.attendance}/${m.leave}/${m.reserve}</span>` : ''}</span>`).join('')}
+            </div>
+        </div>`).join('');
+}
+
+function renderLeaveBoardList() {
+    const el = document.getElementById('leave-board-list');
+    if (!el) return;
+    const wins = leaveBoardCache.windows || [];
+    const openWins = wins.filter(w => w.status === 'open');
+    if (!openWins.length) {
+        el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:6px;">目前沒有開放中的場次。開放場次後，這裡會顯示每場的請假名單。</div>';
+        return;
+    }
+    el.innerHTML = openWins.map(w => {
+        const leaveIds = leaveBoardCache.leaveByWindow[w.window_id] || [];
+        const reserveIds = leaveBoardCache.reserveByWindow[w.window_id] || [];
+        return `<div class="lw-card" style="flex-direction:column; align-items:stretch;">
+            <div style="font-weight:bold;">${w.event_date}　${w.session}　<span class="hash-tag">${fmtType(w.match_type)}</span>${w.title ? ' · ' + w.title : ''}</div>
+            <div style="font-size:12px; color:#e57373; font-weight:bold; margin-top:6px;">🙋 已請假（${leaveIds.length}）</div>
+            ${adminGroupByJob(leaveIds, false)}
+            <div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:6px;">🔶 後備（${reserveIds.length}）</div>
+            ${adminGroupByJob(reserveIds, false)}
+        </div>`;
+    }).join('');
 }
 
 function buildLeaveLink() {
@@ -2004,6 +2079,7 @@ function renderLeaveWindows() {
         <div class="lw-card">
             <div>
                 <b>${w.event_date}　${w.session}</b>
+                <span class="hash-tag" style="margin-left:4px;">${fmtType(w.match_type)}</span>
                 <span class="status-pill ${w.status === 'open' ? 'status-open' : 'status-closed'}">${w.status === 'open' ? '開放中' : '已關閉'}</span>
                 <div style="font-size:12px; color:#97a0ad; margin-top:2px;">
                     ${w.title || ''} · 🙋 請假 ${w.leave_count} 人 · 🔶 後備 ${w.reserve_count} 人
@@ -2020,18 +2096,19 @@ function renderLeaveWindows() {
 async function createLeaveWindow() {
     const event_date = document.getElementById('lw-date').value;
     const session = document.getElementById('lw-session').value;
+    const match_type = document.getElementById('lw-type').value;
     const title = document.getElementById('lw-title').value;
     if (!event_date) { alert('請選擇日期'); return; }
     try {
         const res = await fetch(WORKER_URL + "/api/leave/windows/create", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
-            body: JSON.stringify({ event_date, session, title })
+            body: JSON.stringify({ event_date, session, title, match_type })
         });
         const data = await res.json();
         if (!res.ok) { alert('開放失敗：' + (data.error || res.status)); return; }
         document.getElementById('lw-title').value = '';
-        await loadLeaveWindows();
+        await Promise.all([loadLeaveWindows(), loadLeaveBoard()]);
     } catch (e) { alert('開放失敗：' + e.message); }
 }
 
@@ -2092,8 +2169,11 @@ function renderWindowDetail() {
     document.getElementById('wd-list').innerHTML = list.map(m => {
         const onLeave = leaveSet.has(m.member_id);
         const onReserve = reserveSet.has(m.member_id);
+        const bm = boardMemberById[m.member_id];
+        const jobTag = bm && bm.job && bm.job !== '未知' ? `<span class="job-tag" style="background:var(--color-${bm.job}); margin-left:4px;">${bm.job}</span>` : '';
+        const statNum = bm ? `<span style="color:#97a0ad; font-size:11px; margin-left:4px;">${bm.attendance}/${bm.leave}/${bm.reserve}</span>` : '';
         return `<div class="roster-row">
-            <div style="font-size:13px;">${m.display_name}
+            <div style="font-size:13px;">${m.display_name}${jobTag}${statNum}
                 ${onLeave ? '<span class="status-pill status-closed">請假</span>' : ''}
                 ${onReserve ? '<span class="badge-reserve" style="display:inline-block;">後備</span>' : ''}
             </div>

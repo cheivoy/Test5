@@ -61,7 +61,7 @@
                     <option value="all">類型</option>
                     <option value="幫戰">幫戰</option>
                     <option value="約戰">約戰</option>
-                    <option value="其他">其他</option>
+                    <option value="其他">領地戰</option>
                 </select>
             </div>
         </div>
@@ -88,7 +88,7 @@
                 <select id="match-type" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
                     <option value="幫戰">⚔️ 幫戰</option>
                     <option value="約戰">🤝 約戰</option>
-                    <option value="其他">📝 其他</option>
+                    <option value="其他">🏰 領地戰</option>
                 </select>
                 <button class="btn btn-primary admin-only" onclick="saveHistory()" id="save-btn" style="display:none; background: #4caf50;">💾 點此保存</button>
             </div>
@@ -188,8 +188,8 @@
                             <th onclick="sortDb('last_job')">最近職業 ↕</th>
                             <th onclick="sortDb('tag')">所屬分類 ↕</th>
                             <th onclick="sortDb('matches')">總場次 ↕</th>
-                            <th>幫戰/約戰/其他</th>
-                            <th title="出席次數 / 請假次數 / 後備次數">出席/請假/後備</th>
+                            <th>幫戰/約戰/領地戰</th>
+                            <th title="出席次數 / 請假次數 / 後備次數（滑鼠移上去看各類型明細）">出席/請假/後備</th>
                             <th onclick="sortDb('rate')">出席率 ↕</th>
                             <th>管理員評語</th>
                             <th class="admin-only">操作</th>
@@ -218,10 +218,20 @@
                         <option value="第一場">第一場</option>
                         <option value="第二場">第二場</option>
                     </select>
+                    <select id="lw-type" class="select-input">
+                        <option value="幫戰">⚔️ 幫戰</option>
+                        <option value="約戰">🤝 約戰</option>
+                        <option value="其他">🏰 領地戰</option>
+                    </select>
                     <input type="text" id="lw-title" class="search-input" style="max-width:220px;" placeholder="場次備註（選填）">
                     <button class="btn btn-primary" onclick="createLeaveWindow()">➕ 開放請假</button>
                 </div>
                 <div id="leave-windows-list"></div>
+            </div>
+
+            <div class="leave-block">
+                <div class="leave-block-title">📋 各場次請假名單（依職業）</div>
+                <div id="leave-board-list"></div>
             </div>
 
             <div class="leave-block">
