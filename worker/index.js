@@ -888,6 +888,35 @@ export default {
           "INSERT INTO leave_actions (action_id, window_id, owner, member_id, action, actor, actor_meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(crypto.randomUUID(), window_id, user, member_id, action, user, JSON.stringify({ by: 'admin' }), Date.now()).run();
         await writeAudit(env, user, user, 'leave_action', window_id, action, { member_id });
+
+        // 連續 No-show 警示：從最近的場次往前數，連續 No-show ≥ 2 就發 Discord
+        if (action === 'noshow_set') {
+          const { results: wins } = await env.DB.prepare(
+            "SELECT window_id FROM leave_windows WHERE owner = ? ORDER BY event_date DESC, session DESC"
+          ).bind(user).all();
+          const { results: acts } = await env.DB.prepare(
+            "SELECT window_id, action FROM leave_actions WHERE owner = ? AND member_id = ? AND action IN ('noshow_set','noshow_unset') ORDER BY created_at ASC"
+          ).bind(user, member_id).all();
+          const nsState = {};
+          for (const a of acts || []) nsState[a.window_id] = (a.action === 'noshow_set');
+          let streak = 0;
+          for (const w of wins || []) {
+            if (nsState[w.window_id]) streak++; else break;
+          }
+          if (streak >= 2) {
+            const mem = await env.DB.prepare(
+              "SELECT display_name FROM members_roster WHERE member_id = ? AND owner = ?"
+            ).bind(member_id, user).first();
+            await notifyDiscord(env, user, {
+              content: "@here",
+              embeds: [{
+                title: "⚠️ 連續 No-show 警示",
+                description: `**${mem?.display_name || member_id}** 已連續 **${streak}** 場 No-show，請幹部關注。`,
+                color: 15158332
+              }]
+            });
+          }
+        }
         return json({ status: "OK" });
       }
 

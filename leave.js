@@ -96,9 +96,9 @@ async function submitJoin() {
         // 重新載入看板，並自動選中剛建立的自己
         const newId = data.member_id;
         await loadBoard();
-        document.getElementById('name-search').value = name;
-        renderNames();
+        document.getElementById('name-search').value = '';
         if (newId && memberById[newId]) selectMember(newId);
+        else renderNames();
     } catch (e) { toast('⚠️ 連線失敗，請稍後再試'); }
 }
 
@@ -125,23 +125,54 @@ function renderJobGroups(memberIds, withStats) {
         </div>`).join('');
 }
 
+// ---- 記住這台裝置用過的名字（不預載全部人）----
+function getRecentNames() {
+    try { return JSON.parse(localStorage.getItem('nsh_leave_names') || '[]'); } catch (e) { return []; }
+}
+function addRecentName(m) {
+    if (!m) return;
+    let list = getRecentNames().filter(x => x.member_id !== m.member_id);
+    list.unshift({ member_id: m.member_id, display_name: m.display_name });
+    localStorage.setItem('nsh_leave_names', JSON.stringify(list.slice(0, 8)));
+}
+function removeRecentName(memberId) {
+    const list = getRecentNames().filter(x => x.member_id !== memberId);
+    localStorage.setItem('nsh_leave_names', JSON.stringify(list));
+    renderNames();
+}
+
 // ---- 名字搜尋 ----
 function renderNames() {
     const q = (document.getElementById('name-search').value || '').toLowerCase().trim();
     const listEl = document.getElementById('name-list');
-    const matched = (board.members || []).filter(m => !q || m.display_name.toLowerCase().includes(q));
-    if (matched.length === 0) {
-        listEl.innerHTML = `<div class="muted">找不到「${q}」，請確認拼字或聯絡管理員。</div>`;
+
+    if (!q) {
+        // 沒搜尋時，只顯示這台裝置用過的名字（對到目前名冊仍存在的）
+        const recents = getRecentNames()
+            .map(r => memberById[r.member_id] || (board.members || []).find(m => m.display_name === r.display_name))
+            .filter(Boolean);
+        if (!recents.length) {
+            listEl.innerHTML = `<div class="muted">請在上方輸入你的名字搜尋。第一次用之後，這裡會記住你的名字。</div>`;
+            return;
+        }
+        listEl.innerHTML = `<div style="font-size:12px; color:#97a0ad; margin-bottom:6px;">你常用的名字：</div>` +
+            recents.map(m => `<span class="name-btn ${m.member_id === selectedMemberId ? 'active' : ''}" onclick="selectMember('${m.member_id}')">${m.display_name} <span onclick="event.stopPropagation(); removeRecentName('${m.member_id}')" style="color:#c9ced6; margin-left:4px;">✕</span></span>`).join('');
         return;
     }
-    const show = q ? matched : matched.slice(0, 40);
-    listEl.innerHTML = show.map(m =>
+
+    const matched = (board.members || []).filter(m => m.display_name.toLowerCase().includes(q));
+    if (matched.length === 0) {
+        listEl.innerHTML = `<div class="muted">找不到「${q}」，請確認拼字，或用下方「自助建檔」。</div>`;
+        return;
+    }
+    listEl.innerHTML = matched.slice(0, 30).map(m =>
         `<span class="name-btn ${m.member_id === selectedMemberId ? 'active' : ''}" onclick="selectMember('${m.member_id}')">${m.display_name}</span>`
-    ).join('') + (!q && matched.length > 40 ? `<div class="muted">共 ${matched.length} 人，輸入名字可快速找到自己</div>` : '');
+    ).join('') + (matched.length > 30 ? `<div class="muted">符合的太多了，再多打幾個字縮小範圍</div>` : '');
 }
 
 function selectMember(memberId) {
     selectedMemberId = memberId;
+    addRecentName(memberById[memberId]);
     renderNames();
     renderWindows();
 }

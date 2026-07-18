@@ -235,3 +235,89 @@ th:hover { background: #eee; }
     .close-modal-btn { top: 10px; right: 15px; font-size: 28px; }
     .auth-modal-body { width: 95vw; }
 }
+
+/* =====================================================
+   ===  行動裝置體驗優化（卡片化、大按鈕、底部彈窗）
+   ===================================================== */
+@media screen and (max-width: 768px) {
+    /* 防止 iOS 點輸入框自動放大：字級 ≥16px */
+    input, select, textarea, .search-input, .select-input {
+        font-size: 16px !important;
+        padding: 11px 12px;
+        border-radius: 10px;
+    }
+
+    /* 大一點、好按的按鈕 */
+    .btn {
+        min-height: 44px;
+        padding: 11px 16px;
+        border-radius: 12px;
+        font-size: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* 側邊欄項目做成大卡片按鈕 */
+    .nav-item { padding: 15px 14px; border-radius: 12px; font-size: 15px; }
+
+    /* 卡片統一圓角與陰影 */
+    .hist-card, .leave-block, .lw-card, .mvp-card, .table-card, .win-block {
+        border-radius: 14px;
+        box-shadow: 0 2px 10px rgba(20,30,50,0.05);
+    }
+    .leave-block { padding: 14px; }
+
+    /* 場次 / 名冊 / 名單列：直向堆疊、按鈕撐開易點 */
+    .lw-card, .roster-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 14px;
+    }
+    .lw-card > div:last-child,
+    .roster-row > div:last-child {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .lw-card .btn, .roster-row .btn {
+        flex: 1;
+        min-width: 88px;
+        min-height: 40px;
+        padding: 9px 8px;
+        font-size: 13px;
+    }
+
+    /* 彈窗改為貼底的 bottom-sheet，單手好操作 */
+    #modal, #member-modal, #auth-modal, #sync-confirm-modal,
+    #sync-report-modal, #receive-transfer-modal,
+    #override-modal, #window-detail-modal, #sessions-modal {
+        align-items: flex-end;
+    }
+    .modal-body, .auth-modal-body {
+        width: 100% !important;
+        max-width: 100%;
+        border-radius: 20px 20px 0 0;
+        max-height: 92vh;
+        padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+        animation: sheetUp 0.25s ease;
+    }
+    @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+    /* 篩選列的輸入排整齊 */
+    .controls-row .search-input, .controls-row .select-input { width: 100% !important; }
+
+    /* 成員檔案室：操作欄按鈕縮小換行，不撐爆表格 */
+    #db-table-body .btn { padding: 6px 10px; margin: 2px; font-size: 12px; min-height: 34px; }
+
+    /* 戰報上傳工具列：讓每個控制項各佔一行、好點 */
+    #page-report > div:first-child { flex-direction: column; align-items: stretch; }
+    #page-report > div:first-child > * { width: 100%; }
+}
+
+/* 桌機也讓卡片與按鈕更現代一點（不影響版面結構） */
+.btn { transition: filter .15s, box-shadow .15s; }
+.btn:hover { filter: brightness(0.97); }
+.btn-primary { box-shadow: 0 2px 8px rgba(142,154,175,0.35); }
+.name-btn { transition: background .15s, border-color .15s; }

@@ -291,6 +291,9 @@ window.onload = async () => {
     const matchDateEl = document.getElementById('match-date');
     if (matchDateEl) matchDateEl.valueAsDate = new Date();
 
+    const thEl = document.getElementById('db-threshold');
+    if (thEl) { const saved = localStorage.getItem('nsh_attendance_threshold'); if (saved) thEl.value = saved; }
+
     updateModeBanner();
     initSections();
 
@@ -1228,12 +1231,17 @@ function renderDbTable() {
         catSel.value = cur || 'all';
     }
 
+    const threshold = parseFloat(document.getElementById('db-threshold')?.value);
+    const hasThreshold = !isNaN(threshold);
+    const onlyLow = document.getElementById('db-only-low')?.checked;
+
     let data = dbMembersMap.filter(m => {
         const matchS = m.id.toLowerCase().includes(search);
         const matchJ = jobF === 'all' || m.last_job === jobF;
         const matchT = tagF === 'all' || m.tag === tagF;
         const matchC = catF === 'all' || (catF === 'none' ? !m.category : m.category === catF);
-        return matchS && matchJ && matchT && matchC;
+        const matchLow = !onlyLow || (hasThreshold && m.rate < threshold);
+        return matchS && matchJ && matchT && matchC && matchLow;
     });
 
     data.sort((a, b) => {
@@ -1242,24 +1250,55 @@ function renderDbTable() {
         return dbSort.asc ? va - vb : vb - va;
     });
 
-    document.getElementById('db-table-body').innerHTML = data.map(m => `
-        <tr onclick="openMemberDetail('${m.id}')" style="cursor:pointer">
-            <td><b>${m.id}</b></td>
+    document.getElementById('db-table-body').innerHTML = data.map(m => {
+        const low = hasThreshold && m.rate < threshold;
+        return `
+        <tr onclick="openMemberDetail('${m.id}')" style="cursor:pointer; ${low ? 'background:#fff0f0;' : ''}">
+            <td><b>${m.id}</b>${low ? ' <span style="color:var(--danger); font-size:11px;">⚠️低出席</span>' : ''}</td>
             <td><span class="job-tag" style="background:var(--color-${m.last_job})">${m.last_job}</span></td>
             <td>${m.category ? `<span class="hash-tag" style="background:#e3ecf7;">${m.category}</span>` : '<span style="color:#ccc;">—</span>'}</td>
             <td>${m.tag !== 'none' ? `<span class="hash-tag">${m.tag}</span>` : ''}</td>
             <td>${m.matches} 場</td>
             <td style="font-size:11px; color:#666;" title="幫戰/約戰/領地戰 出席次數">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 🏰${m.counts['其他'] || 0}</td>
             <td>${renderStatBadge(m)}</td>
-            <td>${m.rate.toFixed(1)}%</td>
+            <td style="${low ? 'color:var(--danger); font-weight:bold;' : ''}">${m.rate.toFixed(1)}%</td>
             <td>${m.note || ''}</td>
             <td class="admin-only">
                 <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
                 <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); mergeP('${m.id}')">合併</button>
                 ${m.member_id ? `<button class="btn btn-outline" style="padding:2px 8px; color:var(--danger);" onclick="event.stopPropagation(); deleteRosterMember('${m.member_id}', '${(m.id || '').replace(/'/g, "\\'")}')">移除</button>` : ''}
             </td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
+}
+
+// 出席率門檻：記在 localStorage
+function onThresholdChange() {
+    const v = document.getElementById('db-threshold').value;
+    localStorage.setItem('nsh_attendance_threshold', v);
+    renderDbTable();
+}
+
+// 匯出成員名單 CSV（名字/職業/身份/標籤/出席/請假/後備/出席率）
+function exportMembersCSV() {
+    if (!dbMembersMap.length) { alert('沒有可匯出的資料'); return; }
+    const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '後備', '出席率(%)'];
+    const rows = dbMembersMap.map(m => [
+        m.id, m.last_job || '', m.category || '', (m.tag && m.tag !== 'none') ? m.tag : '',
+        m.matches, (m.attendance != null ? m.attendance : m.matches), m.leaveCount || 0, m.reserveCount || 0,
+        m.rate.toFixed(1)
+    ]);
+    const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
+    // BOM 讓 Excel 正確辨識中文
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toLocaleDateString('zh-TW').replace(/\//g, '');
+    a.download = `成員名單_${stamp}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function sortDb(key) {
@@ -2342,6 +2381,7 @@ async function openWindowDetail(windowId) {
     document.getElementById('wd-list').innerHTML = '<div style="color:#aaa;">載入中…</div>';
     try {
         if (!rosterCache.length) await loadRoster();
+        if (!Object.keys(boardMemberById).length) await loadLeaveBoard();
         const res = await fetch(WORKER_URL + "/api/leave/window-members?window_id=" + encodeURIComponent(windowId) + "&t=" + Date.now(), {
             cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
         });
@@ -2361,11 +2401,11 @@ function renderWindowDetail() {
     const leaveSet = window._wdLeave || new Set();
     const reserveSet = window._wdReserve || new Set();
     const list = rosterCache.filter(m => !q || m.display_name.toLowerCase().includes(q));
-    // 依職業分組
+    // 依職業分組（優先用名冊自身的 job，退而用看板資料）
     const groups = {};
     list.forEach(m => {
         const bm = boardMemberById[m.member_id];
-        const job = (bm && bm.job) ? bm.job : '未知';
+        const job = m.job || (bm && bm.job) || '未知';
         (groups[job] = groups[job] || []).push(m);
     });
     const jobs = Object.keys(groups).sort();

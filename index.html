@@ -183,6 +183,15 @@
                     <option value="all">全部身份</option>
                 </select>
             </div>
+            <div style="margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <span style="font-size:12px; color:#97a0ad;">⚠️ 出席率低於</span>
+                <input type="number" id="db-threshold" class="select-input" style="width:70px;" min="0" max="100" placeholder="%" onchange="onThresholdChange()" oninput="renderDbTable()">
+                <span style="font-size:12px; color:#97a0ad;">% 標紅</span>
+                <label style="font-size:12px; color:#97a0ad; display:flex; align-items:center; gap:4px;">
+                    <input type="checkbox" id="db-only-low" onchange="renderDbTable()"> 只看未達標
+                </label>
+                <button class="btn btn-outline admin-only" onclick="exportMembersCSV()" style="font-size:12px;">📤 匯出 CSV</button>
+            </div>
             <div class="table-card">
                 <table>
                     <thead>
