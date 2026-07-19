@@ -371,6 +371,13 @@ async function hashIp(ip) {
 // 通知事件種類（前後端一致）
 const DISCORD_EVENT_KEYS = ['leave_open', 'leave_submit', 'self_join', 'noshow'];
 
+// 淨化 @標記設定：everyone / here 保留關鍵字，其餘只留數字（身分組 ID）
+function sanitizeMention(v) {
+  const s = String(v || '').trim().replace(/^@/, '').toLowerCase();
+  if (s === 'everyone' || s === 'here') return s;
+  return String(v || '').replace(/\D/g, '');
+}
+
 // 取得 owner 要發送的頻道清單（多頻道；沒設定多頻道時退回舊的單一 webhook＝全部事件）
 async function getDiscordTargets(env, owner) {
   let channels = [];
@@ -404,23 +411,29 @@ async function notifyDiscord(env, owner, eventKey, message) {
       try { events = c.events ? JSON.parse(c.events) : null; } catch (e) { events = null; }
       // events 為 null 或空陣列＝全部事件；否則必須包含此事件 key
       if (Array.isArray(events) && events.length > 0 && !events.includes(eventKey)) continue;
-      // 身分組 ID 只保留數字，避免使用者貼到名稱或 <@&...> 造成整則通知失敗
-      const roleId = (c.mention_role_id || '').replace(/\D/g, '');
-      const mention = roleId ? `<@&${roleId}>` : '';
+      // 支援 @everyone / @here（內建角色，要用文字＋parse，不能用 <@&ID>）；否則當一般身分組 ID
+      const raw = (c.mention_role_id || '').trim().replace(/^@/, '').toLowerCase();
+      let mention = '', allowed = null;
+      if (raw === 'everyone') { mention = '@everyone'; allowed = { parse: ['everyone'] }; }
+      else if (raw === 'here') { mention = '@here'; allowed = { parse: ['everyone'] }; }
+      else {
+        const roleId = (c.mention_role_id || '').replace(/\D/g, '');
+        if (roleId) { mention = `<@&${roleId}>`; allowed = { roles: [roleId] }; }
+      }
+      const hasMention = !!mention;
       const content = [mention, message.content || ''].filter(Boolean).join(' ').trim();
       const body = {};
       if (content) body.content = content;
       if (message.embed) body.embeds = [message.embed];
-      // 只允許明確指定的身分組被 tag，避免誤 @everyone
-      if (roleId) body.allowed_mentions = { roles: [roleId] };
+      if (allowed) body.allowed_mentions = allowed;
       try {
         const res = await fetch(c.webhook_url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        // 若帶了 @身分組卻被 Discord 退回（多半是角色 ID 無效）→ 拿掉 @ 重送，至少通知要出去
-        if (!res.ok && roleId) {
+        // 若帶了 @標記卻被 Discord 退回（多半是 ID 無效）→ 拿掉 @ 重送，至少通知要出去
+        if (!res.ok && hasMention) {
           const body2 = {};
           if (message.content) body2.content = message.content;
           if (message.embed) body2.embeds = [message.embed];
@@ -1918,7 +1931,7 @@ export default {
           const events = Array.isArray(c.events) ? c.events.filter(e => DISCORD_EVENT_KEYS.includes(e)) : [];
           await env.DB.prepare(
             "INSERT INTO discord_channels (id, owner, name, webhook_url, events, mention_role_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-          ).bind(crypto.randomUUID(), user, (c.name || '').slice(0, 40), c.webhook_url || '', JSON.stringify(events), (c.mention_role_id || '').replace(/\D/g, ''), c.enabled ? 1 : 0, now, now).run();
+          ).bind(crypto.randomUUID(), user, (c.name || '').slice(0, 40), c.webhook_url || '', JSON.stringify(events), sanitizeMention(c.mention_role_id), c.enabled ? 1 : 0, now, now).run();
         }
         await writeAudit(env, user, user, 'session', '', 'discord_channels', { count: channels.length });
         return json({ status: "OK" });

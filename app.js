@@ -3616,9 +3616,9 @@ function buildDiscordChannelRow(c) {
         <input type="text" class="search-input dc-webhook" placeholder="https://discord.com/api/webhooks/..." value="${(c.webhook_url || '').replace(/"/g, '&quot;')}" style="width:100%;box-sizing:border-box;">
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:2px;">${evChecks}</div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <span style="font-size:12px;color:var(--muted);">@身分組 ID（選填）：</span>
-            <input type="text" class="search-input dc-role" placeholder="只填數字 ID，留空＝不 @" value="${(c.mention_role_id || '').replace(/"/g, '&quot;')}" style="width:200px;" inputmode="numeric">
-            <span style="font-size:11px;color:var(--muted);">開開發者模式→伺服器設定→身分組→右鍵複製 ID</span>
+            <span style="font-size:12px;color:var(--muted);">@提醒（選填）：</span>
+            <input type="text" class="search-input dc-role" placeholder="數字身分組ID，或填 everyone / here" value="${(c.mention_role_id || '').replace(/"/g, '&quot;')}" style="width:220px;">
+            <span style="font-size:11px;color:var(--muted);">要 @全體填 <b>everyone</b>、@在線填 <b>here</b>；一般身分組填數字 ID（開發者模式→右鍵身分組→複製 ID）</span>
         </div>`;
     return row;
 }
@@ -3638,7 +3638,7 @@ function collectDiscordChannels() {
             name: row.querySelector('.dc-name').value.trim(),
             webhook_url: row.querySelector('.dc-webhook').value.trim(),
             events,
-            mention_role_id: row.querySelector('.dc-role').value.replace(/\D/g, ''),
+            mention_role_id: (() => { const s = (row.querySelector('.dc-role').value || '').trim().replace(/^@/, '').toLowerCase(); return (s === 'everyone' || s === 'here') ? s : (row.querySelector('.dc-role').value || '').replace(/\D/g, ''); })(),
             enabled: row.querySelector('.dc-enabled').checked
         };
     }).filter(c => c.webhook_url);
