@@ -21,6 +21,7 @@ let totalReportsInTimeframe = 0, currentReportId = null;
 
 // ✅ 身分系統：name -> member_id -> 目前顯示名稱（改名不用重寫歷史戰報）
 let aliasToMemberId = {}, memberIdToDisplayName = {}, memberIdToJob = {};
+let subMapByWin = {}; // 代替上號：`日期|場次|類型` -> { 本人member_id: 代打者member_id }
 let memberIdToCategory = {};
 const CATEGORY_PRESETS = ['主幫', '副幫', '俱樂部'];
 const JOB_LIST = ['碎夢', '神相', '血河', '九靈', '玄機', '龍吟', '鐵衣', '素問', '潮光'];
@@ -1135,6 +1136,20 @@ async function loadDbData() {
     });
     totalReportsInTimeframe = filteredHistories.length;
 
+    // 代替上號對照表（供出席重導）
+    subMapByWin = {};
+    try {
+        const subUrl = WORKER_URL + "/api/leave/substitutes?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
+        const subHeaders = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
+        if (shareId || (storageMode === 'cloud' && currentUser)) {
+            const subs = await fetch(subUrl, { cache: "no-store", headers: subHeaders }).then(r => r.json()).catch(() => []);
+            (Array.isArray(subs) ? subs : []).forEach(s => {
+                const k = `${s.date}|${s.session}|${s.type}`;
+                (subMapByWin[k] = subMapByWin[k] || {})[s.member_id] = s.substitute_member_id;
+            });
+        }
+    } catch (e) { subMapByWin = {}; }
+
     let noteMap = {};
     const jobSet = new Set();
 
@@ -1182,9 +1197,13 @@ async function loadDbData() {
             const aName = d.nameA || h.guild_a;
             const type = d.matchType || "幫戰";
             const session = d.session || "第一場";
+            const subForWin = subMapByWin[`${h.date}|${session}|${type}`];
             d.gA.forEach(p => {
                 // ✅ 改名/合併安全：有對照到穩定 member_id 就用它分組，顯示名稱取當下最新名稱
-                const resolvedId = aliasToMemberId[p.name];
+                const origId = aliasToMemberId[p.name];
+                // 代替上號：本人請假、他人代打 → 這場出席改算到代打者身上
+                let resolvedId = origId;
+                if (subForWin && origId && subForWin[origId]) resolvedId = subForWin[origId];
                 const key = resolvedId || p.name;
                 const displayName = resolvedId ? (memberIdToDisplayName[resolvedId] || p.name) : p.name;
                 if (!map[key]) {
@@ -2611,6 +2630,7 @@ async function openWindowDetail(windowId) {
         window._wdReserve = new Set(data.reserve || []);
         window._wdNoshow = new Set(data.noshow || []);
         window._wdLate = new Set(data.late || []);
+        window._wdSub = data.substitutes || {}; // 本人 -> 代打者
         renderWindowDetail();
     } catch (e) {
         document.getElementById('wd-list').innerHTML = '<div style="color:var(--danger);">載入失敗：' + e.message + '</div>';
@@ -2652,6 +2672,8 @@ function renderWindowDetail() {
                 const onReserve = reserveSet.has(m.member_id);
                 const onNoshow = (window._wdNoshow || new Set()).has(m.member_id);
                 const onLate = (window._wdLate || new Set()).has(m.member_id);
+                const subId = (window._wdSub || {})[m.member_id];
+                const subName = subId ? (memberIdToDisplayName[subId] || rosterCache.find(x => x.member_id === subId)?.display_name || subId.slice(0, 6)) : '';
                 const bm = boardMemberById[m.member_id];
                 const statNum = bm ? `<span style="color:#97a0ad; font-size:11px; margin-left:4px;">${bm.attendance}/${bm.leave}/${bm.reserve}</span>` : '';
                 return `<div class="roster-row" style="flex-wrap:wrap; gap:4px;">
@@ -2660,12 +2682,14 @@ function renderWindowDetail() {
                         ${onReserve ? '<span class="badge-reserve" style="display:inline-block;">後備</span>' : ''}
                         ${onNoshow ? '<span class="status-pill status-closed">No-show</span>' : ''}
                         ${onLate ? '<span class="badge-reserve" style="display:inline-block;">臨時</span>' : ''}
+                        ${subId ? `<span class="badge-reserve" style="display:inline-block; background:#5c6bc0;">代打：${subName} <span style="cursor:pointer;" onclick="wdUnsetSub('${m.member_id}')">✕</span></span>` : ''}
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap;">
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px;" onclick="wdAction('${m.member_id}', '${onLeave ? 'leave_cancel' : 'leave_request'}')">${onLeave ? '取消請假' : '請假'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#e65100;" onclick="wdAction('${m.member_id}', '${onReserve ? 'reserve_unset' : 'reserve_set'}')">${onReserve ? '取消後備' : '後備'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:var(--danger);" onclick="wdAction('${m.member_id}', '${onNoshow ? 'noshow_unset' : 'noshow_set'}')">${onNoshow ? '取消No-show' : 'No-show'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#8e6b00;" onclick="wdAction('${m.member_id}', '${onLate ? 'late_unset' : 'late_set'}')">${onLate ? '取消臨時' : '臨時請假'}</button>
+                        <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#5c6bc0;" onclick="wdSetSub('${m.member_id}')">代替上號</button>
                     </div>
                 </div>`;
             }).join('')}
@@ -2694,6 +2718,70 @@ async function wdAction(memberId, action) {
         renderWindowDetail();
         loadLeaveWindows();
     } catch (e) { alert('操作失敗：' + e.message); }
+}
+
+// 代替上號：本人請假、他人代打，出席算到代打者身上
+function wdSetSub(memberId) {
+    const w = window._wdWindow;
+    if (!w) return;
+    const self = rosterCache.find(x => x.member_id === memberId);
+    const existing = document.getElementById('wd-sub-modal');
+    if (existing) existing.remove();
+    const datalist = rosterCache
+        .filter(x => x.member_id !== memberId)
+        .map(x => `<option value="${(x.display_name || '').replace(/"/g, '&quot;')}"></option>`).join('');
+    const modal = document.createElement('div');
+    modal.id = 'wd-sub-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2400;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+        <div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:22px;border-radius:14px;width:360px;max-width:92vw;display:flex;flex-direction:column;gap:12px;">
+            <h3 style="margin:0;">代替上號</h3>
+            <p style="font-size:13px;color:var(--muted);margin:0;"><b>${self?.display_name || memberId}</b> 本人請假，這場由誰幫他開號打？出席會算到代打者身上，本人記為請假。</p>
+            <input type="text" id="wd-sub-input" class="search-input" list="wd-sub-list" placeholder="🔍 輸入代打者名字…" autocomplete="off" style="width:100%;box-sizing:border-box;">
+            <datalist id="wd-sub-list">${datalist}</datalist>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-outline" onclick="document.getElementById('wd-sub-modal').remove()">取消</button>
+                <button class="btn btn-primary" onclick="wdConfirmSub('${memberId}')">確認</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    setTimeout(() => document.getElementById('wd-sub-input')?.focus(), 50);
+}
+
+async function wdConfirmSub(memberId) {
+    const w = window._wdWindow;
+    const typed = (document.getElementById('wd-sub-input')?.value || '').trim();
+    const sub = rosterCache.find(x => x.display_name === typed);
+    if (!sub) { alert('找不到「' + (typed || '（空白）') + '」，請從清單選一個名字'); return; }
+    if (sub.member_id === memberId) { alert('代打者不能是本人'); return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/substitute", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ window_id: w.window_id, member_id: memberId, substitute_member_id: sub.member_id })
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert('設定失敗：' + (d.error || res.status)); return; }
+        (window._wdSub = window._wdSub || {})[memberId] = sub.member_id;
+        window._wdLeave.add(memberId); // 後端會把本人記為請假
+        document.getElementById('wd-sub-modal')?.remove();
+        renderWindowDetail();
+    } catch (e) { alert('設定失敗：' + e.message); }
+}
+
+async function wdUnsetSub(memberId) {
+    const w = window._wdWindow;
+    if (!w) return;
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/substitute", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ window_id: w.window_id, member_id: memberId, substitute_member_id: '' })
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert('取消失敗：' + (d.error || res.status)); return; }
+        if (window._wdSub) delete window._wdSub[memberId];
+        renderWindowDetail();
+    } catch (e) { alert('取消失敗：' + e.message); }
 }
 
 // ---- 名單管理 ----
