@@ -1444,9 +1444,9 @@ function renderDbTable() {
             <td>${m.category ? `<span class="cat-chip">${m.category}</span>` : '<span style="color:var(--muted);">—</span>'}</td>
             <td>${m.tag !== 'none' ? `<span class="hash-tag">${m.tag}</span>` : ''}</td>
             <td>${m.matches} 場</td>
-            <td style="font-size:11px; color:#666;" title="幫戰/約戰/領地戰 出席次數">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 🏰${m.counts['其他'] || 0}</td>
-            <td>${renderStatBadge(m)}</td>
-            <td style="${low ? 'color:var(--danger); font-weight:bold;' : ''}">${m.rate.toFixed(1)}%</td>
+            <td class="nowrap" style="font-size:11px; color:#666;" title="幫戰/約戰/領地戰 出席次數">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 🏰${m.counts['其他'] || 0}</td>
+            <td class="nowrap">${renderStatBadge(m)}</td>
+            <td class="nowrap" style="${low ? 'color:var(--danger); font-weight:bold;' : ''}">${m.rate.toFixed(1)}%</td>
             <td>${m.note || ''}</td>
             <td class="admin-only">
                 <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
@@ -1486,13 +1486,14 @@ function renderDbCards(data, hasThreshold, threshold) {
             <div class="mcard-bar ${low ? 'low' : ''}"><span style="width:${Math.min(100, m.rate)}%"></span></div>
             <div class="mcard-stat">
                 <div><b>${m.matches}</b><span>總場次</span></div>
-                <div>${badge}<span>出席/請假/後備</span></div>
+                <div>${badge}<span>出席/請假/後備/缺席</span></div>
             </div>
             <div class="mcard-break">${TYPE_ORDER.map(t => {
                 const a = (m.attByTypeEff && m.attByTypeEff[t]) || 0;
                 const l = (m.leaveByType && m.leaveByType[t]) || 0;
                 const r = (m.reserveByType && m.reserveByType[t]) || 0;
-                return `<span>${fmtType(t)} ${a}/${l}/${r}</span>`;
+                const n = (m.noshowByType && m.noshowByType[t]) || 0;
+                return `<span>${fmtType(t)} ${a}/${l}/${r}/${n}</span>`;
             }).join('')}</div>
             ${actions}
         </div>`;

@@ -226,6 +226,9 @@ th:hover { background: var(--accent-soft); }
 .audit-row:last-child { border-bottom: none; }
 .audit-time { color: #aaa; font-size: 11px; }
 .stat-badge { cursor: pointer; font-weight: bold; padding: 2px 6px; border-radius: 4px; background: #f1f3f5; white-space: nowrap; }
+/* 桌面版成員表格：表頭與數字欄不要換行（評語欄仍可換行） */
+#db-table-wrap th { white-space: nowrap; }
+#db-table-wrap td.nowrap { white-space: nowrap; }
 .stat-badge:hover { background: #e2e6ea; }
 
 /* ===== 手機版 ===== */
