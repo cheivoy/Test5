@@ -64,6 +64,10 @@ async function loadBoard() {
         renderNames();
         renderBoard();
         renderOverview();
+        // 從 DC「長期請假」連結進來（#long）→ 捲動到長期請假區
+        if (window.location.hash === '#long') {
+            setTimeout(() => { document.getElementById('long-card')?.scrollIntoView({ behavior: 'smooth' }); }, 200);
+        }
     } catch (e) {
         document.getElementById('sub-line').textContent = "⚠️ 連線失敗，請稍後再試";
     }
@@ -179,6 +183,55 @@ function selectMember(memberId) {
     addRecentName(memberById[memberId]);
     renderNames();
     renderWindows();
+    // 顯示長期請假表單
+    const need = document.getElementById('long-need-select');
+    const form = document.getElementById('long-form');
+    if (need) need.style.display = 'none';
+    if (form) form.style.display = 'block';
+}
+
+async function submitLongLeave() {
+    if (!selectedMemberId) { toast('請先找到並點選你的名字'); return; }
+    const from_date = document.getElementById('long-from').value;
+    const to_date = document.getElementById('long-to').value;
+    const reason = document.getElementById('long-reason').value.trim();
+    if (!from_date || !to_date) { toast('請選起訖日期'); return; }
+    if (from_date > to_date) { toast('起始日不能晚於結束日'); return; }
+    try {
+        const res = await fetch(`${WORKER_URL}/api/leave/public/long?share=${encodeURIComponent(shareId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ member_id: selectedMemberId, from_date, to_date, reason })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { toast('⚠️ ' + (data.error || '送出失敗')); return; }
+        toast('✅ 已送出長期請假');
+        document.getElementById('long-reason').value = '';
+        await loadBoard();
+        if (memberById[selectedMemberId]) renderWindows();
+    } catch (e) { toast('⚠️ 連線失敗，請稍後再試'); }
+}
+
+async function renameSelf() {
+    if (!selectedMemberId) return;
+    const cur = memberById[selectedMemberId];
+    const nn = prompt('輸入你的新名字（改名後未來戰報也請用新名字）：', cur?.display_name || '');
+    if (nn == null) return;
+    const newName = nn.trim();
+    if (!newName || newName === cur?.display_name) return;
+    try {
+        const res = await fetch(`${WORKER_URL}/api/leave/public/rename?share=${encodeURIComponent(shareId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ member_id: selectedMemberId, new_name: newName })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { toast('⚠️ ' + (data.error || '改名失敗')); return; }
+        toast('✅ 已改名');
+        const keepId = selectedMemberId;
+        await loadBoard();
+        if (memberById[keepId]) selectMember(keepId);
+    } catch (e) { toast('⚠️ 連線失敗，請稍後再試'); }
 }
 
 function renderWindows() {

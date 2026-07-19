@@ -2378,12 +2378,13 @@ async function loadLeavePage() {
 function leaveGoto(name) {
     document.getElementById('leave-menu').style.display = 'none';
     document.getElementById('leave-sub').style.display = 'block';
-    ['windows', 'board', 'roster', 'discord', 'audit'].forEach(n => {
+    ['windows', 'board', 'long', 'roster', 'discord', 'audit'].forEach(n => {
         const el = document.getElementById('lsub-' + n);
         if (el) el.style.display = (n === name) ? 'block' : 'none';
     });
     if (name === 'windows') loadLeaveWindows();
     else if (name === 'board') loadLeaveBoard();
+    else if (name === 'long') loadLongLeaves();
     else if (name === 'roster') loadRoster();
     else if (name === 'discord') loadDiscordSettings();
     else if (name === 'audit') loadAuditLog();
@@ -2456,6 +2457,77 @@ function renderLeaveBoardList() {
             ${adminGroupByJob(reserveIds, false)}
         </div>`;
     }).join('');
+}
+
+// ---- 長期／預先請假（管理員） ----
+async function loadLongLeaves() {
+    // 成員 datalist（沿用名冊）
+    if (!rosterCache.length) { try { await loadRoster(); } catch (e) { } }
+    const dl = document.getElementById('ll-member-list');
+    if (dl) dl.innerHTML = rosterCache.map(m => `<option value="${(m.display_name || '').replace(/"/g, '&quot;')}"></option>`).join('');
+    let rows = [];
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/long?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        rows = await res.json();
+    } catch (e) { rows = []; }
+    const el = document.getElementById('long-leave-list');
+    if (!el) return;
+    if (!Array.isArray(rows) || !rows.length) {
+        el.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:6px;">目前沒有長期／預先請假。</div>';
+        return;
+    }
+    const today = ymd(new Date());
+    el.innerHTML = rows.map(r => {
+        const active = r.from_date <= today && today <= r.to_date;
+        const upcoming = r.from_date > today;
+        const tag = active ? '<span class="status-pill" style="background:#e8f5e9;color:#2e7d32;">生效中</span>'
+            : upcoming ? '<span class="status-pill" style="background:#fff3e0;color:#e65100;">未開始</span>'
+                : '<span class="status-pill status-closed">已過期</span>';
+        return `<div class="lw-card" style="align-items:center; justify-content:space-between;">
+            <div>
+                <div style="font-weight:bold;">${r.display_name} ${tag}</div>
+                <div style="font-size:12px; color:var(--muted); margin-top:2px;">${r.from_date} ~ ${r.to_date}${r.reason ? '　·　' + r.reason : ''}${r.created_by === 'public' ? '　·　本人申請' : ''}</div>
+            </div>
+            <button class="btn btn-outline" style="font-size:12px; color:var(--danger);" onclick="deleteLongLeave('${r.id}')">刪除</button>
+        </div>`;
+    }).join('');
+}
+
+async function addLongLeave() {
+    const typed = (document.getElementById('ll-member')?.value || '').trim();
+    const from_date = document.getElementById('ll-from')?.value || '';
+    const to_date = document.getElementById('ll-to')?.value || '';
+    const reason = document.getElementById('ll-reason')?.value || '';
+    const m = rosterCache.find(x => x.display_name === typed);
+    if (!m) { alert('請從名冊選一個正確的成員名字'); return; }
+    if (!from_date || !to_date) { alert('請選起訖日期'); return; }
+    if (from_date > to_date) { alert('起始日不能晚於結束日'); return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/long/create", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ member_id: m.member_id, from_date, to_date, reason })
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert('新增失敗：' + (d.error || res.status)); return; }
+        document.getElementById('ll-member').value = '';
+        document.getElementById('ll-reason').value = '';
+        await loadLongLeaves();
+    } catch (e) { alert('新增失敗：' + e.message); }
+}
+
+async function deleteLongLeave(id) {
+    if (!confirm('確定刪除這筆長期請假？（範圍內尚未表態的場次會恢復成未請假）')) return;
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/long/delete", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ id })
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert('刪除失敗：' + (d.error || res.status)); return; }
+        await loadLongLeaves();
+    } catch (e) { alert('刪除失敗：' + e.message); }
 }
 
 function buildLeaveLink() {
