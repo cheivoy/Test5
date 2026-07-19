@@ -1160,26 +1160,47 @@ function onDbTimeChange() {
 }
 
 async function loadDbData() {
-    await fetchRosterAliasMap();
     const { fromDate, toDate } = getDbTimeRange();
     const filteredHistories = allHistories.filter(h => {
         if (fromDate && h.date < fromDate) return false;
         if (toDate && h.date > toDate) return false;
         return true;
     });
-    // 代替上號對照表（供出席重導）
-    await loadSubMap();
 
-    // 手動補登出席（漏戰報時）
-    let manualAttendance = [];
-    try {
-        const aUrl = WORKER_URL + "/api/leave/attendance?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
-        const aHeaders = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
-        if (shareId || (storageMode === 'cloud' && currentUser)) {
-            const r = await fetch(aUrl, { cache: "no-store", headers: aHeaders }).then(r => r.json()).catch(() => []);
-            manualAttendance = (Array.isArray(r) ? r : []).filter(a => (!fromDate || a.date >= fromDate) && (!toDate || a.date <= toDate));
-        }
-    } catch (e) { manualAttendance = []; }
+    // ⚡ 並行抓取所有彼此獨立的資料（名冊/代打/補登出席/成員備註），加速載入。
+    //    只改「同時發請求」，API、回傳格式、後續計算完全不變。
+    const membersPromise = (async () => {
+        try {
+            if (shareId) {
+                const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now() + "&share=" + shareId, { cache: "no-store" });
+                return await res.json();
+            } else if (storageMode === 'cloud' && currentUser) {
+                const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now(), { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+                return await res.json();
+            }
+            return Object.values(getLocalMembers());
+        } catch (e) { console.error("載入成員備註失敗", e); return []; }
+    })();
+    const manualPromise = (async () => {
+        try {
+            const aUrl = WORKER_URL + "/api/leave/attendance?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
+            const aHeaders = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
+            if (shareId || (storageMode === 'cloud' && currentUser)) {
+                const r = await fetch(aUrl, { cache: "no-store", headers: aHeaders }).then(r => r.json()).catch(() => []);
+                return Array.isArray(r) ? r : [];
+            }
+            return [];
+        } catch (e) { return []; }
+    })();
+
+    const [, , dbRaw, manualAll] = await Promise.all([
+        fetchRosterAliasMap(),   // 設定 aliasToMemberId / memberIdToDisplayName
+        loadSubMap(),            // 設定 subMapByWin
+        membersPromise,
+        manualPromise
+    ]);
+
+    const manualAttendance = (Array.isArray(manualAll) ? manualAll : []).filter(a => (!fromDate || a.date >= fromDate) && (!toDate || a.date <= toDate));
 
     // 出席以「場次(date|session|type)」為單位；分母＝戰報場 ∪ 補登場
     const sessionSet = new Set();
@@ -1189,33 +1210,17 @@ async function loadDbData() {
 
     let noteMap = {};
     const jobSet = new Set();
-
-    try {
-        let dbRaw = [];
-        if (shareId) {
-            const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now() + "&share=" + shareId, { cache: "no-store" });
-            dbRaw = await res.json();
-        } else if (storageMode === 'cloud' && currentUser) {
-            const res = await fetch(WORKER_URL + "/api/members?t=" + Date.now(), {
-                cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
-            });
-            dbRaw = await res.json();
-        } else {
-            dbRaw = Object.values(getLocalMembers());
-        }
-
-        dbRaw.forEach(m => {
-            let noteStr = "", tagStr = "none", storedJob = m.last_job;
-            try {
-                const p = JSON.parse(m.note);
-                noteStr = p.text || "";
-                tagStr = p.tag || "none";
-                if (p.last_job) storedJob = p.last_job;
-            } catch (e) { noteStr = m.note || ""; }
-            noteMap[m.id] = { note: noteStr, tag: tagStr, lastJob: storedJob, version: (typeof m.version === 'number' ? m.version : null) };
-            if (m.last_job) jobSet.add(m.last_job);
-        });
-    } catch (e) { console.error("載入成員備註失敗", e); }
+    (Array.isArray(dbRaw) ? dbRaw : []).forEach(m => {
+        let noteStr = "", tagStr = "none", storedJob = m.last_job;
+        try {
+            const p = JSON.parse(m.note);
+            noteStr = p.text || "";
+            tagStr = p.tag || "none";
+            if (p.last_job) storedJob = p.last_job;
+        } catch (e) { noteStr = m.note || ""; }
+        noteMap[m.id] = { note: noteStr, tag: tagStr, lastJob: storedJob, version: (typeof m.version === 'number' ? m.version : null) };
+        if (m.last_job) jobSet.add(m.last_job);
+    });
 
     const jobSelect = document.getElementById('db-job');
     const currJob = jobSelect.value;
@@ -1516,8 +1521,9 @@ function exportMembersCSV() {
     const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '其中臨時', '缺席', '後備', '出席率(%)', '代打記錄'];
     const subText = (m) => {
         const parts = [];
-        (m.subFor || []).forEach(s => parts.push(`${s.date} 代打 ${s.name}`));
-        (m.subBy || []).forEach(s => parts.push(`${s.date} 由 ${s.name} 代打`));
+        const seg = (s) => `${s.date} ${fmtType(s.type)}${s.session || ''}`;
+        (m.subFor || []).forEach(s => parts.push(`${seg(s)} 代打 ${s.name}`));
+        (m.subBy || []).forEach(s => parts.push(`${seg(s)} 由 ${s.name} 代打`));
         return parts.join('；');
     };
     const rows = dbMembersMap.map(m => [
