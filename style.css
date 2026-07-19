@@ -565,6 +565,8 @@ th { background: var(--surface-2) !important; }
 
 /* 臨時請假醒目標籤（影響惡劣，需特別注意） */
 .late-tag { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: #d32f2f; border-radius: 5px; padding: 1px 5px; margin-left: 2px; vertical-align: middle; }
+/* No-show 標籤（更嚴重，深色，僅管理員可見） */
+.noshow-tag { display: inline-block; font-size: 10px; font-weight: 800; color: #fff; background: #7a1f1c; border: 1px solid #b0413e; border-radius: 5px; padding: 1px 6px; margin-left: 3px; vertical-align: middle; letter-spacing: .02em; }
 
 /* 分享選單彈窗 */
 .share-menu-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; justify-content: center; align-items: center; z-index: 2200; padding: 16px; }

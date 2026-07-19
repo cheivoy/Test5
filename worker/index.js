@@ -100,6 +100,7 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   const leaveState = {};   // key `${window}|${member}` -> bool
   const reserveState = {};
   const lateState = {};    // 臨時請假
+  const noshowState = {};  // No-show（說要來卻沒來，另計、不併入請假）
   for (const a of results || []) {
     const key = a.window_id + "|" + a.member_id;
     if (a.action === 'leave_request') leaveState[key] = true;
@@ -108,15 +109,17 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
     else if (a.action === 'reserve_unset') reserveState[key] = false;
     else if (a.action === 'late_set') lateState[key] = true;
     else if (a.action === 'late_unset') lateState[key] = false;
+    else if (a.action === 'noshow_set') noshowState[key] = true;
+    else if (a.action === 'noshow_unset') noshowState[key] = false;
   }
   const byMember = {};
   const byWindow = {};
   const ensureMember = (mid) => {
-    if (!byMember[mid]) byMember[mid] = { leave: 0, reserve: 0, late: 0, leaveByType: {}, reserveByType: {}, lateByType: {} };
+    if (!byMember[mid]) byMember[mid] = { leave: 0, reserve: 0, late: 0, noshow: 0, leaveByType: {}, reserveByType: {}, lateByType: {}, noshowByType: {} };
     return byMember[mid];
   };
   const ensureWin = (wid) => {
-    if (!byWindow[wid]) byWindow[wid] = { leave: [], reserve: [], late: [] };
+    if (!byWindow[wid]) byWindow[wid] = { leave: [], reserve: [], late: [], noshow: [] };
     return byWindow[wid];
   };
   for (const key in leaveState) {
@@ -176,6 +179,17 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
     m.leave++;
     m.leaveByType[t] = (m.leaveByType[t] || 0) + 1;
     ensureWin(wid).late.push(mid);
+  }
+  // No-show：單獨累計，不併入請假
+  for (const key in noshowState) {
+    if (!noshowState[key]) continue;
+    const [wid, mid] = key.split("|");
+    if (!inRange(wid)) continue;
+    const t = winType[wid] || '幫戰';
+    const m = ensureMember(mid);
+    m.noshow++;
+    m.noshowByType[t] = (m.noshowByType[t] || 0) + 1;
+    ensureWin(wid).noshow.push(mid);
   }
   return { byMember, byWindow };
 }
@@ -1532,17 +1546,20 @@ export default {
         const { results: acts } = await env.DB.prepare(
           "SELECT window_id, action FROM leave_actions WHERE owner = ? AND member_id = ? ORDER BY created_at ASC"
         ).bind(user, memberId).all();
-        const leaveSt = {}, lateSt = {};
+        const leaveSt = {}, lateSt = {}, noshowSt = {};
         for (const a of acts || []) {
           if (a.action === 'leave_request') leaveSt[a.window_id] = true;
           else if (a.action === 'leave_cancel') leaveSt[a.window_id] = false;
           else if (a.action === 'late_set') lateSt[a.window_id] = true;
           else if (a.action === 'late_unset') lateSt[a.window_id] = false;
+          else if (a.action === 'noshow_set') noshowSt[a.window_id] = true;
+          else if (a.action === 'noshow_unset') noshowSt[a.window_id] = false;
         }
         const out = [];
         const push = (w, kind, extra) => { if (w) out.push({ kind, date: w.event_date, session: w.session, type: w.match_type || '幫戰', ...(extra || {}) }); };
         for (const wid in leaveSt) if (leaveSt[wid]) push(winMap[wid], 'leave');
         for (const wid in lateSt) if (lateSt[wid]) push(winMap[wid], 'late');
+        for (const wid in noshowSt) if (noshowSt[wid]) push(winMap[wid], 'noshow');
         try {
           const { results: subOut } = await env.DB.prepare("SELECT window_id, substitute_member_id FROM leave_substitutes WHERE owner = ? AND member_id = ?").bind(user, memberId).all();
           (subOut || []).forEach(s => push(winMap[s.window_id], 'covered_by', { other: nameMap[s.substitute_member_id] || '' }));

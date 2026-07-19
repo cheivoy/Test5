@@ -1361,6 +1361,8 @@ async function mergeLeaveAndOverrides(fromDate, toDate) {
         // 臨時請假：已併入 leaveByType，這裡單獨保留次數供醒目標示
         m.lateCount = s.lateByType ? TYPE_ORDER.reduce((x, t) => x + (s.lateByType[t] || 0), 0) : (s.late || 0);
         m.lateByType = s.lateByType || {};
+        // No-show：不併入請假，單獨醒目顯示（僅管理員）
+        m.noshowCount = s.noshowByType ? TYPE_ORDER.reduce((x, t) => x + (s.noshowByType[t] || 0), 0) : (s.noshow || 0);
 
         const ov = mid ? ovMap[mid] : null;
         m.overrideVersion = ov ? ov.version : null;
@@ -1506,7 +1508,7 @@ function onThresholdChange() {
 // 匯出成員名單 CSV（名字/職業/身份/標籤/出席/請假/後備/出席率）
 function exportMembersCSV() {
     if (!dbMembersMap.length) { alert('沒有可匯出的資料'); return; }
-    const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '其中臨時', '後備', '出席率(%)', '代打記錄'];
+    const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '其中臨時', 'No-show', '後備', '出席率(%)', '代打記錄'];
     const subText = (m) => {
         const parts = [];
         (m.subFor || []).forEach(s => parts.push(`${s.date} 代打 ${s.name}`));
@@ -1515,7 +1517,7 @@ function exportMembersCSV() {
     };
     const rows = dbMembersMap.map(m => [
         m.id, m.last_job || '', m.category || '', (m.tag && m.tag !== 'none') ? m.tag : '',
-        m.matches, (m.attendance != null ? m.attendance : m.matches), m.leaveCount || 0, m.lateCount || 0, m.reserveCount || 0,
+        m.matches, (m.attendance != null ? m.attendance : m.matches), m.leaveCount || 0, m.lateCount || 0, m.noshowCount || 0, m.reserveCount || 0,
         m.rate.toFixed(1), subText(m)
     ]);
     const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
@@ -1560,12 +1562,16 @@ function renderStatBadge(m) {
     const late = m.lateCount || 0;
     // 臨時請假影響惡劣 → 醒目紅色標出（次數已含在請假 lv 內）
     const lateTag = late > 0 ? ` <span class="late-tag" title="臨時請假 ${late} 次（已計入請假）">臨時${late}</span>` : '';
-    const tip = statBreakdownTooltip(m) + (late > 0 ? `\n臨時請假：${late} 次（已計入請假）` : '') + (m.hasOverride ? '\n（*=有人工覆蓋）' : '');
-    const clickable = (!isViewMode && !shareId && storageMode === 'cloud' && currentUser && m.member_id);
+    // No-show 更嚴重 → 深色醒目標出，僅管理員可見（不併入請假）
+    const noshow = m.noshowCount || 0;
+    const adminView = !isViewMode && !shareId && storageMode === 'cloud' && currentUser;
+    const noshowTag = (adminView && noshow > 0) ? ` <span class="noshow-tag" title="No-show ${noshow} 次：說要來卻沒來（僅管理員可見，不計入請假）">⛔No-show ${noshow}</span>` : '';
+    const tip = statBreakdownTooltip(m) + (late > 0 ? `\n臨時請假：${late} 次（已計入請假）` : '') + (noshow > 0 ? `\nNo-show：${noshow} 次` : '') + (m.hasOverride ? '\n（*=有人工覆蓋）' : '');
+    const clickable = (adminView && m.member_id);
     if (clickable) {
-        return `<span class="stat-badge" title="${tip}\n（點擊可手動調整）" onclick="event.stopPropagation(); openOverrideModal('${m.member_id}')">${att}/${lv}/${rs}${star}</span>${lateTag}`;
+        return `<span class="stat-badge" title="${tip}\n（點擊可手動調整）" onclick="event.stopPropagation(); openOverrideModal('${m.member_id}')">${att}/${lv}/${rs}${star}</span>${lateTag}${noshowTag}`;
     }
-    return `<span class="stat-badge" title="${tip}">${att}/${lv}/${rs}${star}</span>${lateTag}`;
+    return `<span class="stat-badge" title="${tip}">${att}/${lv}/${rs}${star}</span>${lateTag}${noshowTag}`;
 }
 
 // =====================================================
@@ -1781,6 +1787,7 @@ function renderMemberLeaveHistory() {
     const kindLabel = {
         leave: '<span class="status-pill status-closed">請假</span>',
         late: '<span class="badge-reserve" style="display:inline-block;">臨時請假</span>',
+        noshow: '<span class="noshow-tag">⛔ No-show</span>',
         covered_by: '<span class="badge-reserve" style="display:inline-block; background:#5c6bc0;">被代打</span>',
         covered_for: '<span class="badge-reserve" style="display:inline-block; background:#5c6bc0;">代打他人</span>',
         long: '<span class="badge-reserve" style="display:inline-block; background:#7e57c2;">長期請假</span>'
