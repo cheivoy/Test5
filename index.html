@@ -3,7 +3,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=18">
+    <link rel="stylesheet" href="style.css?v=19">
 </head>
 
 <body>
@@ -241,8 +241,7 @@
             <div id="leave-menu">
                 <h3 style="margin-top:0;">🗓️ 請假管理</h3>
                 <div class="menu-list">
-                    <button class="menu-row" onclick="leaveGoto('windows')"><span class="mr-ico">📅</span><span class="mr-txt"><b>請假場次</b><small>開放／關閉場次、查看請假人數</small></span><span class="mr-arr">›</span></button>
-                    <button class="menu-row" onclick="leaveGoto('board')"><span class="mr-ico">📋</span><span class="mr-txt"><b>各場次請假名單</b><small>依職業分類查看已請假／後備</small></span><span class="mr-arr">›</span></button>
+                    <button class="menu-row" onclick="leaveGoto('windows')"><span class="mr-ico">📅</span><span class="mr-txt"><b>請假場次／名單</b><small>開放關閉場次、展開/複製各場請假名單</small></span><span class="mr-arr">›</span></button>
                     <button class="menu-row" onclick="leaveGoto('long')"><span class="mr-ico">📆</span><span class="mr-txt"><b>長期／預先請假</b><small>某段期間內自動請假的名單</small></span><span class="mr-arr">›</span></button>
                     <button class="menu-row" onclick="leaveGoto('roster')"><span class="mr-ico">👥</span><span class="mr-txt"><b>人員名單</b><small>匯入、更名、移除成員</small></span><span class="mr-arr">›</span></button>
                     <button class="menu-row" onclick="copyLeaveLink()"><span class="mr-ico">🔗</span><span class="mr-txt"><b>複製請假連結</b><small>給幫眾免登入請假</small></span><span class="mr-arr">›</span></button>
@@ -574,6 +573,23 @@
                     <p style="font-weight:bold; margin-bottom:6px;">管理紀錄（No-show / 臨時請假）：</p>
                     <div id="mm-flags" style="font-size:13px;"></div>
                 </div>
+                <div class="admin-only" id="mm-leave-box" style="margin-top:12px;">
+                    <p style="font-weight:bold; margin-bottom:6px;">請假／代打記錄：</p>
+                    <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+                        <input type="text" id="mm-lh-search" class="select-input" placeholder="搜尋日期/名字" style="flex:1; min-width:120px; font-size:12px;" oninput="renderMemberLeaveHistory()">
+                        <select id="mm-lh-range" class="select-input" style="font-size:12px;" onchange="onMmLhRangeChange()">
+                            <option value="5">最近5筆</option>
+                            <option value="all">全部</option>
+                            <option value="30">近一個月</option>
+                            <option value="custom">自訂範圍</option>
+                        </select>
+                        <span id="mm-lh-daterange" style="display:none; gap:4px; align-items:center;">
+                            <input type="date" id="mm-lh-from" class="select-input" style="font-size:12px;" onchange="renderMemberLeaveHistory()">
+                            <input type="date" id="mm-lh-to" class="select-input" style="font-size:12px;" onchange="renderMemberLeaveHistory()">
+                        </span>
+                    </div>
+                    <div id="mm-leave-history" style="font-size:13px;"></div>
+                </div>
                 <p style="margin-top:15px; font-weight:bold;">數據快照（最近5場）：</p>
                 <div id="mm-history-list" class="scroll-list"></div>
                 <p style="margin-top:15px; font-weight:bold;">統戰綜合評語：</p>
@@ -672,5 +688,5 @@
         </div>
     </div>
 
-    <script src="app.js?v=18"></script>
+    <script src="app.js?v=19"></script>
 </body></html>

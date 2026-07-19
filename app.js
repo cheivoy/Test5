@@ -978,6 +978,7 @@ async function openMemberDetail(id) {
 
     // 管理員專屬：no-show / 臨時請假 紀錄（唯讀版不顯示）
     renderMemberFlags(m);
+    loadMemberLeaveHistory(m);
 
     const jobEl = document.getElementById('mm-job');
     if (jobEl) {
@@ -1675,6 +1676,72 @@ async function renderMemberFlags(m) {
             return `<div style="padding:4px 0; border-bottom:1px solid #f5f5f5;"><b>${f.date}</b> ${f.session || ''} ${label}</div>`;
         }).join('');
     } catch (e) { box.innerHTML = '<span style="color:var(--danger);">載入失敗</span>'; }
+}
+
+// 成員檔案：請假/代打/臨時/長期 記錄（預設5筆＋搜尋/範圍）
+let _mmLeaveHistory = [];
+async function loadMemberLeaveHistory(m) {
+    const wrap = document.getElementById('mm-leave-box');
+    if (!wrap) return;
+    if (isViewMode || shareId || storageMode !== 'cloud' || !currentUser || !m.member_id) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'block';
+    const box = document.getElementById('mm-leave-history');
+    box.innerHTML = '<span style="color:#aaa;">載入中…</span>';
+    // 重設篩選
+    const rangeSel = document.getElementById('mm-lh-range'); if (rangeSel) rangeSel.value = '5';
+    const dr = document.getElementById('mm-lh-daterange'); if (dr) dr.style.display = 'none';
+    const sr = document.getElementById('mm-lh-search'); if (sr) sr.value = '';
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/member-history?member_id=" + encodeURIComponent(m.member_id) + "&t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        _mmLeaveHistory = await res.json();
+        if (!Array.isArray(_mmLeaveHistory)) _mmLeaveHistory = [];
+        renderMemberLeaveHistory();
+    } catch (e) { box.innerHTML = '<span style="color:var(--danger);">載入失敗</span>'; }
+}
+
+function onMmLhRangeChange() {
+    const v = document.getElementById('mm-lh-range').value;
+    const dr = document.getElementById('mm-lh-daterange');
+    if (dr) dr.style.display = (v === 'custom') ? 'inline-flex' : 'none';
+    renderMemberLeaveHistory();
+}
+
+function renderMemberLeaveHistory() {
+    const box = document.getElementById('mm-leave-history');
+    if (!box) return;
+    const kindLabel = {
+        leave: '<span class="status-pill status-closed">請假</span>',
+        late: '<span class="badge-reserve" style="display:inline-block;">臨時請假</span>',
+        covered_by: '<span class="badge-reserve" style="display:inline-block; background:#5c6bc0;">被代打</span>',
+        covered_for: '<span class="badge-reserve" style="display:inline-block; background:#5c6bc0;">代打他人</span>',
+        long: '<span class="badge-reserve" style="display:inline-block; background:#7e57c2;">長期請假</span>'
+    };
+    const q = (document.getElementById('mm-lh-search')?.value || '').toLowerCase().trim();
+    const range = document.getElementById('mm-lh-range')?.value || '5';
+    let list = _mmLeaveHistory.slice();
+    // 範圍過濾
+    if (range === '30') {
+        const from = ymd(new Date(Date.now() - 30 * 86400000));
+        list = list.filter(r => (r.date || r.from || '') >= from);
+    } else if (range === 'custom') {
+        const f = document.getElementById('mm-lh-from')?.value || '';
+        const t = document.getElementById('mm-lh-to')?.value || '';
+        list = list.filter(r => { const d = r.date || r.from || ''; return (!f || d >= f) && (!t || d <= t); });
+    }
+    // 搜尋
+    if (q) list = list.filter(r => `${r.date || ''}${r.from || ''}${r.to || ''}${r.session || ''}${fmtType(r.type) || ''}${r.other || ''}`.toLowerCase().includes(q));
+    if (!list.length) { box.innerHTML = '<span style="color:#aaa;">沒有符合的記錄。</span>'; return; }
+    const limited = range === '5' ? list.slice(0, 5) : list;
+    const rows = limited.map(r => {
+        if (r.kind === 'long') {
+            return `<div style="padding:4px 0; border-bottom:1px solid #f5f5f5;"><b>${r.from} ~ ${r.to}</b> ${kindLabel.long}${r.reason ? ' · ' + r.reason : ''}</div>`;
+        }
+        return `<div style="padding:4px 0; border-bottom:1px solid #f5f5f5;"><b>${r.date}</b> ${r.session || ''} <span class="hash-tag">${fmtType(r.type)}</span> ${kindLabel[r.kind] || ''}${r.other ? ' · ' + r.other : ''}</div>`;
+    }).join('');
+    const more = (range === '5' && list.length > 5) ? `<div style="font-size:11px; color:var(--muted); padding-top:4px;">還有 ${list.length - 5} 筆，切換上方範圍看全部</div>` : '';
+    box.innerHTML = rows + more;
 }
 
 function onCategorySelectChange(sel) {
@@ -2549,7 +2616,7 @@ function copyLeaveLink() {
     }).catch(() => { prompt('請手動複製以下連結：', link); });
 }
 
-// ---- 請假場次 ----
+// ---- 請假場次（已併入各場次名單）----
 async function loadLeaveWindows() {
     try {
         const res = await fetch(WORKER_URL + "/api/leave/windows?t=" + Date.now(), {
@@ -2557,6 +2624,7 @@ async function loadLeaveWindows() {
         });
         leaveWindowsCache = await res.json();
     } catch (e) { leaveWindowsCache = []; }
+    await loadLeaveBoard(); // 取得每場的請假/後備名單（依職業）
     renderLeaveWindows();
 }
 
@@ -2599,22 +2667,78 @@ function renderLeaveWindows() {
         el.innerHTML = '<div style="color:#aaa; font-size:13px; padding:10px;">沒有符合條件的場次。</div>';
         return;
     }
-    el.innerHTML = list.map(w => `
-        <div class="lw-card">
-            <div>
-                <b>${w.event_date}　${w.session}</b>
-                <span class="hash-tag" style="margin-left:4px;">${fmtType(w.match_type)}</span>
-                <span class="status-pill ${w.status === 'open' ? 'status-open' : 'status-closed'}">${w.status === 'open' ? '開放中' : '已關閉'}</span>
-                <div style="font-size:12px; color:#97a0ad; margin-top:2px;">
-                    ${w.title || ''} · 🙋 請假 ${w.leave_count} 人 · 🔶 後備 ${w.reserve_count} 人
+    el.innerHTML = list.map(w => {
+        const leaveIds = (leaveBoardCache.leaveByWindow && leaveBoardCache.leaveByWindow[w.window_id]) || [];
+        const reserveIds = (leaveBoardCache.reserveByWindow && leaveBoardCache.reserveByWindow[w.window_id]) || [];
+        return `
+        <div class="lw-card" style="flex-direction:column; align-items:stretch; gap:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+                <div>
+                    <b>${w.event_date}　${w.session}</b>
+                    <span class="hash-tag" style="margin-left:4px;">${fmtType(w.match_type)}</span>
+                    <span class="status-pill ${w.status === 'open' ? 'status-open' : 'status-closed'}">${w.status === 'open' ? '開放中' : '已關閉'}</span>
+                    <div style="font-size:12px; color:#97a0ad; margin-top:2px;">
+                        ${w.title || ''} · 🙋 請假 ${w.leave_count} 人 · 🔶 後備 ${w.reserve_count} 人
+                    </div>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                    <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="openWindowDetail('${w.window_id}')">管理名單</button>
+                    <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="toggleLeaveWindow('${w.window_id}', '${w.status === 'open' ? 'closed' : 'open'}', ${w.version})">${w.status === 'open' ? '關閉' : '開放'}</button>
+                    <button class="btn btn-outline" style="font-size:12px; padding:4px 10px; color:var(--danger);" onclick="deleteLeaveWindow('${w.window_id}')">刪除</button>
                 </div>
             </div>
-            <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="openWindowDetail('${w.window_id}')">管理名單</button>
-                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="toggleLeaveWindow('${w.window_id}', '${w.status === 'open' ? 'closed' : 'open'}', ${w.version})">${w.status === 'open' ? '關閉' : '開放'}</button>
-                <button class="btn btn-outline" style="font-size:12px; padding:4px 10px; color:var(--danger);" onclick="deleteLeaveWindow('${w.window_id}')">刪除</button>
+            <div style="border-top:1px dashed var(--border); padding-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <button class="btn btn-outline" style="font-size:12px; padding:3px 10px;" onclick="toggleWinList('${w.window_id}', this)">▸ 名單</button>
+                <button class="btn btn-outline" style="font-size:12px; padding:3px 10px;" onclick="copyWinList('${w.window_id}')">📋 複製名單</button>
             </div>
-        </div>`).join('');
+            <div id="winlist-${w.window_id}" style="display:none;">${buildWinListHTML(leaveIds, reserveIds)}</div>
+        </div>`;
+    }).join('');
+}
+
+// 依職業精簡排列（名字用、分隔，不佔高度）
+function buildWinListHTML(leaveIds, reserveIds) {
+    const byJob = (ids) => {
+        const groups = {};
+        (ids || []).forEach(mid => {
+            const m = boardMemberById[mid];
+            if (!m) return;
+            (groups[m.job || '未知'] = groups[m.job || '未知'] || []).push(m.display_name);
+        });
+        const jobs = Object.keys(groups).sort();
+        if (!jobs.length) return '<span style="color:var(--muted);">無</span>';
+        return jobs.map(j => `<div style="margin:2px 0;"><span class="job-tag" style="background:var(--color-${j})">${j}</span> ${groups[j].join('、')}</div>`).join('');
+    };
+    return `
+        <div style="font-size:12px; color:#e57373; font-weight:bold; margin-top:4px;">🙋 已請假（${leaveIds.length}）</div>
+        <div style="font-size:13px;">${byJob(leaveIds)}</div>
+        <div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:6px;">🔶 後備（${reserveIds.length}）</div>
+        <div style="font-size:13px;">${byJob(reserveIds)}</div>`;
+}
+
+function toggleWinList(windowId, btn) {
+    const el = document.getElementById('winlist-' + windowId);
+    if (!el) return;
+    const open = el.style.display !== 'none';
+    el.style.display = open ? 'none' : 'block';
+    if (btn) btn.textContent = open ? '▸ 名單' : '▾ 名單';
+}
+
+// 複製這場的請假/後備名單（純文字，依職業）
+function copyWinList(windowId) {
+    const w = (leaveWindowsCache || []).find(x => x.window_id === windowId);
+    const leaveIds = (leaveBoardCache.leaveByWindow && leaveBoardCache.leaveByWindow[windowId]) || [];
+    const reserveIds = (leaveBoardCache.reserveByWindow && leaveBoardCache.reserveByWindow[windowId]) || [];
+    const byJobText = (ids) => {
+        const groups = {};
+        (ids || []).forEach(mid => { const m = boardMemberById[mid]; if (m) (groups[m.job || '未知'] = groups[m.job || '未知'] || []).push(m.display_name); });
+        const jobs = Object.keys(groups).sort();
+        if (!jobs.length) return '　無';
+        return jobs.map(j => `　${j}：${groups[j].join('、')}`).join('\n');
+    };
+    const head = w ? `${w.event_date} ${w.session} [${fmtType(w.match_type)}]${w.title ? ' · ' + w.title : ''}` : '';
+    const text = `${head}\n🙋 請假（${leaveIds.length}）：\n${byJobText(leaveIds)}\n🔶 後備（${reserveIds.length}）：\n${byJobText(reserveIds)}`;
+    navigator.clipboard.writeText(text).then(() => alert('✅ 名單已複製')).catch(() => prompt('請手動複製：', text));
 }
 
 async function createLeaveWindow() {
