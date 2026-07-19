@@ -2657,11 +2657,12 @@ async function loadLongLeaves() {
     }
     const today = ymd(new Date());
     el.innerHTML = rows.map(r => {
-        const active = r.from_date <= today && today <= r.to_date;
-        const upcoming = r.from_date > today;
-        const tag = active ? '<span class="status-pill" style="background:#e8f5e9;color:#2e7d32;">生效中</span>'
-            : upcoming ? '<span class="status-pill" style="background:#fff3e0;color:#e65100;">未開始</span>'
-                : '<span class="status-pill status-closed">已過期</span>';
+        // 只要迄日還沒過（含未來場次）就算生效中——它已在自動涵蓋範圍內的場次，不用等到當天
+        const effective = r.to_date >= today;
+        const future = r.from_date > today;
+        const tag = effective
+            ? `<span class="status-pill" style="background:#e8f5e9;color:#2e7d32;">生效中${future ? '（未來場次）' : ''}</span>`
+            : '<span class="status-pill status-closed">已過期</span>';
         return `<div class="lw-card" style="align-items:center; justify-content:space-between;">
             <div>
                 <div style="font-weight:bold;">${r.display_name} ${tag}</div>
