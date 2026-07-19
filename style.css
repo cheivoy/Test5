@@ -317,7 +317,57 @@ th:hover { background: #eee; }
 }
 
 /* 桌機也讓卡片與按鈕更現代一點（不影響版面結構） */
-.btn { transition: filter .15s, box-shadow .15s; }
+.btn { transition: filter .15s, box-shadow .15s; border-radius: 10px; }
 .btn:hover { filter: brightness(0.97); }
 .btn-primary { box-shadow: 0 2px 8px rgba(142,154,175,0.35); }
 .name-btn { transition: background .15s, border-color .15s; }
+
+/* ===== 現代化：桌機也套用（卡片圓角、陰影、間距） ===== */
+.table-card, .leave-block, .mvp-card, .hist-card { box-shadow: 0 1px 2px rgba(24,33,52,.04), 0 6px 20px rgba(24,33,52,.05); }
+.table-card, .leave-block { border-radius: 16px; }
+.nav-item { transition: background .15s; }
+.nav-item:hover { background: #f1f3f7; }
+.section-header { border-radius: 10px; }
+.sidebar { padding: 22px 18px; }
+
+/* ===== 手機底部分頁列 ===== */
+#mobile-tabbar { display: none; }
+.mtab { }
+
+@media screen and (max-width: 768px) {
+    /* 底部分頁列取代側邊抽屜 */
+    #menu-toggle { display: none !important; }
+    .sidebar { display: none !important; }
+    body.mobile-tabs { padding-bottom: 0; }
+    .main-content { padding-bottom: calc(70px + env(safe-area-inset-bottom)) !important; }
+    .container { padding-top: 14px !important; }
+
+    #mobile-tabbar {
+        display: flex;
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 1500;
+        background: rgba(255,255,255,0.94);
+        backdrop-filter: saturate(180%) blur(12px);
+        -webkit-backdrop-filter: saturate(180%) blur(12px);
+        border-top: 1px solid var(--border);
+        padding: 7px 4px calc(7px + env(safe-area-inset-bottom));
+    }
+    .mtab {
+        flex: 1; border: none; background: none; cursor: pointer; color: #9aa4b2;
+        display: flex; flex-direction: column; align-items: center; gap: 3px;
+        padding: 4px 0; font-size: 11px; font-weight: 600;
+    }
+    .mtab svg { width: 23px; height: 23px; }
+    .mtab .ico-wrap { }
+    .mtab.active { color: var(--accent); }
+    .mtab:active { transform: scale(0.92); }
+
+    /* 我的頁：帳號按鈕做成大卡片按鈕 */
+    #me-account-mount { display: flex; flex-direction: column; gap: 10px; }
+    #me-account-mount .btn { width: 100%; min-height: 48px; font-size: 15px !important; justify-content: center; }
+    #mode-banner { font-size: 13px; padding: 12px 14px; }
+
+    /* 戰報頁頂部的歷史清單 */
+    #report-hist-mount { margin-bottom: 16px; }
+    #report-hist-mount .history-list { max-height: 46vh; overflow-y: auto; border-top: none; }
+    #report-hist-mount .hist-card { padding: 14px; border-radius: 14px; }
+}

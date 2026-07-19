@@ -296,6 +296,7 @@ window.onload = async () => {
 
     updateModeBanner();
     initSections();
+    layoutForViewport();
 
     await fetchAllHistories();
     const reportId = urlParams.get('id');
@@ -2641,16 +2642,48 @@ async function loadAuditLog() {
 // ===  UI 工具函數
 // =====================================================
 function switchPage(p) {
-    document.getElementById('page-report').style.display = p === 'report' ? 'block' : 'none';
-    document.getElementById('page-db').style.display = p === 'db' ? 'block' : 'none';
-    const leavePage = document.getElementById('page-leave');
-    if (leavePage) leavePage.style.display = p === 'leave' ? 'block' : 'none';
+    ['report', 'db', 'leave', 'me'].forEach(x => {
+        const el = document.getElementById('page-' + x);
+        if (el) el.style.display = (x === p) ? 'block' : 'none';
+    });
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     const nav = document.getElementById('nav-' + p);
     if (nav) nav.classList.add('active');
+    document.querySelectorAll('.mtab').forEach(el => el.classList.toggle('active', el.dataset.page === p));
+    // 捲回頂端（手機切分頁時體驗較好）
+    const mc = document.querySelector('.main-content');
+    if (mc) mc.scrollTop = 0;
+    window.scrollTo(0, 0);
     if (p === 'db') loadDbData();
     if (p === 'leave') loadLeavePage();
 }
+
+// 手機/桌機版面切換：把「歷史列表」「帳號區」搬到合適位置
+function layoutForViewport() {
+    const mobile = window.innerWidth <= 768;
+    const sidebar = document.querySelector('.sidebar');
+    const histBlock = document.getElementById('hist-block');
+    const acct = document.getElementById('account-block');
+    const banner = document.getElementById('mode-banner');
+    const reportMount = document.getElementById('report-hist-mount');
+    const meMount = document.getElementById('me-account-mount');
+    if (!sidebar) return;
+    if (mobile) {
+        if (histBlock && reportMount && histBlock.parentElement !== reportMount) reportMount.appendChild(histBlock);
+        if (banner && meMount && banner.parentElement !== meMount) meMount.appendChild(banner);
+        if (acct && meMount && acct.parentElement !== meMount) meMount.appendChild(acct);
+    } else {
+        const navReport = document.getElementById('nav-report');
+        if (banner && navReport && banner.parentElement !== sidebar) sidebar.insertBefore(banner, navReport);
+        if (acct && navReport && acct.parentElement !== sidebar) sidebar.insertBefore(acct, navReport);
+        if (histBlock && histBlock.parentElement !== sidebar) sidebar.appendChild(histBlock);
+    }
+}
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(layoutForViewport, 150);
+});
 
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 

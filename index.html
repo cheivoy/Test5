@@ -18,7 +18,7 @@
 
         <div id="mode-banner" class="local">💾 本地模式（未登入）</div>
 
-        <div style="margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap;">
+        <div id="account-block" style="margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap;">
             <button class="btn btn-outline" id="auth-btn" onclick="openAuthModal()" style="flex:1; font-size:12px;">🔑 登入 / 註冊</button>
             <button class="btn btn-outline admin-only" id="sessions-btn" onclick="openSessionsModal()" style="flex:1; font-size:12px; display:none;">💻 裝置</button>
             <button class="btn btn-outline" id="logout-btn" onclick="logoutUser()" style="flex:1; font-size:12px; display:none;">🚪 登出</button>
@@ -29,6 +29,7 @@
         <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員檔案室</div>
         <div class="nav-item admin-only" id="nav-leave" onclick="switchPage('leave')">🗓️ 請假管理</div>
 
+        <div id="hist-block">
         <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
             <!-- 歷史記錄搜索區域 -->
             <div class="controls-row">
@@ -68,10 +69,12 @@
         <div class="history-list">
             <div id="hist-items"></div>
         </div>
+        </div>
     </div>
 
     <div class="main-content">
         <div class="container" id="page-report">
+            <div id="report-hist-mount"></div>
             <div style="background:#fff; padding:15px; border-radius:12px; margin-bottom:20px; display:flex; gap:12px; align-items:center; border: 1px solid var(--border); flex-wrap: wrap;">
                 <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
                 <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
@@ -287,7 +290,38 @@
                 <div id="audit-log-list" class="table-card" style="max-height:360px; overflow-y:auto;"></div>
             </div>
         </div>
+
+        <div class="container" id="page-me" style="display:none;">
+            <h3 style="margin-top:0;">👤 我的</h3>
+            <div id="me-account-mount"></div>
+            <div class="leave-block" style="margin-top:14px;">
+                <div class="leave-block-title">說明</div>
+                <div style="font-size:12px; color:#97a0ad; line-height:1.7;">
+                    系統會延遲，有問題先刷新，再重登。<br>實在不行找 🍒 櫻桃白蘭地 · DC：cherrycywong
+                </div>
+            </div>
+        </div>
     </div>
+
+    <!-- 手機底部分頁列 -->
+    <nav id="mobile-tabbar">
+        <button class="mtab active" data-page="report" onclick="switchPage('report')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+            <span>戰報</span>
+        </button>
+        <button class="mtab" data-page="db" onclick="switchPage('db')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 7.5a3 3 0 0 1 0 6M18.5 20a5 5 0 0 0-3-4.6"/></svg>
+            <span>成員</span>
+        </button>
+        <button class="mtab admin-only" data-page="leave" onclick="switchPage('leave')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v3M16 2v3M3 9h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>
+            <span>請假</span>
+        </button>
+        <button class="mtab" data-page="me" onclick="switchPage('me')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
+            <span>我的</span>
+        </button>
+    </nav>
 
     <!-- 出席/請假/後備 人工覆蓋 Modal（依類型：幫戰/約戰/領地戰） -->
     <div id="override-modal" onclick="closeModal('override-modal')">
