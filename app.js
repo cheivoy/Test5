@@ -1296,6 +1296,9 @@ async function mergeLeaveAndOverrides(fromDate, toDate) {
         const autoLeave = s.leaveByType || {};
         const autoReserve = s.reserveByType || {};
         m.autoByType = { attendance: autoAtt, leave: autoLeave, reserve: autoReserve };
+        // 臨時請假：已併入 leaveByType，這裡單獨保留次數供醒目標示
+        m.lateCount = s.lateByType ? TYPE_ORDER.reduce((x, t) => x + (s.lateByType[t] || 0), 0) : (s.late || 0);
+        m.lateByType = s.lateByType || {};
 
         const ov = mid ? ovMap[mid] : null;
         m.overrideVersion = ov ? ov.version : null;
@@ -1441,10 +1444,10 @@ function onThresholdChange() {
 // 匯出成員名單 CSV（名字/職業/身份/標籤/出席/請假/後備/出席率）
 function exportMembersCSV() {
     if (!dbMembersMap.length) { alert('沒有可匯出的資料'); return; }
-    const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '後備', '出席率(%)'];
+    const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '其中臨時', '後備', '出席率(%)'];
     const rows = dbMembersMap.map(m => [
         m.id, m.last_job || '', m.category || '', (m.tag && m.tag !== 'none') ? m.tag : '',
-        m.matches, (m.attendance != null ? m.attendance : m.matches), m.leaveCount || 0, m.reserveCount || 0,
+        m.matches, (m.attendance != null ? m.attendance : m.matches), m.leaveCount || 0, m.lateCount || 0, m.reserveCount || 0,
         m.rate.toFixed(1)
     ]);
     const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
@@ -1486,12 +1489,15 @@ function renderStatBadge(m) {
     const lv = m.leaveCount || 0;
     const rs = m.reserveCount || 0;
     const star = m.hasOverride ? '*' : '';
-    const tip = statBreakdownTooltip(m) + (m.hasOverride ? '\n（*=有人工覆蓋）' : '');
+    const late = m.lateCount || 0;
+    // 臨時請假影響惡劣 → 醒目紅色標出（次數已含在請假 lv 內）
+    const lateTag = late > 0 ? ` <span class="late-tag" title="臨時請假 ${late} 次（已計入請假）">臨時${late}</span>` : '';
+    const tip = statBreakdownTooltip(m) + (late > 0 ? `\n臨時請假：${late} 次（已計入請假）` : '') + (m.hasOverride ? '\n（*=有人工覆蓋）' : '');
     const clickable = (!isViewMode && !shareId && storageMode === 'cloud' && currentUser && m.member_id);
     if (clickable) {
-        return `<span class="stat-badge" title="${tip}\n（點擊可手動調整）" onclick="event.stopPropagation(); openOverrideModal('${m.member_id}')">${att}/${lv}/${rs}${star}</span>`;
+        return `<span class="stat-badge" title="${tip}\n（點擊可手動調整）" onclick="event.stopPropagation(); openOverrideModal('${m.member_id}')">${att}/${lv}/${rs}${star}</span>${lateTag}`;
     }
-    return `<span class="stat-badge" title="${tip}">${att}/${lv}/${rs}${star}</span>`;
+    return `<span class="stat-badge" title="${tip}">${att}/${lv}/${rs}${star}</span>${lateTag}`;
 }
 
 // =====================================================
