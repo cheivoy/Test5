@@ -2612,7 +2612,12 @@ async function openWindowDetail(windowId) {
     // 職業篩選選單（用名冊職業）
     const jobFilter = document.getElementById('wd-job-filter');
     if (jobFilter) {
-        const jobs = [...new Set(rosterCache.map(m => m.job).filter(Boolean))].sort();
+        // 職業來源：戰報算出的職業（boardMemberById）最準，補上名冊職業與 9 大職業預設
+        const jobs = [...new Set([
+            ...JOB_LIST,
+            ...rosterCache.map(m => m.job).filter(Boolean),
+            ...Object.values(boardMemberById).map(b => b.job).filter(Boolean)
+        ])];
         jobFilter.innerHTML = '<option value="all">全部職業</option>' + jobs.map(j => `<option value="${j}">${j}</option>`).join('');
         jobFilter.value = 'all';
     }
@@ -2684,7 +2689,7 @@ function renderWindowDetail() {
                         ${onLate ? '<span class="badge-reserve" style="display:inline-block;">臨時</span>' : ''}
                         ${subId ? `<span class="badge-reserve" style="display:inline-block; background:#5c6bc0;">代打：${subName} <span style="cursor:pointer;" onclick="wdUnsetSub('${m.member_id}')">✕</span></span>` : ''}
                     </div>
-                    <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:4px; flex-wrap:wrap; margin-left:auto;">
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px;" onclick="wdAction('${m.member_id}', '${onLeave ? 'leave_cancel' : 'leave_request'}')">${onLeave ? '取消請假' : '請假'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#e65100;" onclick="wdAction('${m.member_id}', '${onReserve ? 'reserve_unset' : 'reserve_set'}')">${onReserve ? '取消後備' : '後備'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:var(--danger);" onclick="wdAction('${m.member_id}', '${onNoshow ? 'noshow_unset' : 'noshow_set'}')">${onNoshow ? '取消No-show' : 'No-show'}</button>

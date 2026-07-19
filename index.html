@@ -485,7 +485,7 @@
 
     <!-- 場次請假名單 Modal（管理員） -->
     <div id="window-detail-modal" onclick="closeModal('window-detail-modal')">
-        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:480px; max-height:85vh; overflow-y:auto;">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:min(720px, 94vw); max-height:85vh; overflow-y:auto;">
             <h3 style="margin-top:0;" id="wd-title">場次名單</h3>
             <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
                 <input type="text" id="wd-search" class="search-input" placeholder="搜尋名字…" oninput="renderWindowDetail()">
