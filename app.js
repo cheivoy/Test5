@@ -2976,6 +2976,7 @@ function renderLeaveWindows() {
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="openWindowDetail('${w.window_id}')">管理名單</button>
+                    ${w.status === 'open' ? `<button class="btn btn-outline" style="font-size:12px; padding:4px 10px; color:#2e7d32;" onclick="notifyLeaveWindow('${w.window_id}')">📣 發通知</button>` : ''}
                     <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="toggleLeaveWindow('${w.window_id}', '${w.status === 'open' ? 'closed' : 'open'}', ${w.version})">${w.status === 'open' ? '關閉' : '開放'}</button>
                     <button class="btn btn-outline" style="font-size:12px; padding:4px 10px; color:var(--danger);" onclick="deleteLeaveWindow('${w.window_id}')">刪除</button>
                 </div>
@@ -3064,6 +3065,41 @@ async function createLeaveWindow() {
         document.getElementById('lw-title').value = '';
         await Promise.all([loadLeaveWindows(), loadLeaveBoard()]);
     } catch (e) { alert('開放失敗：' + e.message); }
+}
+
+// 手動重發某場的 Discord 開放請假通知（可自訂加一句話）
+function notifyLeaveWindow(windowId) {
+    const existing = document.getElementById('notify-modal'); if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'notify-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2400;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+      <div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:22px;border-radius:14px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:12px;">
+        <h3 style="margin:0;">📣 發送請假通知</h3>
+        <p style="font-size:12px;color:var(--muted);margin:0;">會用現有模板（本場請假／長期請假／找管理／查詢指令）重發到 Discord。下面可再加你想說的話（選填，會附在最後）。</p>
+        <textarea id="notify-msg" class="search-input" rows="4" placeholder="例：本週幫戰很重要，請儘早登記！（可留空）" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn btn-outline" onclick="document.getElementById('notify-modal').remove()">取消</button>
+          <button class="btn btn-primary" id="notify-go" onclick="sendLeaveNotify('${windowId}')">發送</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    setTimeout(() => document.getElementById('notify-msg')?.focus(), 50);
+}
+async function sendLeaveNotify(windowId) {
+    const message = document.getElementById('notify-msg')?.value || '';
+    const btn = document.getElementById('notify-go');
+    if (btn) { btn.disabled = true; btn.textContent = '發送中…'; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/windows/notify", {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ window_id: windowId, message })
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert('發送失敗：' + (d.error || res.status)); if (btn) { btn.disabled = false; btn.textContent = '發送'; } return; }
+        document.getElementById('notify-modal')?.remove();
+        alert('✅ 已發送 Discord 通知');
+    } catch (e) { alert('發送失敗：' + e.message); if (btn) { btn.disabled = false; btn.textContent = '發送'; } }
 }
 
 async function toggleLeaveWindow(windowId, status, version) {

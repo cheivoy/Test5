@@ -456,6 +456,24 @@ async function buildLeaveUrl(env, owner, request) {
   } catch (e) { return ''; }
 }
 
+// 組「已開放請假」通知（供開場次自動發＋管理員手動重發共用）；extraMsg 為管理員自訂加句
+async function buildLeaveOpenEmbed(env, owner, win, request, extraMsg) {
+  const typeLabel = win.match_type === '其他' ? '領地戰' : (win.match_type || '幫戰');
+  const leaveUrl = await buildLeaveUrl(env, owner, request);
+  const longUrl = leaveUrl ? leaveUrl + '#long' : '';
+  let desc = `**${win.event_date}　${win.session}　[${typeLabel}]**${win.title ? "\n" + win.title : ""}`;
+  if (leaveUrl) {
+    desc += `\n\n① ${win.event_date} 請假開放，有需要自行申請：\n${leaveUrl}`;
+    desc += `\n\n② 長期/預先請假（如需於非開放時段請假請用此連結）：\n${longUrl}`;
+    desc += `\n\n③ 有問題請找當家/管理處理`;
+  } else {
+    desc += `\n請到請假連結登記。`;
+  }
+  desc += `\n\n🤖 也可直接用機器人指令查詢：\n\`/查詢 名字\`　\`/出勤榜\`　\`/請假名單\``;
+  if (extraMsg && String(extraMsg).trim()) desc += `\n\n📢 ${String(extraMsg).trim()}`;
+  return { title: "🗓️ 已開放請假", description: desc, color: 3447003 };
+}
+
 // 依 guild_id 找出綁定的戰隊帳號（先查多伺服器表，再退回舊的單一欄位）
 async function ownerByGuild(env, guildId) {
   if (!guildId) return null;
@@ -1203,23 +1221,32 @@ export default {
             throw e;
           }
         }
-        const typeLabel = mtype === '其他' ? '領地戰' : mtype;
         await writeAudit(env, user, user, 'leave_window', windowId, 'create', { event_date, session, title, match_type: mtype });
-        const leaveUrl = await buildLeaveUrl(env, user, request);
-        const longUrl = leaveUrl ? leaveUrl + '#long' : '';
-        let leaveDesc = `**${event_date}　${session}　[${typeLabel}]**${title ? "\n" + title : ""}`;
-        if (leaveUrl) {
-          leaveDesc += `\n\n① ${event_date} 請假開放，有需要自行申請：\n${leaveUrl}`;
-          leaveDesc += `\n\n② 長期/預先請假（如需於非開放時段請假請用此連結）：\n${longUrl}`;
-          leaveDesc += `\n\n③ 有問題請找當家/管理處理`;
-        } else {
-          leaveDesc += `\n請到請假連結登記。`;
-        }
-        leaveDesc += `\n\n🤖 也可直接用機器人指令查詢：\n\`/查詢 名字\`　\`/出勤榜\`　\`/請假名單\``;
-        await notifyDiscord(env, user, 'leave_open', {
-          embed: { title: "🗓️ 已開放請假", description: leaveDesc, color: 3447003 }
-        });
+        const openEmbed = await buildLeaveOpenEmbed(env, user, { event_date, session, match_type: mtype, title }, request);
+        await notifyDiscord(env, user, 'leave_open', { embed: openEmbed });
         return json({ status: "OK", window_id: windowId });
+      }
+
+      // 手動重發某場的「已開放請假」Discord 通知（可自訂加一句話）
+      if (url.pathname === "/api/leave/windows/notify" && request.method === "POST") {
+        requireAuth();
+        const { window_id, message } = await request.json();
+        if (!window_id) return json({ error: "參數錯誤" }, 400);
+        let win;
+        try {
+          win = await env.DB.prepare(
+            "SELECT event_date, session, match_type, title, status FROM leave_windows WHERE window_id = ? AND owner = ?"
+          ).bind(window_id, user).first();
+        } catch (e) {
+          win = await env.DB.prepare(
+            "SELECT event_date, session, title, status FROM leave_windows WHERE window_id = ? AND owner = ?"
+          ).bind(window_id, user).first();
+        }
+        if (!win) return json({ error: "找不到場次" }, 404);
+        const embed = await buildLeaveOpenEmbed(env, user, win, request, message);
+        await notifyDiscord(env, user, 'leave_open', { embed });
+        await writeAudit(env, user, user, 'leave_window', window_id, 'notify', { hasMessage: !!(message && String(message).trim()) });
+        return json({ status: "OK" });
       }
 
       // 開放 / 關閉場次
