@@ -1403,6 +1403,47 @@ export default {
         return json({ status: "OK" });
       }
 
+      // 🎖️ 出戰班表：列表
+      if (url.pathname === "/api/lineups" && request.method === "GET") {
+        requireAuth();
+        let results = [];
+        try {
+          ({ results } = await env.DB.prepare(
+            "SELECT id, title, window_id, data_json, updated_at FROM lineups WHERE owner = ? ORDER BY updated_at DESC"
+          ).bind(user).all());
+        } catch (e) { results = []; }
+        return json((results || []).map(r => ({
+          id: r.id, title: r.title || '', window_id: r.window_id || '', updated_at: r.updated_at,
+          groups: (() => { try { return JSON.parse(r.data_json) || []; } catch (e) { return []; } })()
+        })));
+      }
+      // 出戰班表：儲存（新增/更新）
+      if (url.pathname === "/api/lineups/save" && request.method === "POST") {
+        requireAuth();
+        const { id, title, window_id, groups } = await request.json();
+        const gjson = JSON.stringify(Array.isArray(groups) ? groups : []);
+        const now = Date.now();
+        if (id) {
+          const r = await env.DB.prepare(
+            "UPDATE lineups SET title=?, window_id=?, data_json=?, updated_at=? WHERE id=? AND owner=?"
+          ).bind(title || '', window_id || '', gjson, now, id, user).run();
+          if (r.meta && r.meta.changes > 0) return json({ status: "OK", id });
+        }
+        const newId = crypto.randomUUID();
+        await env.DB.prepare(
+          "INSERT INTO lineups (id, owner, title, window_id, data_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(newId, user, title || '', window_id || '', gjson, now).run();
+        return json({ status: "OK", id: newId });
+      }
+      // 出戰班表：刪除
+      if (url.pathname === "/api/lineups/delete" && request.method === "POST") {
+        requireAuth();
+        const { id } = await request.json();
+        if (!id) return json({ error: "參數錯誤" }, 400);
+        await env.DB.prepare("DELETE FROM lineups WHERE owner = ? AND id = ?").bind(user, id).run();
+        return json({ status: "OK" });
+      }
+
       // 代替上號：設定 / 取消（管理員用）
       if (url.pathname === "/api/leave/substitute" && request.method === "POST") {
         requireAuth();

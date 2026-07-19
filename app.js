@@ -2512,13 +2512,14 @@ async function loadLeavePage() {
 function leaveGoto(name) {
     document.getElementById('leave-menu').style.display = 'none';
     document.getElementById('leave-sub').style.display = 'block';
-    ['windows', 'board', 'long', 'roster', 'discord', 'audit'].forEach(n => {
+    ['windows', 'board', 'long', 'lineup', 'roster', 'discord', 'audit'].forEach(n => {
         const el = document.getElementById('lsub-' + n);
         if (el) el.style.display = (n === name) ? 'block' : 'none';
     });
     if (name === 'windows') loadLeaveWindows();
     else if (name === 'board') loadLeaveBoard();
     else if (name === 'long') loadLongLeaves();
+    else if (name === 'lineup') loadLineups();
     else if (name === 'roster') loadRoster();
     else if (name === 'discord') loadDiscordSettings();
     else if (name === 'audit') loadAuditLog();
@@ -2661,6 +2662,211 @@ async function deleteLongLeave(id) {
         });
         if (!res.ok) { const d = await res.json().catch(() => ({})); alert('刪除失敗：' + (d.error || res.status)); return; }
         await loadLongLeaves();
+    } catch (e) { alert('刪除失敗：' + e.message); }
+}
+
+// ---- 出戰班表（綁場次、依職業排、請假灰掉、不重複；純規劃不影響出席）----
+let lineupsCache = [];
+let editingLineup = null;      // { id, title, window_id, groups:[{name, members:[mid]}] }
+let lineupWindows = [];
+let lineupUnavail = new Set();  // 這場請假/臨時/長期 → 不可上陣
+let lineupActiveGroup = 0;
+
+async function loadLineups() {
+    if (!rosterCache.length) { try { await loadRoster(); } catch (e) { } }
+    try {
+        const w = await fetch(WORKER_URL + "/api/leave/windows?t=" + Date.now(), { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+        lineupWindows = await w.json();
+        if (!Array.isArray(lineupWindows)) lineupWindows = [];
+    } catch (e) { lineupWindows = []; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/lineups?t=" + Date.now(), { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+        lineupsCache = await res.json();
+        if (!Array.isArray(lineupsCache)) lineupsCache = [];
+    } catch (e) { lineupsCache = []; }
+    editingLineup = null;
+    renderLineupHome();
+}
+function lineupMemberName(mid) { const m = rosterCache.find(x => x.member_id === mid); return m ? m.display_name : (memberIdToDisplayName[mid] || String(mid).slice(0, 6)); }
+function lineupMemberJob(mid) { const m = rosterCache.find(x => x.member_id === mid); return (m && m.job) || (boardMemberById[mid] && boardMemberById[mid].job) || '未知'; }
+function lineupWinLabel(wid) { const w = lineupWindows.find(x => x.window_id === wid); return w ? `${w.event_date} ${w.session} ${fmtType(w.match_type)}` : ''; }
+function lineupAssignedSet() { const s = new Set(); editingLineup.groups.forEach(g => g.members.forEach(m => s.add(m))); return s; }
+
+function renderLineupHome() {
+    const el = document.getElementById('lineup-mount');
+    if (!el) return;
+    const cards = lineupsCache.map(l => {
+        const total = (l.groups || []).reduce((s, g) => s + (g.members ? g.members.length : 0), 0);
+        const win = l.window_id ? lineupWinLabel(l.window_id) : '未綁場次';
+        return `<div class="lw-card" style="align-items:center;justify-content:space-between;">
+            <div><div style="font-weight:bold;">${l.title || '(未命名班表)'}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">${win} · ${(l.groups || []).length} 組 · ${total} 人</div></div>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-outline" style="font-size:12px;" onclick="lineupEdit('${l.id}')">編輯</button>
+              <button class="btn btn-outline" style="font-size:12px;color:var(--danger);" onclick="lineupDelete('${l.id}')">刪除</button>
+            </div></div>`;
+    }).join('');
+    el.innerHTML = `<p style="font-size:12px;color:var(--muted);margin:0 0 12px;">選一個場次來排陣，請假的人會變灰不能排。班表只是規劃，最終出席仍以戰報為準。</p>
+        <button class="btn btn-primary" style="margin-bottom:12px;" onclick="lineupNew()">➕ 新增班表</button>
+        ${cards || '<div style="color:var(--muted);font-size:13px;padding:6px;">還沒有班表，點上面新增。</div>'}`;
+}
+function lineupNew() {
+    editingLineup = { id: null, title: '', window_id: '', groups: [{ name: '進攻團', members: [] }, { name: '防守團', members: [] }, { name: '機動團', members: [] }] };
+    lineupActiveGroup = 0; lineupUnavail = new Set();
+    renderLineupEditor();
+}
+function lineupEdit(id) {
+    const l = lineupsCache.find(x => x.id === id); if (!l) return;
+    editingLineup = { id: l.id, title: l.title || '', window_id: l.window_id || '', groups: JSON.parse(JSON.stringify(l.groups || [])) };
+    lineupActiveGroup = 0;
+    lineupLoadWindowLeave();
+}
+async function lineupSetWindow(wid) { editingLineup.window_id = wid; await lineupLoadWindowLeave(); }
+async function lineupLoadWindowLeave() {
+    lineupUnavail = new Set();
+    if (editingLineup.window_id) {
+        try {
+            const res = await fetch(WORKER_URL + "/api/leave/window-members?window_id=" + encodeURIComponent(editingLineup.window_id) + "&t=" + Date.now(), { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+            const d = await res.json();
+            (d.leave || []).forEach(id => lineupUnavail.add(id));
+            (d.late || []).forEach(id => lineupUnavail.add(id));
+        } catch (e) { }
+    }
+    renderLineupEditor();
+}
+function lineupSetActiveGroup(i) { lineupActiveGroup = i; renderLineupEditor(); }
+
+function renderLineupEditor() {
+    const el = document.getElementById('lineup-mount');
+    if (!el || !editingLineup) return;
+    if (lineupActiveGroup >= editingLineup.groups.length) lineupActiveGroup = 0;
+
+    // 場次下拉
+    const winOpts = '<option value="">— 選場次（看請假）—</option>' + lineupWindows.map(w =>
+        `<option value="${w.window_id}" ${w.window_id === editingLineup.window_id ? 'selected' : ''}>${w.event_date} ${w.session} ${fmtType(w.match_type)}${w.status === 'open' ? '' : '（關閉）'}</option>`).join('');
+    // 複製來源（其他班表）
+    const copyOpts = '<option value="">— 複製其他班表的陣容 —</option>' + lineupsCache.filter(l => l.id !== editingLineup.id).map(l =>
+        `<option value="${l.id}">${l.title || '未命名'}${l.window_id ? '（' + lineupWinLabel(l.window_id) + '）' : ''}</option>`).join('');
+
+    // 分組（可點來設為「作用中」，點職業池的人會加進作用中的組）
+    const groupsHtml = editingLineup.groups.map((g, i) => {
+        const active = i === lineupActiveGroup;
+        const chips = g.members.map(mid => {
+            const bad = lineupUnavail.has(mid);
+            return `<span class="hash-tag" style="display:inline-flex;gap:5px;align-items:center;${bad ? 'background:#ffe0e0;color:#b0413e;text-decoration:line-through;' : ''}">
+                <span class="job-tag" style="background:var(--color-${lineupMemberJob(mid)});font-size:9px;">${lineupMemberJob(mid)}</span>${lineupMemberName(mid)}${bad ? ' ⚠請假' : ''}
+                <span style="cursor:pointer;text-decoration:none;" onclick="lineupRemoveMember(${i},'${mid}')">✕</span></span>`;
+        }).join('') || '<span style="font-size:12px;color:var(--muted);">點右邊職業池的人加進來</span>';
+        return `<div style="border:2px solid ${active ? 'var(--accent)' : 'var(--border)'};border-radius:12px;padding:12px;margin-bottom:10px;background:var(--surface-2);cursor:pointer;" onclick="lineupSetActiveGroup(${i})">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+              ${active ? '<span class="status-pill" style="background:var(--accent-soft);color:var(--accent-strong);">作用中</span>' : ''}
+              <input type="text" class="search-input" value="${(g.name || '').replace(/"/g, '&quot;')}" oninput="editingLineup.groups[${i}].name=this.value" onclick="event.stopPropagation()" style="font-weight:bold;width:140px;">
+              <span style="font-size:12px;color:var(--muted);">${g.members.length} 人</span>
+              <button class="btn btn-outline" style="font-size:11px;padding:3px 8px;color:var(--danger);margin-left:auto;" onclick="event.stopPropagation();lineupRemoveGroup(${i})">刪組</button>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
+        </div>`;
+    }).join('');
+
+    // 可用成員池（依職業分組；已上陣的不出現；請假的變灰不可點）
+    const assigned = lineupAssignedSet();
+    const pool = rosterCache.filter(m => !assigned.has(m.member_id));
+    const byJob = {};
+    pool.forEach(m => { (byJob[m.job || '未知'] = byJob[m.job || '未知'] || []).push(m); });
+    const jobs = Object.keys(byJob).sort();
+    const poolHtml = jobs.length ? jobs.map(j => `
+        <div style="margin-bottom:8px;">
+          <div style="font-size:12px;font-weight:bold;color:var(--muted);margin-bottom:4px;">
+            <span class="job-tag" style="background:var(--color-${j})">${j}</span> ${byJob[j].length}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            ${byJob[j].map(m => {
+                const bad = lineupUnavail.has(m.member_id);
+                return `<span class="hash-tag" style="cursor:${bad ? 'not-allowed' : 'pointer'};${bad ? 'opacity:.4;text-decoration:line-through;' : ''}"
+                    onclick="${bad ? `alert('${m.display_name} 這場已請假，不能上陣')` : `lineupAssign('${m.member_id}')`}">${m.display_name}${bad ? ' ⚠' : ''}</span>`;
+            }).join('')}
+          </div>
+        </div>`).join('') : '<div style="font-size:12px;color:var(--muted);">全部都排上了。</div>';
+
+    el.innerHTML = `
+      <button class="btn btn-outline" style="margin-bottom:12px;" onclick="loadLineups()">← 返回班表列表</button>
+      <input type="text" class="search-input" value="${(editingLineup.title || '').replace(/"/g, '&quot;')}" oninput="editingLineup.title=this.value" placeholder="班表名稱（例：7/20 幫戰陣容）" style="margin-bottom:10px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+        <select class="select-input" style="flex:1;min-width:180px;" onchange="lineupSetWindow(this.value)">${winOpts}</select>
+        <select class="select-input" style="flex:1;min-width:180px;" onchange="if(this.value){lineupApplyCopy(this.value);this.value='';}">${copyOpts}</select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr;gap:16px;">
+        <div>
+          <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">分組（點一組設為作用中，再從下方職業池點人加入）</div>
+          ${groupsHtml}
+          <button class="btn btn-outline" style="font-size:12px;" onclick="lineupAddGroup()">➕ 新增分組</button>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:bold;margin-bottom:6px;">可用成員（依職業）· 灰＝已請假</div>
+          <div style="border:1px solid var(--border);border-radius:12px;padding:12px;max-height:340px;overflow-y:auto;">${poolHtml}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">
+        <button class="btn btn-primary" onclick="lineupSave()">💾 暫存 / 發佈</button>
+        <button class="btn btn-outline" onclick="lineupCopy()">📋 複製成文字</button>
+        ${editingLineup.id ? `<button class="btn btn-outline" style="color:var(--danger);" onclick="lineupDelete('${editingLineup.id}')">刪除</button>` : ''}
+      </div>`;
+}
+function lineupAssign(mid) {
+    if (lineupUnavail.has(mid)) { alert('他這場已請假，不能上陣'); return; }
+    if (lineupAssignedSet().has(mid)) { alert('已經排上了，不能重複'); return; }
+    if (!editingLineup.groups.length) { alert('請先新增一個分組'); return; }
+    editingLineup.groups[lineupActiveGroup].members.push(mid);
+    renderLineupEditor();
+}
+function lineupAddGroup() { editingLineup.groups.push({ name: '新分組', members: [] }); lineupActiveGroup = editingLineup.groups.length - 1; renderLineupEditor(); }
+function lineupRemoveGroup(i) { editingLineup.groups.splice(i, 1); if (lineupActiveGroup >= editingLineup.groups.length) lineupActiveGroup = Math.max(0, editingLineup.groups.length - 1); renderLineupEditor(); }
+function lineupRemoveMember(i, mid) { editingLineup.groups[i].members = editingLineup.groups[i].members.filter(x => x !== mid); renderLineupEditor(); }
+function lineupApplyCopy(fromId) {
+    const src = lineupsCache.find(l => l.id === fromId); if (!src) return;
+    const assigned = lineupAssignedSet();
+    (src.groups || []).forEach(sg => {
+        let tg = editingLineup.groups.find(g => g.name === sg.name);
+        if (!tg) { tg = { name: sg.name, members: [] }; editingLineup.groups.push(tg); }
+        (sg.members || []).forEach(mid => { if (!assigned.has(mid)) { tg.members.push(mid); assigned.add(mid); } });
+    });
+    renderLineupEditor();
+    const bad = [...lineupAssignedSet()].filter(id => lineupUnavail.has(id));
+    if (bad.length) alert('已複製。這些人這場請假了（紅色劃線），請更換：' + bad.map(lineupMemberName).join('、'));
+}
+async function lineupSave() {
+    const bad = [...lineupAssignedSet()].filter(id => lineupUnavail.has(id));
+    if (bad.length) { alert('這些人這場已請假，請先更換上陣人員再存：\n' + bad.map(lineupMemberName).join('、')); return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/lineups/save", { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token }, body: JSON.stringify({ id: editingLineup.id, title: editingLineup.title, window_id: editingLineup.window_id, groups: editingLineup.groups }) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert('儲存失敗：' + (d.error || res.status)); return; }
+        editingLineup.id = d.id || editingLineup.id;
+        alert('✅ 已儲存');
+        await loadLineups();
+    } catch (e) { alert('儲存失敗：' + e.message); }
+}
+function lineupCopy() {
+    const lines = [editingLineup.title || '出戰班表'];
+    if (editingLineup.window_id) lines.push(lineupWinLabel(editingLineup.window_id));
+    editingLineup.groups.forEach(g => {
+        lines.push('');
+        lines.push(`【${g.name}】(${g.members.length})`);
+        const byJob = {};
+        g.members.forEach(mid => { const j = lineupMemberJob(mid); (byJob[j] = byJob[j] || []).push(lineupMemberName(mid)); });
+        const jobs = Object.keys(byJob);
+        if (!jobs.length) lines.push('（無）');
+        else jobs.forEach(j => lines.push(`${j}：${byJob[j].join('、')}`));
+    });
+    const text = lines.join('\n');
+    navigator.clipboard.writeText(text).then(() => alert('✅ 班表已複製')).catch(() => prompt('請手動複製：', text));
+}
+async function lineupDelete(id) {
+    if (!confirm('確定刪除這個班表？')) return;
+    try {
+        const res = await fetch(WORKER_URL + "/api/lineups/delete", { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token }, body: JSON.stringify({ id }) });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert('刪除失敗：' + (d.error || res.status)); return; }
+        await loadLineups();
     } catch (e) { alert('刪除失敗：' + e.message); }
 }
 
