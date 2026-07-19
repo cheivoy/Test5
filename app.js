@@ -22,6 +22,22 @@ let totalReportsInTimeframe = 0, currentReportId = null;
 // ✅ 身分系統：name -> member_id -> 目前顯示名稱（改名不用重寫歷史戰報）
 let aliasToMemberId = {}, memberIdToDisplayName = {}, memberIdToJob = {};
 let subMapByWin = {}; // 代替上號：`日期|場次|類型` -> { 本人member_id: 代打者member_id }
+
+// 載入中轉圈圈（計數式，支援同時多個載入）
+let _loadingCount = 0;
+function showLoading(text) {
+    _loadingCount++;
+    const el = document.getElementById('loading-overlay');
+    if (el) { if (text) { const t = el.querySelector('.load-text'); if (t) t.textContent = text; } el.classList.add('show'); }
+}
+function hideLoading() {
+    _loadingCount = Math.max(0, _loadingCount - 1);
+    if (_loadingCount === 0) { const el = document.getElementById('loading-overlay'); if (el) el.classList.remove('show'); }
+}
+async function withLoading(fn, text) {
+    showLoading(text || '努力加載中…');
+    try { return await fn(); } finally { hideLoading(); }
+}
 let memberIdToCategory = {};
 const CATEGORY_PRESETS = ['主幫', '副幫', '俱樂部'];
 const JOB_LIST = ['碎夢', '神相', '血河', '九靈', '玄機', '龍吟', '鐵衣', '素問', '潮光'];
@@ -812,8 +828,12 @@ async function viewHistory(id) {
         full = [...gA, ...gB];
         // 代替上號標示所需：目前戰報的場次鍵 + 對照表
         window._curRep = { date: h.date, session: d.session || '第一場', type: d.matchType || '幫戰' };
-        if (!Object.keys(memberIdToDisplayName).length) { try { await fetchRosterAliasMap(); } catch (e) { } }
-        if (!Object.keys(subMapByWin).length) { try { await loadSubMap(); } catch (e) { } }
+        if (!Object.keys(memberIdToDisplayName).length || !Object.keys(subMapByWin).length) {
+            await withLoading(async () => {
+                if (!Object.keys(memberIdToDisplayName).length) { try { await fetchRosterAliasMap(); } catch (e) { } }
+                if (!Object.keys(subMapByWin).length) { try { await loadSubMap(); } catch (e) { } }
+            });
+        }
         document.getElementById('display-title').innerText = d.nameA || h.guild_a;
         document.getElementById('name-b-title').innerText = d.nameB || '未知';
         const matchResultEl = document.getElementById('match-result');
@@ -1159,7 +1179,8 @@ function onDbTimeChange() {
     loadDbData();
 }
 
-async function loadDbData() {
+async function loadDbData() { return withLoading(_loadDbDataImpl, '努力加載中…'); }
+async function _loadDbDataImpl() {
     const { fromDate, toDate } = getDbTimeRange();
     const filteredHistories = allHistories.filter(h => {
         if (fromDate && h.date < fromDate) return false;
@@ -2910,7 +2931,8 @@ function copyLeaveLink() {
 }
 
 // ---- 請假場次（已併入各場次名單）----
-async function loadLeaveWindows() {
+async function loadLeaveWindows() { return withLoading(_loadLeaveWindowsImpl, '努力加載中…'); }
+async function _loadLeaveWindowsImpl() {
     try {
         const res = await fetch(WORKER_URL + "/api/leave/windows?t=" + Date.now(), {
             cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }

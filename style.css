@@ -566,6 +566,15 @@ th { background: var(--surface-2) !important; }
 .mcard-break { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mcard-break span { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 3px 7px; }
 
+/* 載入中遮罩 */
+#loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.22); display: none; align-items: center; justify-content: center; z-index: 3000; }
+#loading-overlay.show { display: flex; }
+.load-box { display: flex; flex-direction: column; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px 30px; box-shadow: var(--shadow); }
+.load-spin { width: 38px; height: 38px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: load-rot .8s linear infinite; }
+.load-text { font-size: 14px; font-weight: 600; color: var(--ink); }
+@keyframes load-rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .load-spin { animation: none; } }
+
 /* 臨時請假醒目標籤（影響惡劣，需特別注意） */
 .late-tag { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: #d32f2f; border-radius: 5px; padding: 1px 5px; margin-left: 2px; vertical-align: middle; }
 /* No-show 標籤（更嚴重，深色，僅管理員可見） */
