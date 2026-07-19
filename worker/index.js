@@ -1846,6 +1846,26 @@ export default {
         return json(results || []);
       }
 
+      // 📈 個人用量監控（僅系統擁有者，靠 env.ADMIN_USERNAME 鎖住；一般管理員看不到）
+      if (url.pathname === "/api/admin/usage" && request.method === "GET") {
+        requireAuth();
+        if (!env.ADMIN_USERNAME || user !== env.ADMIN_USERNAME) return json({ error: "無權限" }, 403);
+        const firstVal = async (sql) => { try { const r = await env.DB.prepare(sql).first(); return r ? (Object.values(r)[0] || 0) : 0; } catch (e) { return 0; } };
+        const accounts = await firstVal("SELECT COUNT(*) c FROM users");
+        let repCount = 0, repBytes = 0;
+        try { const r = await env.DB.prepare("SELECT COUNT(*) c, COALESCE(SUM(LENGTH(raw_json)),0) b FROM reports").first(); repCount = r?.c || 0; repBytes = r?.b || 0; } catch (e) { }
+        const tables = {};
+        for (const t of ['reports', 'members', 'members_roster', 'member_aliases', 'leave_windows', 'leave_actions', 'stat_overrides', 'long_leaves', 'leave_substitutes', 'lineups', 'discord_channels', 'discord_guilds', 'sessions', 'audit_log', 'transfers']) {
+          tables[t] = await firstVal(`SELECT COUNT(*) c FROM ${t}`);
+        }
+        let perOwner = [];
+        try { const { results } = await env.DB.prepare("SELECT owner, COUNT(*) c, COALESCE(SUM(LENGTH(raw_json)),0) b FROM reports GROUP BY owner ORDER BY b DESC LIMIT 30").all(); perOwner = results || []; } catch (e) { }
+        // 估算資料庫大小：戰報 raw_json 是大宗，其餘用列數粗估
+        const otherRows = Object.entries(tables).filter(([k]) => k !== 'reports').reduce((s, [, v]) => s + v, 0);
+        const estBytes = repBytes + otherRows * 200; // 每列粗估 200 bytes
+        return json({ accounts, reports: { count: repCount, bytes: repBytes }, tables, perOwner, estBytes });
+      }
+
       // =========================
       // 🤖 Discord 設定
       // =========================

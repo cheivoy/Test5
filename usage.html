@@ -1,0 +1,99 @@
+<html lang="zh-TW"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用量監控（私人）</title>
+<style>
+  :root{--bg:#0f1115;--card:#171a21;--line:#262b35;--ink:#e7ebf2;--muted:#8b94a3;--accent:#6ea8fe;--good:#4caf50;--warn:#e0a800;--crit:#e5534b;}
+  *{box-sizing:border-box;}
+  body{margin:0;background:#0f1115;color:#e7ebf2;font-family:"PingFang TC","Microsoft JhengHei",system-ui,sans-serif;padding:20px;max-width:820px;margin:0 auto;}
+  h1{font-size:20px;margin:0 0 4px;}
+  .sub{color:#8b94a3;font-size:13px;margin-bottom:18px;}
+  .card{background:#171a21;border:1px solid #262b35;border-radius:12px;padding:16px 18px;margin-bottom:14px;}
+  .card h2{font-size:14px;margin:0 0 12px;color:#8b94a3;font-weight:700;letter-spacing:.04em;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
+  .kpi{background:#0f1115;border:1px solid #262b35;border-radius:10px;padding:12px 14px;}
+  .kpi .n{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .kpi .l{font-size:12px;color:#8b94a3;margin-top:2px;}
+  .bar{height:8px;background:#0f1115;border:1px solid #262b35;border-radius:6px;overflow:hidden;margin-top:8px;}
+  .bar span{display:block;height:100%;background:#6ea8fe;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid #262b35;}
+  th{color:#8b94a3;font-size:12px;}
+  td.n{text-align:right;font-variant-numeric:tabular-nums;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;font-size:13px;}
+  .grid2 div{display:flex;justify-content:space-between;border-bottom:1px solid #262b35;padding:5px 0;}
+  .grid2 b{font-variant-numeric:tabular-nums;}
+  button{background:#6ea8fe;color:#0f1115;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:14px;}
+  .muted{color:#8b94a3;font-size:12px;}
+  code{background:#0f1115;border:1px solid #262b35;border-radius:5px;padding:1px 6px;font-size:12px;}
+  a{color:#6ea8fe;}
+</style>
+</head>
+<body>
+  <h1>📈 用量監控（私人）</h1>
+  <div class="sub">只有你（系統擁有者）看得到。每日手動查即可。</div>
+  <div id="mount"><button onclick="load()">🔄 載入</button> <span class="muted" id="status"></span></div>
+
+<script>
+const WORKER_URL = "https://d1-template.cherrycywong0907.workers.dev";
+const D1_STORAGE_LIMIT = 5 * 1024 * 1024 * 1024; // 5GB 免費
+function fmtBytes(b){ if(b<1024)return b+' B'; if(b<1048576)return (b/1024).toFixed(1)+' KB'; if(b<1073741824)return (b/1048576).toFixed(2)+' MB'; return (b/1073741824).toFixed(2)+' GB'; }
+function getToken(){ try{ return JSON.parse(localStorage.getItem('nsh_current_user')||'{}').token || ''; }catch(e){ return ''; } }
+
+async function load(){
+  const st = document.getElementById('status'); st.textContent='載入中…';
+  const token = getToken();
+  if(!token){ document.getElementById('mount').innerHTML = '<div class="card">請先到主系統登入（同一個瀏覽器），再回來這頁。</div>'; return; }
+  let d;
+  try{
+    const res = await fetch(WORKER_URL + "/api/admin/usage?t=" + Date.now(), { cache:"no-store", headers:{ 'Authorization':'Bearer '+token } });
+    if(res.status===403){ document.getElementById('mount').innerHTML = '<div class="card">這個帳號沒有權限。請在 Worker 設定環境變數 <code>ADMIN_USERNAME</code> = 你的登入帳號，再用那個帳號登入。</div>'; return; }
+    if(!res.ok){ st.textContent = '載入失敗：'+res.status; return; }
+    d = await res.json();
+  }catch(e){ st.textContent='連線失敗：'+e.message; return; }
+  render(d);
+}
+
+function render(d){
+  const usedPct = Math.min(100, (d.estBytes / D1_STORAGE_LIMIT) * 100);
+  const rows = (d.perOwner||[]).map(o=>`<tr><td>${o.owner}</td><td class="n">${o.c}</td><td class="n">${fmtBytes(o.b)}</td></tr>`).join('');
+  const tbl = Object.entries(d.tables||{}).map(([k,v])=>`<div><span>${k}</span><b>${v}</b></div>`).join('');
+  document.getElementById('mount').innerHTML = `
+    <div style="margin-bottom:12px;"><button onclick="load()">🔄 重新整理</button></div>
+    <div class="card">
+      <h2>容量（D1 免費上限 5 GB）</h2>
+      <div class="kpis">
+        <div class="kpi"><div class="n">${d.reports.count}</div><div class="l">戰報總場數</div></div>
+        <div class="kpi"><div class="n">${fmtBytes(d.reports.bytes)}</div><div class="l">戰報佔用</div></div>
+        <div class="kpi"><div class="n">${fmtBytes(d.estBytes)}</div><div class="l">資料庫估算</div></div>
+        <div class="kpi"><div class="n">${d.accounts}</div><div class="l">帳號數</div></div>
+      </div>
+      <div class="bar"><span style="width:${usedPct}%;background:${usedPct>80?'#e5534b':usedPct>50?'#e0a800':'#6ea8fe'}"></span></div>
+      <div class="muted" style="margin-top:6px;">已用約 ${usedPct.toFixed(3)}% · 離 5 GB 還很遠</div>
+    </div>
+
+    <div class="card">
+      <h2>各帳號戰報佔用（前 30）</h2>
+      <table><thead><tr><th>帳號</th><th class="n">場數</th><th class="n">佔用</th></tr></thead><tbody>${rows||'<tr><td colspan="3" class="muted">無資料</td></tr>'}</tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>各表列數</h2>
+      <div class="grid2">${tbl}</div>
+    </div>
+
+    <div class="card">
+      <h2>每日「讀取 / 寫入」次數（要去 Cloudflare 後台看）</h2>
+      <div class="muted" style="line-height:1.8;">
+        這個系統讀不到 Cloudflare 自己的每日配額用量。最準的地方：<br>
+        Cloudflare Dashboard → <b>Workers &amp; Pages → D1 → 你的資料庫 → Metrics</b>，可看每天 rows read / written / 儲存量。<br><br>
+        免費上限參考：<br>
+        · Workers 請求：<b>10 萬 / 日</b><br>
+        · D1 讀取：<b>500 萬列 / 日</b>　·　寫入：<b>10 萬列 / 日</b><br>
+        · D1 儲存：<b>5 GB</b>
+      </div>
+    </div>`;
+}
+load();
+</script>
+</body></html>
