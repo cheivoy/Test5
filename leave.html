@@ -39,6 +39,13 @@
         .muted { color: #97a0ad; font-size: 13px; text-align: center; padding: 20px; }
         .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #323a45; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
         .toast.show { opacity: 1; }
+        #load-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.18); display: none; align-items: center; justify-content: center; z-index: 60; }
+        #load-overlay.show { display: flex; }
+        .load-box { display: flex; flex-direction: column; align-items: center; gap: 10px; background: #fff; border-radius: 14px; padding: 20px 28px; box-shadow: 0 6px 24px rgba(0,0,0,.15); }
+        .load-spin { width: 34px; height: 34px; border: 4px solid #e5e8ec; border-top-color: #8e9aaf; border-radius: 50%; animation: lsp .8s linear infinite; }
+        .load-text { font-size: 14px; font-weight: 600; color: #5a6473; }
+        @keyframes lsp { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .load-spin { animation: none; } }
     </style>
 </head>
 <body>
@@ -101,6 +108,7 @@
     <div id="empty-state" class="muted" style="display:none;">目前沒有開放中的請假場次。</div>
 
     <div class="toast" id="toast"></div>
+    <div id="load-overlay"><div class="load-box"><div class="load-spin"></div><div class="load-text">努力加載中…</div></div></div>
 
-    <script src="leave.js?v=4"></script>
+    <script src="leave.js?v=5"></script>
 </body></html>

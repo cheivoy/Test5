@@ -28,11 +28,16 @@ function toast(msg) {
     setTimeout(() => el.classList.remove('show'), 1800);
 }
 
+let _lc = 0;
+function showLoading(t) { _lc++; const el = document.getElementById('load-overlay'); if (el) { if (t) { const x = el.querySelector('.load-text'); if (x) x.textContent = t; } el.classList.add('show'); } }
+function hideLoading() { _lc = Math.max(0, _lc - 1); if (_lc === 0) { const el = document.getElementById('load-overlay'); if (el) el.classList.remove('show'); } }
+
 async function loadBoard() {
     if (!shareId) {
         document.getElementById('sub-line').textContent = "⚠️ 連結無效（缺少 share 參數）";
         return;
     }
+    showLoading('努力加載中…');
     try {
         // 用 public/board（新舊後端都有這條路徑，避免版本不一致時卡「唯讀模式」）
         const res = await fetch(`${WORKER_URL}/api/leave/public/board?share=${encodeURIComponent(shareId)}&t=${Date.now()}`, { cache: "no-store" });
@@ -70,6 +75,8 @@ async function loadBoard() {
         }
     } catch (e) {
         document.getElementById('sub-line').textContent = "⚠️ 連線失敗，請稍後再試";
+    } finally {
+        hideLoading();
     }
 }
 
