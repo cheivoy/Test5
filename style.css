@@ -563,6 +563,19 @@ th { background: var(--surface-2) !important; }
 .mcard-break { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mcard-break span { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 3px 7px; }
 
+/* 分享選單彈窗 */
+.share-menu-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; justify-content: center; align-items: center; z-index: 2200; padding: 16px; }
+.share-menu-card { background: var(--surface); color: var(--ink); border: 1px solid var(--border); padding: 18px; border-radius: 16px; width: 360px; max-width: 100%; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+.share-menu-head { display: flex; align-items: center; justify-content: space-between; }
+.share-menu-x { border: none; background: var(--surface-2); color: var(--muted); width: 30px; height: 30px; border-radius: 9px; cursor: pointer; font-size: 14px; }
+.share-menu-x:hover { background: var(--accent-soft); color: var(--accent-strong); }
+.share-opt { display: flex; align-items: center; gap: 12px; text-align: left; width: 100%; padding: 12px 14px; border: 1px solid var(--border); background: var(--surface-2); border-radius: 12px; cursor: pointer; font-family: inherit; transition: background .15s, border-color .15s; }
+.share-opt:hover { background: var(--accent-soft); border-color: var(--accent); }
+.share-opt-ic { font-size: 20px; flex-shrink: 0; }
+.share-opt-txt { display: flex; flex-direction: column; gap: 2px; }
+.share-opt-txt b { font-size: 14px; color: var(--ink); }
+.share-opt-txt small { font-size: 12px; color: var(--muted); }
+
 /* 頂欄情境按鈕 */
 .topbar-context { display: flex; gap: 6px; align-items: center; }
 .topbar-context .btn { font-size: 12px; padding: 7px 11px; margin: 0; }

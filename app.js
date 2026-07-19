@@ -20,9 +20,10 @@ let allHistories = [], dbMembersMap = [], dbSort = { key: 'matches', asc: false 
 let totalReportsInTimeframe = 0, currentReportId = null;
 
 // ✅ 身分系統：name -> member_id -> 目前顯示名稱（改名不用重寫歷史戰報）
-let aliasToMemberId = {}, memberIdToDisplayName = {};
+let aliasToMemberId = {}, memberIdToDisplayName = {}, memberIdToJob = {};
 let memberIdToCategory = {};
 const CATEGORY_PRESETS = ['主幫', '副幫', '俱樂部'];
+const JOB_LIST = ['碎夢', '神相', '血河', '九靈', '玄機', '龍吟', '鐵衣', '素問', '潮光'];
 
 // 對戰類型顯示：內部值仍用「其他」（相容舊資料），顯示一律為「領地戰」
 function fmtType(t) { return t === '其他' ? '領地戰' : (t || '幫戰'); }
@@ -1057,6 +1058,7 @@ async function fetchRosterAliasMap() {
     aliasToMemberId = {};
     memberIdToDisplayName = {};
     memberIdToCategory = {};
+    memberIdToJob = {};
     try {
         let apiUrl = WORKER_URL + "/api/roster/aliases?t=" + Date.now();
         let res;
@@ -1071,6 +1073,7 @@ async function fetchRosterAliasMap() {
         (data.roster || []).forEach(r => {
             memberIdToDisplayName[r.member_id] = r.display_name;
             memberIdToCategory[r.member_id] = r.category || '';
+            if (r.job) memberIdToJob[r.member_id] = r.job;
         });
         (data.aliases || []).forEach(a => { aliasToMemberId[a.alias_name] = a.member_id; });
     } catch (e) { console.error("載入身分對照表失敗", e); }
@@ -1079,12 +1082,50 @@ async function fetchRosterAliasMap() {
 // =====================================================
 // ===  成員檔案室：loadDbData
 // =====================================================
+// 本地 YYYY-MM-DD（避免 toISOString 的時區偏移）
+function ymd(d) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// 依「時間篩選」下拉計算實際日期範圍 {fromDate, toDate}（'YYYY-MM-DD' 或 null）
+function getDbTimeRange() {
+    const v = document.getElementById('db-time')?.value || 'all';
+    const now = new Date();
+    if (v === 'all') return { fromDate: null, toDate: null };
+    if (v === 'custom') {
+        return {
+            fromDate: document.getElementById('db-date-from')?.value || null,
+            toDate: document.getElementById('db-date-to')?.value || null
+        };
+    }
+    if (v === 'thismonth') {
+        return { fromDate: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), toDate: ymd(now) };
+    }
+    const days = parseInt(v);
+    const from = new Date(now);
+    from.setDate(from.getDate() - days);
+    return { fromDate: ymd(from), toDate: ymd(now) };
+}
+// 切換時間篩選：自訂範圍時顯示日期輸入，其餘直接載入
+function onDbTimeChange() {
+    const v = document.getElementById('db-time').value;
+    const box = document.getElementById('db-date-range');
+    if (box) box.style.display = (v === 'custom') ? 'inline-flex' : 'none';
+    if (v === 'custom') {
+        const from = document.getElementById('db-date-from'), to = document.getElementById('db-date-to');
+        // 首次切到自訂時，預設帶入本月，避免空範圍
+        if (from && !from.value) from.value = ymd(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+        if (to && !to.value) to.value = ymd(new Date());
+    }
+    loadDbData();
+}
+
 async function loadDbData() {
     await fetchRosterAliasMap();
-    const timeFilter = document.getElementById('db-time').value;
+    const { fromDate, toDate } = getDbTimeRange();
     const filteredHistories = allHistories.filter(h => {
-        if (timeFilter === 'all') return true;
-        return Math.ceil(Math.abs(new Date() - new Date(h.date)) / (1000 * 60 * 60 * 24)) <= parseInt(timeFilter);
+        if (fromDate && h.date < fromDate) return false;
+        if (toDate && h.date > toDate) return false;
+        return true;
     });
     totalReportsInTimeframe = filteredHistories.length;
 
@@ -1181,15 +1222,15 @@ async function loadDbData() {
     dbMembersMap = Object.values(map).map(m => {
         m.note = noteMap[m.id]?.note || "";
         m.tag = noteMap[m.id]?.tag || "none";
-        // last_job 以前端計算（最新一場）為主
-        if (!m.last_job) m.last_job = noteMap[m.id]?.lastJob || "未知";
+        // last_job 以前端計算（最新一場）為主；無戰報則用名冊登記的職業
+        if (!m.last_job) m.last_job = noteMap[m.id]?.lastJob || (m.member_id ? memberIdToJob[m.member_id] : '') || "未知";
         m.category = m.member_id ? (memberIdToCategory[m.member_id] || '') : '';
         m.rate = totalReportsInTimeframe > 0 ? (m.matches / totalReportsInTimeframe * 100) : 0;
         return m;
     });
 
-    // ✅ 合併請假/後備次數（來自請假系統）與人工覆蓋
-    await mergeLeaveAndOverrides();
+    // ✅ 合併請假/後備次數（來自請假系統，依時間範圍）與人工覆蓋
+    await mergeLeaveAndOverrides(fromDate, toDate);
 
     const syncEl = document.getElementById('db-last-sync');
     if (syncEl) syncEl.textContent = `最後計算：${new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`;
@@ -1200,16 +1241,17 @@ async function loadDbData() {
 // =====================================================
 // ===  合併請假/後備次數 + 人工覆蓋
 // =====================================================
-async function mergeLeaveAndOverrides() {
+async function mergeLeaveAndOverrides(fromDate, toDate) {
     let leaveStats = {}, overrides = [];
     try {
         const base = shareId
             ? `?share=${shareId}&t=${Date.now()}`
             : `?t=${Date.now()}`;
+        const rangeQS = (fromDate ? `&from=${fromDate}` : '') + (toDate ? `&to=${toDate}` : '');
         const headers = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
         if (shareId || (storageMode === 'cloud' && currentUser)) {
             const [ls, ov] = await Promise.all([
-                fetch(WORKER_URL + "/api/leave/stats" + base, { cache: "no-store", headers }).then(r => r.json()).catch(() => ({})),
+                fetch(WORKER_URL + "/api/leave/stats" + base + rangeQS, { cache: "no-store", headers }).then(r => r.json()).catch(() => ({})),
                 fetch(WORKER_URL + "/api/overrides" + base, { cache: "no-store", headers }).then(r => r.json()).catch(() => ([]))
             ]);
             leaveStats = ls || {};
@@ -1386,8 +1428,11 @@ function exportMembersCSV() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const stamp = new Date().toLocaleDateString('zh-TW').replace(/\//g, '');
-    a.download = `成員名單_${stamp}.csv`;
+    const { fromDate, toDate } = getDbTimeRange();
+    let scope;
+    if (fromDate || toDate) scope = `${fromDate || '最早'}_至_${toDate || '至今'}`;
+    else scope = '全部時間';
+    a.download = `成員出勤_${scope}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
@@ -1814,7 +1859,36 @@ function getRadarCols(job) {
 // =====================================================
 // ===  分享功能
 // =====================================================
-function showShareSection() { document.getElementById('share-section').style.display = 'block'; }
+function showShareSection() { const s = document.getElementById('share-section'); if (s) s.style.display = 'block'; }
+
+// 分享選單（頂欄🔗按鈕）：彈窗自選 幫眾版 / 管理版 / 共享給其他帳號
+function openShareMenu() {
+    const admin = !isViewMode && storageMode === 'cloud' && currentUser;
+    const existing = document.getElementById('share-menu-modal');
+    if (existing) existing.remove();
+
+    const opt = (icon, title, desc, fn) => `
+        <button class="share-opt" onclick="document.getElementById('share-menu-modal').remove(); ${fn}">
+            <span class="share-opt-ic">${icon}</span>
+            <span class="share-opt-txt"><b>${title}</b><small>${desc}</small></span>
+        </button>`;
+
+    const modal = document.createElement('div');
+    modal.id = 'share-menu-modal';
+    modal.className = 'share-menu-overlay';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+        <div class="share-menu-card">
+            <div class="share-menu-head">
+                <h3 style="margin:0;">🔗 分享戰報</h3>
+                <button class="share-menu-x" onclick="document.getElementById('share-menu-modal').remove()" aria-label="關閉">✕</button>
+            </div>
+            ${opt('📋', '複製幫眾版', '唯讀鏈結，可自選要分享哪幾場', "copyShareLink('view')")}
+            ${admin ? opt('📋', '複製管理版', '可編輯鏈結，僅供管理員使用', "copyShareLink('admin')") : ''}
+            ${admin ? opt('🔀', '共享給其他帳號', '把戰報分享到另一個登入帳號', 'openShareTransfer()') : ''}
+        </div>`;
+    document.body.appendChild(modal);
+}
 
 function openSharePicker() {
     if (storageMode === 'local') {
@@ -2795,9 +2869,10 @@ function updateTopbarContext(p) {
     const b = (icon, text, fn) => `<button class="btn btn-outline ctx-btn" onclick="${fn}"><span class="ci">${icon}</span><span class="ct">${text}</span></button>`;
     let html = '';
     if (p === 'report' && !isViewMode) {
-        html = b('📁', '導入', 'openImportModal()');
+        html = b('📁', '導入', 'openImportModal()') + b('🔗', '分享', 'openShareMenu()');
     } else if (p === 'db' && admin) {
-        html = b('➕', '新增', 'openAddMemberModal()') + b('🔄', '同步', 'syncMemberData()') + b('📤', '匯出', 'exportMembersCSV()');
+        html = b('➕', '新增', 'openAddMemberModal()') + b('🔄', '同步', 'syncMemberData()')
+            + b('🆕', '待確認', 'checkUnresolvedRoster()') + b('📤', '匯出', 'exportMembersCSV()');
     } else if (p === 'leave' && admin) {
         html = b('➕', '場次', 'openWindowModal()');
     }
@@ -2854,18 +2929,24 @@ function openAddMemberModal() {
     const sel = document.getElementById('add-member-category');
     const cats = [...new Set([...CATEGORY_PRESETS, ...dbMembersMap.map(x => x.category).filter(Boolean)])];
     sel.innerHTML = '<option value="">未分類</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    const jobSel = document.getElementById('add-member-job');
+    if (jobSel) {
+        const jobs = [...new Set([...JOB_LIST, ...dbMembersMap.map(x => x.last_job).filter(Boolean)])];
+        jobSel.innerHTML = '<option value="">未指定</option>' + jobs.map(j => `<option value="${j}">${j}</option>`).join('');
+    }
     m.style.display = 'flex';
 }
 async function submitAddMember() {
     const name = document.getElementById('add-member-name').value.trim();
     const category = document.getElementById('add-member-category').value;
+    const job = document.getElementById('add-member-job')?.value || '';
     const msg = document.getElementById('add-member-msg');
     if (!name) { msg.textContent = '請輸入名字'; return; }
     try {
         const res = await fetch(WORKER_URL + "/api/roster/add", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
-            body: JSON.stringify({ display_name: name })
+            body: JSON.stringify({ display_name: name, job })
         });
         const data = await res.json();
         if (!res.ok) { msg.textContent = data.error || '新增失敗'; return; }

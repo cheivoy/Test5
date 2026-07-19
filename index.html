@@ -3,7 +3,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="stylesheet" href="style.css?v=11">
 </head>
 
 <body>
@@ -112,19 +112,7 @@
             <div id="report-detail" style="display:none;">
                 <button class="btn btn-outline" onclick="showReportBrowse()" style="margin-bottom:14px;">← 返回歷史記錄</button>
 
-                <div id="share-section" class="share-links">
-                <p style="margin:0 0 10px 0; font-weight:bold; font-size:13px;">🔗 戰報分享鏈結：</p>
-                <button class="btn btn-outline" onclick="copyShareLink('view')">📋 複製幫眾版 (唯讀)</button>
-                <button class="btn btn-outline admin-only" onclick="copyShareLink('admin')">📋 複製管理版 (可編輯)</button>
-                <!--測試中，暫時隱藏 -->
-                <button class="btn btn-outline admin-only" onclick="openShareTransfer()">🔀 共享給其他帳號</button>
-               
-                <div id="share-local-note" style="margin-top:8px; font-size:12px; color:#e65100; display:none;">
-                    ⚠️ 目前為本地模式，分享鏈結需先同步到雲端才能讓他人開啟。
-                </div>
-            </div>
-
-            <div id="report-view" style="display:none;">
+                <div id="report-view" style="display:none;">
                 <div id="job-filters" style="margin-bottom:12px;"></div>
                 <div style="margin-bottom:16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                     <span style="font-size:12px; color:var(--muted);">排序：</span>
@@ -186,13 +174,6 @@
         <div class="container" id="page-db" style="display:none;">
             <div style="display:flex; align-items:center; gap:12px; margin-bottom:15px; flex-wrap:wrap;">
                 <h3 style="margin:0;">幫會成員檔案室</h3>
-                <!-- 成員同步按鈕 -->
-                <button class="btn btn-outline admin-only" id="member-sync-btn" onclick="syncMemberData()"
-                    style="font-size:12px; padding:6px 14px; display:none;">🔄 同步成員資料</button>
-                <button class="btn btn-primary admin-only" id="add-member-btn" onclick="openAddMemberModal()"
-                    style="font-size:12px; padding:6px 14px; display:none;">➕ 新增成員</button>
-                <button class="btn btn-outline admin-only" id="roster-check-btn" onclick="checkUnresolvedRoster()"
-                    style="font-size:12px; padding:6px 14px; display:none;">🆕 檢查待確認名字</button>
                 <span id="db-last-sync" style="font-size:11px; color:#aaa;"></span>
             </div>
             <div class="filter-bar">
@@ -200,13 +181,20 @@
                 <button class="btn btn-outline filter-toggle" onclick="toggleFilter('db-filter-extra', this)">⚙ 篩選</button>
             </div>
             <div class="filter-extra" id="db-filter-extra">
-                <select id="db-time" class="select-input" onchange="loadDbData()">
+                <select id="db-time" class="select-input" onchange="onDbTimeChange()">
                     <option value="all">全部時間</option>
                     <option value="7">最近一周</option>
                     <option value="30">最近一個月</option>
                     <option value="90">最近三個月</option>
                     <option value="365">最近一年</option>
+                    <option value="thismonth">本月</option>
+                    <option value="custom">自訂範圍...</option>
                 </select>
+                <span id="db-date-range" style="display:none; gap:6px; align-items:center;">
+                    <input type="date" id="db-date-from" class="select-input" style="width:150px;" onchange="loadDbData()">
+                    <span style="font-size:12px; color:#97a0ad;">至</span>
+                    <input type="date" id="db-date-to" class="select-input" style="width:150px;" onchange="loadDbData()">
+                </span>
                 <select id="db-job" class="select-input" onchange="renderDbTable()">
                     <option value="all">全部職業</option>
                 </select>
@@ -226,7 +214,6 @@
                 <label style="font-size:12px; color:#97a0ad; display:flex; align-items:center; gap:4px;">
                     <input type="checkbox" id="db-only-low" onchange="renderDbTable()"> 只看未達標
                 </label>
-                <button class="btn btn-outline admin-only" onclick="exportMembersCSV()" style="font-size:12px;">📤 匯出 CSV</button>
             </div>
             <div class="table-card" id="db-table-wrap">
                 <table>
@@ -427,6 +414,8 @@
             <h3 style="margin-top:0;">➕ 新增成員</h3>
             <label style="font-size:13px; font-weight:bold;">名字</label>
             <input type="text" id="add-member-name" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="成員名字">
+            <label style="font-size:13px; font-weight:bold;">職業（選填）</label>
+            <select id="add-member-job" class="select-input" style="width:100%; margin-bottom:10px;"></select>
             <label style="font-size:13px; font-weight:bold;">身份類別（選填）</label>
             <select id="add-member-category" class="select-input" style="width:100%; margin-bottom:14px;"></select>
             <button class="btn btn-primary" style="width:100%;" onclick="submitAddMember()">建立</button>
@@ -631,5 +620,5 @@
         </div>
     </div>
 
-    <script src="app.js?v=10"></script>
+    <script src="app.js?v=11"></script>
 </body></html>
