@@ -1015,13 +1015,14 @@ async function openMemberDetail(id) {
             const display = (['pDmg', 'bDmg', 'heal', 'takeDmg'].includes(c.k)) ? (val / 10000).toFixed(1) + 'w' : val;
             return `<span style="margin-right:8px;"><b>${c.l}</b>:${display}</span>`;
         }).join('');
-        return `<div style="padding:8px 6px; border-bottom:1px solid #eee;">
+        return `<div style="padding:8px 6px; border-bottom:1px solid #eee; ${h.subBy ? 'background:#f3f1fb;' : ''}">
             <div style="margin-bottom:3px;">
                 <b>[${h.date}]</b>
                 <span style="color:var(--accent); font-size:11px;">[${fmtType(h.type)}]</span>
                 ${h.session ? `<span style="font-size:11px;">【${h.session}】</span>` : ''}
                 <span style="font-size:11px; color:#999;">${h.title}</span>
                 <span class="job-tag" style="background:var(--color-${hJob}); font-size:10px; margin-left:4px;">${hJob}</span>
+                ${h.subBy ? `<span class="hash-tag" style="background:#5c6bc0; color:#fff; font-size:10px; margin-left:4px;">🔄${h.subBy}代打（不計出勤）</span>` : ''}
             </div>
             <div style="font-size:12px; color:#555; flex-wrap:wrap; display:flex;">${snapHtml}</div>
         </div>`;
@@ -1029,7 +1030,7 @@ async function openMemberDetail(id) {
 
     const rCols = getRadarCols(currentJob);
     const sameJobHistories = m.histories
-        .filter(h => (h.stats.job || '') === currentJob)
+        .filter(h => (h.stats.job || '') === currentJob && !h.subBy)
         .sort((a, b) => new Date(b.date) - new Date(a.date))
         .slice(0, 5);
 
@@ -1233,10 +1234,11 @@ async function loadDbData() {
                     map[subB].counts[type] = (map[subB].counts[type] || 0) + 1;
                     const aName2 = origId ? (memberIdToDisplayName[origId] || p.name) : p.name;
                     (map[subB].subFor = map[subB].subFor || []).push({ date: h.date, session, type, name: aName2 });
-                    // 本人（被代打）：記一筆標示，但不計出勤
+                    // 本人（被代打）：不計出勤、不進雷達平均，但保留這場快照（標示代打）
                     const aKey = origId || p.name;
                     if (!map[aKey]) map[aKey] = mkEntry(aName2, origId || null);
                     (map[aKey].subBy = map[aKey].subBy || []).push({ date: h.date, session, type, name: bName });
+                    map[aKey].histories.push({ date: h.date, title: aName, stats: p, type, session, subBy: bName });
                     return;
                 }
                 const key = origId || p.name;
@@ -1261,8 +1263,8 @@ async function loadDbData() {
     // 對每個成員的 histories 按日期+場次排序，確保 latestDate 計算正確
     Object.values(map).forEach(m => {
         if (m.histories.length > 1) {
-            // 找到 latestDate 的所有記錄，取場次最大的那個的職業
-            const latestEntries = m.histories.filter(h => h.date === m.latestDate);
+            // 找到 latestDate 的所有記錄，取場次最大的那個的職業（排除代打場，代打不代表本人職業）
+            const latestEntries = m.histories.filter(h => h.date === m.latestDate && !h.subBy);
             latestEntries.sort((a, b) => {
                 const sessionOrder = { '第一場': 1, '第二場': 2 };
                 return (sessionOrder[b.session] || 1) - (sessionOrder[a.session] || 1);
