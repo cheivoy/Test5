@@ -70,61 +70,112 @@ async function ensureMemberFor(env, owner, name) {
 
 // 從 leave_actions 算出每個成員目前的請假/後備狀態（最新一筆事件決定狀態）
 // 回傳 { byMember: {member_id: {leave, reserve, leaveByType, reserveByType}}, byWindow: {window_id: {leave:[], reserve:[]}} }
-async function computeLeaveStats(env, owner) {
+async function computeLeaveStats(env, owner, fromDate, toDate) {
   // 每個場次的類型（幫戰/約戰/其他=領地戰），供請假/後備依類型細分
+  // fromDate/toDate（'YYYY-MM-DD'，可選）：只計算場次日期落在範圍內的請假/後備
   const winType = {};
+  const winDate = {};
   try {
     const { results: wins } = await env.DB.prepare(
-      "SELECT window_id, match_type FROM leave_windows WHERE owner = ?"
+      "SELECT window_id, match_type, event_date FROM leave_windows WHERE owner = ?"
     ).bind(owner).all();
-    (wins || []).forEach(w => { winType[w.window_id] = w.match_type || '幫戰'; });
+    (wins || []).forEach(w => { winType[w.window_id] = w.match_type || '幫戰'; winDate[w.window_id] = w.event_date || ''; });
   } catch (e) {
     // match_type 欄位尚未建立（migration 004 還沒跑）→ 全部視為幫戰
     const { results: wins } = await env.DB.prepare(
-      "SELECT window_id FROM leave_windows WHERE owner = ?"
+      "SELECT window_id, event_date FROM leave_windows WHERE owner = ?"
     ).bind(owner).all();
-    (wins || []).forEach(w => { winType[w.window_id] = '幫戰'; });
+    (wins || []).forEach(w => { winType[w.window_id] = '幫戰'; winDate[w.window_id] = w.event_date || ''; });
   }
+  const inRange = (wid) => {
+    const d = winDate[wid] || '';
+    if (fromDate && (!d || d < fromDate)) return false;
+    if (toDate && (!d || d > toDate)) return false;
+    return true;
+  };
 
   const { results } = await env.DB.prepare(
     "SELECT window_id, member_id, action, created_at FROM leave_actions WHERE owner = ? ORDER BY created_at ASC"
   ).bind(owner).all();
   const leaveState = {};   // key `${window}|${member}` -> bool
   const reserveState = {};
+  const lateState = {};    // 臨時請假
   for (const a of results || []) {
     const key = a.window_id + "|" + a.member_id;
     if (a.action === 'leave_request') leaveState[key] = true;
     else if (a.action === 'leave_cancel') leaveState[key] = false;
     else if (a.action === 'reserve_set') reserveState[key] = true;
     else if (a.action === 'reserve_unset') reserveState[key] = false;
+    else if (a.action === 'late_set') lateState[key] = true;
+    else if (a.action === 'late_unset') lateState[key] = false;
   }
   const byMember = {};
   const byWindow = {};
   const ensureMember = (mid) => {
-    if (!byMember[mid]) byMember[mid] = { leave: 0, reserve: 0, leaveByType: {}, reserveByType: {} };
+    if (!byMember[mid]) byMember[mid] = { leave: 0, reserve: 0, late: 0, leaveByType: {}, reserveByType: {}, lateByType: {} };
     return byMember[mid];
   };
   const ensureWin = (wid) => {
-    if (!byWindow[wid]) byWindow[wid] = { leave: [], reserve: [] };
+    if (!byWindow[wid]) byWindow[wid] = { leave: [], reserve: [], late: [] };
     return byWindow[wid];
   };
   for (const key in leaveState) {
     if (!leaveState[key]) continue;
     const [wid, mid] = key.split("|");
+    if (!inRange(wid)) continue;
     const t = winType[wid] || '幫戰';
     const m = ensureMember(mid);
     m.leave++;
     m.leaveByType[t] = (m.leaveByType[t] || 0) + 1;
     ensureWin(wid).leave.push(mid);
   }
+  // 長期/預先請假：範圍涵蓋的場次，若本人在該場沒有明確請假/取消動作，也算請假（動態判定）
+  let longLeaves = [];
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT member_id, from_date, to_date FROM long_leaves WHERE owner = ?"
+    ).bind(owner).all();
+    longLeaves = results || [];
+  } catch (e) { longLeaves = []; }
+  for (const ll of longLeaves) {
+    for (const wid in winDate) {
+      const d = winDate[wid];
+      if (!d || d < ll.from_date || d > ll.to_date) continue;
+      if (!inRange(wid)) continue;
+      const key = wid + "|" + ll.member_id;
+      if (key in leaveState) continue; // 單場明確動作（請假或取消）優先
+      const t = winType[wid] || '幫戰';
+      const m = ensureMember(ll.member_id);
+      m.leave++;
+      m.leaveByType[t] = (m.leaveByType[t] || 0) + 1;
+      ensureWin(wid).leave.push(ll.member_id);
+      leaveState[key] = true; // 標記已計，避免其他迴圈重複
+    }
+  }
   for (const key in reserveState) {
     if (!reserveState[key]) continue;
     const [wid, mid] = key.split("|");
+    if (!inRange(wid)) continue;
     const t = winType[wid] || '幫戰';
     const m = ensureMember(mid);
     m.reserve++;
     m.reserveByType[t] = (m.reserveByType[t] || 0) + 1;
     ensureWin(wid).reserve.push(mid);
+  }
+  // 臨時請假：併入請假次數（leaveByType），另外單獨累計 lateByType 以便醒目標示
+  for (const key in lateState) {
+    if (!lateState[key]) continue;
+    const [wid, mid] = key.split("|");
+    if (!inRange(wid)) continue;
+    // 同一場已經算過正式請假就不重複加（避免 leave_request + late 雙算）
+    if (leaveState[key]) { const m0 = ensureMember(mid); const t0 = winType[wid] || '幫戰'; m0.late++; m0.lateByType[t0] = (m0.lateByType[t0] || 0) + 1; ensureWin(wid).late.push(mid); continue; }
+    const t = winType[wid] || '幫戰';
+    const m = ensureMember(mid);
+    m.late++;
+    m.lateByType[t] = (m.lateByType[t] || 0) + 1;
+    m.leave++;
+    m.leaveByType[t] = (m.leaveByType[t] || 0) + 1;
+    ensureWin(wid).late.push(mid);
   }
   return { byMember, byWindow };
 }
@@ -161,6 +212,20 @@ async function computeMemberStats(env, owner) {
     members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: r.job || '未知', category: r.category || '', attendance: 0, attendanceByType: {}, _latest: '' };
   });
 
+  // 代替上號對照：key = `日期|場次|類型` → { 本人member_id: 代打者member_id }
+  const subMap = {};
+  try {
+    const { results: subs } = await env.DB.prepare(
+      "SELECT ls.member_id AS a, ls.substitute_member_id AS b, w.event_date, w.session, w.match_type " +
+      "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner " +
+      "WHERE ls.owner = ?"
+    ).bind(owner).all();
+    (subs || []).forEach(s => {
+      const key = `${s.event_date}|${s.session}|${s.match_type || '幫戰'}`;
+      (subMap[key] = subMap[key] || {})[s.a] = s.b;
+    });
+  } catch (e) { /* leave_substitutes 表還沒建立（migration 010 未跑） */ }
+
   const { results: reports } = await env.DB.prepare(
     "SELECT date, raw_json FROM reports WHERE owner = ?"
   ).bind(owner).all();
@@ -169,14 +234,25 @@ async function computeMemberStats(env, owner) {
     const session = d.session || '第一場';
     const type = d.matchType || '幫戰';
     const sortKey = (rep.date || '') + '|' + (session === '第二場' ? '2' : '1');
+    const subForWin = subMap[`${rep.date}|${session}|${type}`];
     (d.gA || []).forEach(p => {
-      const mid = aliasMap[p.name];
-      if (!mid || !members[mid]) return; // 只計入名冊內（已歸戶）的成員
-      members[mid].attendance++;
-      members[mid].attendanceByType[type] = (members[mid].attendanceByType[type] || 0) + 1;
-      if (sortKey >= members[mid]._latest) {
-        members[mid]._latest = sortKey;
-        if (p.job) members[mid].job = p.job;
+      const origId = aliasMap[p.name];
+      if (!origId) return;
+      // 代替上號：本人請假、他人代打
+      const subB = subForWin && subForWin[origId];
+      if (subB) {
+        // 出勤只加「次數」給代打者，不動代打者的職業/數據（避免污染）；本人這場不算出勤
+        const b = members[subB];
+        if (b) { b.attendance++; b.attendanceByType[type] = (b.attendanceByType[type] || 0) + 1; }
+        return;
+      }
+      const m = members[origId];
+      if (!m) return; // 只計入名冊內（已歸戶）的成員
+      m.attendance++;
+      m.attendanceByType[type] = (m.attendanceByType[type] || 0) + 1;
+      if (sortKey >= m._latest) {
+        m._latest = sortKey;
+        if (p.job) m.job = p.job;
       }
     });
   }
@@ -250,20 +326,218 @@ async function hashIp(ip) {
   } catch (e) { return ""; }
 }
 
-// 發 Discord 通知（用 owner 設定的 Incoming Webhook；沒設定就安靜跳過）
-async function notifyDiscord(env, owner, payload) {
+// 通知事件種類（前後端一致）
+const DISCORD_EVENT_KEYS = ['leave_open', 'leave_submit', 'self_join', 'noshow'];
+
+// 取得 owner 要發送的頻道清單（多頻道；沒設定多頻道時退回舊的單一 webhook＝全部事件）
+async function getDiscordTargets(env, owner) {
+  let channels = [];
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT name, webhook_url, events, mention_role_id, enabled FROM discord_channels WHERE owner = ?"
+    ).bind(owner).all();
+    channels = (results || []).filter(c => c.enabled && c.webhook_url);
+  } catch (e) { channels = []; }
+  if (channels.length === 0) {
+    // 向後相容：只設過舊的單一 webhook → 視為接收全部事件的一個頻道
+    try {
+      const row = await env.DB.prepare(
+        "SELECT discord_webhook_url FROM user_settings WHERE owner = ?"
+      ).bind(owner).first();
+      if (row?.discord_webhook_url) {
+        channels = [{ name: '(舊設定)', webhook_url: row.discord_webhook_url, events: null, mention_role_id: null, enabled: 1 }];
+      }
+    } catch (e) { /* ignore */ }
+  }
+  return channels;
+}
+
+// 發 Discord 通知：依事件 key 分流到有勾選該事件的頻道，套用每頻道的 @身分組
+// message: { embed?, content? }
+async function notifyDiscord(env, owner, eventKey, message) {
+  try {
+    const channels = await getDiscordTargets(env, owner);
+    for (const c of channels) {
+      let events = null;
+      try { events = c.events ? JSON.parse(c.events) : null; } catch (e) { events = null; }
+      // events 為 null 或空陣列＝全部事件；否則必須包含此事件 key
+      if (Array.isArray(events) && events.length > 0 && !events.includes(eventKey)) continue;
+      // 身分組 ID 只保留數字，避免使用者貼到名稱或 <@&...> 造成整則通知失敗
+      const roleId = (c.mention_role_id || '').replace(/\D/g, '');
+      const mention = roleId ? `<@&${roleId}>` : '';
+      const content = [mention, message.content || ''].filter(Boolean).join(' ').trim();
+      const body = {};
+      if (content) body.content = content;
+      if (message.embed) body.embeds = [message.embed];
+      // 只允許明確指定的身分組被 tag，避免誤 @everyone
+      if (roleId) body.allowed_mentions = { roles: [roleId] };
+      try {
+        const res = await fetch(c.webhook_url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        // 若帶了 @身分組卻被 Discord 退回（多半是角色 ID 無效）→ 拿掉 @ 重送，至少通知要出去
+        if (!res.ok && roleId) {
+          const body2 = {};
+          if (message.content) body2.content = message.content;
+          if (message.embed) body2.embeds = [message.embed];
+          await fetch(c.webhook_url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body2)
+          });
+        }
+      } catch (e) { console.error("Discord 單頻道發送失敗", e); }
+    }
+  } catch (e) { console.error("Discord 通知失敗", e); }
+}
+
+// 組出該 owner 的公開請假連結（用設定的站台網址，退回請求 Origin）
+async function buildLeaveUrl(env, owner, request) {
+  try {
+    const u = await env.DB.prepare(
+      "SELECT share_id FROM users WHERE username = ?"
+    ).bind(owner).first();
+    if (!u?.share_id) return '';
+    let base = '';
+    try {
+      const s = await env.DB.prepare(
+        "SELECT site_base_url FROM user_settings WHERE owner = ?"
+      ).bind(owner).first();
+      base = s?.site_base_url || '';
+    } catch (e) { /* 欄位還沒建立 */ }
+    if (!base) base = request.headers.get('Origin') || '';
+    if (!base) return '';
+    base = base.replace(/\/+$/, '');
+    return `${base}/leave.html?share=${encodeURIComponent(u.share_id)}`;
+  } catch (e) { return ''; }
+}
+
+// 依 guild_id 找出綁定的戰隊帳號（先查多伺服器表，再退回舊的單一欄位）
+async function ownerByGuild(env, guildId) {
+  if (!guildId) return null;
   try {
     const row = await env.DB.prepare(
-      "SELECT discord_webhook_url FROM user_settings WHERE owner = ?"
-    ).bind(owner).first();
-    const urlStr = row?.discord_webhook_url;
-    if (!urlStr) return;
-    await fetch(urlStr, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      "SELECT owner FROM discord_guilds WHERE guild_id = ?"
+    ).bind(guildId).first();
+    if (row?.owner) return row.owner;
+  } catch (e) { /* discord_guilds 表還沒建立 */ }
+  try {
+    const row = await env.DB.prepare(
+      "SELECT owner FROM user_settings WHERE discord_guild_id = ?"
+    ).bind(guildId).first();
+    return row?.owner || null;
+  } catch (e) { return null; }
+}
+
+// 背景處理 slash 指令，算完用 interaction token 編輯先前的 deferred 訊息
+async function respondToDiscordCommand(env, interaction) {
+  let content = "（無內容）";
+  try {
+    const res = await handleDiscordCommand(env, interaction);
+    content = res?.data?.content || content;
+  } catch (e) {
+    console.error("指令處理失敗", e);
+    content = "查詢時發生錯誤，請稍後再試。";
+  }
+  try {
+    await fetch(`https://discord.com/api/v10/webhooks/${env.DISCORD_APP_ID}/${interaction.token}/messages/@original`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, allowed_mentions: { parse: [] } })
     });
-  } catch (e) { console.error("Discord 通知失敗", e); }
+  } catch (e) { console.error("Discord 回覆編輯失敗", e); }
+}
+
+// hex 字串 → Uint8Array
+function hexToBytes(hex) {
+  const clean = (hex || '').trim();
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
+  return out;
+}
+
+// 驗證 Discord interactions 的 Ed25519 簽章
+async function verifyDiscordSig(publicKeyHex, signatureHex, timestamp, body) {
+  if (!publicKeyHex || !signatureHex || !timestamp) return false;
+  const msg = new TextEncoder().encode(timestamp + body);
+  const keyBytes = hexToBytes(publicKeyHex);
+  const sigBytes = hexToBytes(signatureHex);
+  for (const alg of [{ name: 'Ed25519' }, { name: 'NODE-ED25519', namedCurve: 'NODE-ED25519' }]) {
+    try {
+      const key = await crypto.subtle.importKey('raw', keyBytes, alg, false, ['verify']);
+      return await crypto.subtle.verify(alg.name === 'Ed25519' ? { name: 'Ed25519' } : { name: 'NODE-ED25519' }, key, sigBytes, msg);
+    } catch (e) { /* 換下一個演算法名稱再試 */ }
+  }
+  return false;
+}
+
+// 處理 slash 指令，回傳 Discord interaction response
+async function handleDiscordCommand(env, interaction) {
+  const reply = (content) => ({ type: 4, data: { content, allowed_mentions: { parse: [] } } });
+  const guildId = interaction.guild_id;
+  if (!guildId) return reply("請在伺服器頻道內使用這個指令。");
+  const owner = await ownerByGuild(env, guildId);
+  if (!owner) return reply("這個 Discord 伺服器還沒綁定戰隊帳號。請管理員到後台『Discord 設定』填入此伺服器 ID 並儲存。");
+
+  const cmd = interaction.data?.name || '';
+  const opts = interaction.data?.options || [];
+  const getOpt = (n) => opts.find(o => o.name === n)?.value;
+
+  const members = Object.values(await computeMemberStats(env, owner));
+  if (members.length === 0) return reply("名冊目前沒有成員資料。");
+
+  if (cmd === '查詢') {
+    const q = String(getOpt('名字') || '').trim();
+    if (!q) return reply("請輸入要查詢的名字。");
+    const m = members.find(x => x.display_name === q) || members.find(x => x.display_name.includes(q));
+    if (!m) return reply(`找不到「${q}」，請確認名字是否正確。`);
+    const total = m.attendance + m.leave + m.reserve;
+    const rate = total > 0 ? Math.round(m.attendance / total * 100) : 0;
+    return reply(`📊 **${m.display_name}**（${m.job || '未知'}）\n出席 **${m.attendance}**　請假 **${m.leave}**　後備 **${m.reserve}**　出席率約 **${rate}%**${m.hasOverride ? '\n（含管理員手動調整）' : ''}`);
+  }
+
+  if (cmd === '出勤榜') {
+    const top = [...members].sort((a, b) => b.attendance - a.attendance).slice(0, 10);
+    const lines = top.map((m, i) => `${i + 1}. ${m.display_name}　出席 ${m.attendance}／請假 ${m.leave}／後備 ${m.reserve}`);
+    return reply("🏆 **出勤榜（前 10）**\n" + lines.join("\n"));
+  }
+
+  if (cmd === '請假名單') {
+    const dateOpt = String(getOpt('日期') || '').trim();
+    // 找開放中的場次（可用日期過濾）
+    let wins;
+    try {
+      ({ results: wins } = await env.DB.prepare(
+        "SELECT window_id, event_date, session, title, match_type FROM leave_windows WHERE owner = ? AND status = 'open' ORDER BY event_date DESC, session ASC"
+      ).bind(owner).all());
+    } catch (e) {
+      ({ results: wins } = await env.DB.prepare(
+        "SELECT window_id, event_date, session, title FROM leave_windows WHERE owner = ? AND status = 'open' ORDER BY event_date DESC, session ASC"
+      ).bind(owner).all());
+    }
+    wins = (wins || []).filter(w => !dateOpt || w.event_date === dateOpt);
+    if (wins.length === 0) return reply(dateOpt ? `${dateOpt} 沒有開放中的場次。` : "目前沒有開放中的場次。");
+
+    const idToName = {};
+    members.forEach(m => { idToName[m.member_id] = m.display_name; });
+    const stats = await computeLeaveStats(env, owner);
+    const blocks = wins.map(w => {
+      const wb = stats.byWindow[w.window_id] || { leave: [], reserve: [] };
+      const leaveNames = [...new Set(wb.leave)].map(id => idToName[id] || id.slice(0, 6));
+      const reserveNames = [...new Set(wb.reserve)].map(id => idToName[id] || id.slice(0, 6));
+      const typeLabel = w.match_type === '其他' ? '領地戰' : (w.match_type || '幫戰');
+      let s = `📅 **${w.event_date}　${w.session}　[${typeLabel}]**${w.title ? ' · ' + w.title : ''}\n🙋 請假（${leaveNames.length}）：${leaveNames.length ? leaveNames.join('、') : '無'}`;
+      if (reserveNames.length) s += `\n🔄 後備（${reserveNames.length}）：${reserveNames.join('、')}`;
+      return s;
+    });
+    let out = blocks.join("\n\n");
+    if (out.length > 1900) out = out.slice(0, 1900) + "\n…（名單過長已截斷）";
+    return reply(out);
+  }
+
+  return reply("未知指令。可用：/查詢 名字、/出勤榜、/請假名單");
 }
 
 // 操作紀錄寫入（best-effort：migration 還沒跑之前不能讓這個把主要功能弄壞）
@@ -276,7 +550,7 @@ async function writeAudit(env, owner, actor, entityType, entityId, action, detai
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
@@ -331,6 +605,31 @@ export default {
         ).bind(shareId).first();
         return u?.username || null;
       };
+
+      // =========================
+      // 🤖 Discord Bot：互動端點（Discord 以 Ed25519 簽章驗證，不走 Bearer）
+      // =========================
+      if (url.pathname === "/api/discord/interactions" && request.method === "POST") {
+        const sig = request.headers.get("X-Signature-Ed25519");
+        const ts = request.headers.get("X-Signature-Timestamp");
+        const rawBody = await request.text();
+        const ok = await verifyDiscordSig(env.DISCORD_PUBLIC_KEY, sig, ts, rawBody);
+        if (!ok) return new Response("invalid request signature", { status: 401 });
+        let interaction;
+        try { interaction = JSON.parse(rawBody); } catch (e) { return new Response("bad json", { status: 400 }); }
+        if (interaction.type === 1) return json({ type: 1 }); // PING → PONG
+        if (interaction.type === 2) {
+          // 查詢要掃資料庫，可能超過 Discord 的 3 秒限制 → 先回 deferred（type 5）ACK，
+          // 背景把資料算完再用 interaction token 編輯訊息，徹底避免「應用程式未回應」
+          if (ctx && ctx.waitUntil) {
+            ctx.waitUntil(respondToDiscordCommand(env, interaction));
+            return json({ type: 5 }); // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+          }
+          // 極少數環境沒有 ctx → 退回同步回覆（可能有逾時風險）
+          return json(await handleDiscordCommand(env, interaction));
+        }
+        return json({ type: 4, data: { content: "未支援的互動類型" } });
+      }
 
       // =========================
       // 🔐 註冊
@@ -476,19 +775,27 @@ export default {
       // 👥 成員（只回傳備註/標籤）
       // =========================
       if (url.pathname === "/api/members") {
+        const loadMembers = async (owr) => {
+          try {
+            const { results } = await env.DB.prepare(
+              "SELECT id, last_job, note, version FROM members WHERE owner = ?"
+            ).bind(owr).all();
+            return results || [];
+          } catch (e) {
+            // version 欄位還沒建立（migration 008 未跑）
+            const { results } = await env.DB.prepare(
+              "SELECT id, last_job, note FROM members WHERE owner = ?"
+            ).bind(owr).all();
+            return results || [];
+          }
+        };
         if (isShareMode) {
           const owner = await getShareOwner();
           if (!owner) return json([]);
-          const { results } = await env.DB.prepare(
-            "SELECT id, last_job, note FROM members WHERE owner = ?"
-          ).bind(owner).all();
-          return json(results || []);
+          return json(await loadMembers(owner));
         }
         requireAuth();
-        const { results } = await env.DB.prepare(
-          "SELECT id, last_job, note FROM members WHERE owner = ?"
-        ).bind(user).all();
-        return json(results || []);
+        return json(await loadMembers(user));
       }
 
       // =========================
@@ -578,7 +885,7 @@ export default {
 
       if (url.pathname === "/api/roster/add" && request.method === "POST") {
         requireAuth();
-        const { display_name } = await request.json();
+        const { display_name, job } = await request.json();
         if (!display_name) return json({ error: "名稱不能為空" }, 400);
         const exist = await env.DB.prepare(
           "SELECT member_id FROM members_roster WHERE owner = ? AND display_name = ?"
@@ -586,13 +893,20 @@ export default {
         if (exist) return json({ error: "名稱已存在" }, 400);
         const memberId = crypto.randomUUID();
         const now = Date.now();
-        await env.DB.prepare(
-          "INSERT INTO members_roster (member_id, owner, display_name, status, version, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?)"
-        ).bind(memberId, user, display_name, now, now).run();
+        try {
+          await env.DB.prepare(
+            "INSERT INTO members_roster (member_id, owner, display_name, status, version, created_at, updated_at, job) VALUES (?, ?, ?, 'active', 1, ?, ?, ?)"
+          ).bind(memberId, user, display_name, now, now, job || null).run();
+        } catch (e) {
+          // 舊 DB 無 job 欄位時退回不含 job 的寫法
+          await env.DB.prepare(
+            "INSERT INTO members_roster (member_id, owner, display_name, status, version, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?)"
+          ).bind(memberId, user, display_name, now, now).run();
+        }
         await env.DB.prepare(
           "INSERT INTO member_aliases (alias_name, owner, member_id, created_at) VALUES (?, ?, ?, ?)"
         ).bind(display_name, user, memberId, now).run();
-        await writeAudit(env, user, user, 'roster', memberId, 'create', { display_name });
+        await writeAudit(env, user, user, 'roster', memberId, 'create', { display_name, job: job || '' });
         return json({ status: "OK", member_id: memberId });
       }
 
@@ -814,10 +1128,19 @@ export default {
         const { event_date, session, title, match_type } = await request.json();
         if (!event_date || !session) return json({ error: "請選擇日期與場次" }, 400);
         const mtype = match_type || '幫戰';
-        const dup = await env.DB.prepare(
-          "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ?"
-        ).bind(user, event_date, session).first();
-        if (dup) return json({ error: "這個日期＋場次已經開過請假了", existing_window_id: dup.window_id, existing_status: dup.status }, 409);
+        // 重複判定＝日期＋場次＋類型（幫戰/約戰/領地戰各自獨立，可同日同場次分別開）
+        let dup;
+        try {
+          dup = await env.DB.prepare(
+            "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ? AND COALESCE(match_type, '幫戰') = ?"
+          ).bind(user, event_date, session, mtype).first();
+        } catch (e) {
+          // match_type 欄位尚未建立（migration 004 未跑）→ 退回舊的日期＋場次判定
+          dup = await env.DB.prepare(
+            "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ?"
+          ).bind(user, event_date, session).first();
+        }
+        if (dup) return json({ error: "這個日期＋場次＋類型已經開過請假了", existing_window_id: dup.window_id, existing_status: dup.status }, 409);
         const windowId = crypto.randomUUID();
         const now = Date.now();
         try {
@@ -825,19 +1148,33 @@ export default {
             "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at, match_type) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?, ?)"
           ).bind(windowId, user, event_date, session, title || "", now, now, mtype).run();
         } catch (e) {
-          // match_type 欄位尚未建立（migration 004 還沒跑）→ 退回不含類型
-          await env.DB.prepare(
-            "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?)"
-          ).bind(windowId, user, event_date, session, title || "", now, now).run();
+          const msg = String((e && e.message) || e);
+          if (/no such column/i.test(msg)) {
+            // match_type 欄位尚未建立（migration 004 還沒跑）→ 退回不含類型
+            await env.DB.prepare(
+              "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?)"
+            ).bind(windowId, user, event_date, session, title || "", now, now).run();
+          } else if (/UNIQUE|constraint/i.test(msg)) {
+            // 舊的唯一索引還鎖在 (owner,date,session)，尚未套用 migration 009
+            return json({ error: "這個日期＋場次已經開過請假了。若要同日同場次分開幫戰／約戰／領地戰，請先在資料庫執行 migration 009。", existing_status: 'open' }, 409);
+          } else {
+            throw e;
+          }
         }
         const typeLabel = mtype === '其他' ? '領地戰' : mtype;
         await writeAudit(env, user, user, 'leave_window', windowId, 'create', { event_date, session, title, match_type: mtype });
-        await notifyDiscord(env, user, {
-          embeds: [{
-            title: "🗓️ 已開放請假",
-            description: `**${event_date}　${session}　[${typeLabel}]**${title ? "\n" + title : ""}\n請到請假連結登記。`,
-            color: 3447003
-          }]
+        const leaveUrl = await buildLeaveUrl(env, user, request);
+        const longUrl = leaveUrl ? leaveUrl + '#long' : '';
+        let leaveDesc = `**${event_date}　${session}　[${typeLabel}]**${title ? "\n" + title : ""}`;
+        if (leaveUrl) {
+          leaveDesc += `\n\n① ${event_date} 請假開放，有需要自行申請：\n${leaveUrl}`;
+          leaveDesc += `\n\n② 長期/預先請假（如需於非開放時段請假請用此連結）：\n${longUrl}`;
+          leaveDesc += `\n\n③ 有問題請找當家/管理處理`;
+        } else {
+          leaveDesc += `\n請到請假連結登記。`;
+        }
+        await notifyDiscord(env, user, 'leave_open', {
+          embed: { title: "🗓️ 已開放請假", description: leaveDesc, color: 3447003 }
         });
         return json({ status: "OK", window_id: windowId });
       }
@@ -907,13 +1244,13 @@ export default {
             const mem = await env.DB.prepare(
               "SELECT display_name FROM members_roster WHERE member_id = ? AND owner = ?"
             ).bind(member_id, user).first();
-            await notifyDiscord(env, user, {
+            await notifyDiscord(env, user, 'noshow', {
               content: "@here",
-              embeds: [{
+              embed: {
                 title: "⚠️ 連續 No-show 警示",
                 description: `**${mem?.display_name || member_id}** 已連續 **${streak}** 場 No-show，請幹部關注。`,
                 color: 15158332
-              }]
+              }
             });
           }
         }
@@ -939,11 +1276,188 @@ export default {
           else if (a.action === 'late_set') st.late[a.member_id] = true;
           else if (a.action === 'late_unset') st.late[a.member_id] = false;
         }
+        // 長期請假涵蓋此場 → 也視為請假（單場明確取消優先）
+        const longSet = new Set();
+        try {
+          const win = await env.DB.prepare("SELECT event_date FROM leave_windows WHERE window_id = ? AND owner = ?").bind(windowId, user).first();
+          if (win?.event_date) {
+            const { results: lls } = await env.DB.prepare(
+              "SELECT member_id FROM long_leaves WHERE owner = ? AND from_date <= ? AND to_date >= ?"
+            ).bind(user, win.event_date, win.event_date).all();
+            (lls || []).forEach(l => {
+              if (st.leave[l.member_id] === false) return; // 該場明確取消過 → 尊重
+              st.leave[l.member_id] = true;
+              longSet.add(l.member_id);
+            });
+          }
+        } catch (e) { /* long_leaves 表還沒建立 */ }
         const collect = (o) => Object.keys(o).filter(k => o[k]);
-        return json({ leave: collect(st.leave), reserve: collect(st.reserve), noshow: collect(st.noshow), late: collect(st.late) });
+        // 代替上號對照（本人 → 代打者）
+        let substitutes = {};
+        try {
+          const { results: subs } = await env.DB.prepare(
+            "SELECT member_id, substitute_member_id FROM leave_substitutes WHERE owner = ? AND window_id = ?"
+          ).bind(user, windowId).all();
+          (subs || []).forEach(s => { substitutes[s.member_id] = s.substitute_member_id; });
+        } catch (e) { substitutes = {}; }
+        return json({ leave: collect(st.leave), reserve: collect(st.reserve), noshow: collect(st.noshow), late: collect(st.late), substitutes, long: [...longSet] });
+      }
+
+      // 長期/預先請假：管理員列表
+      if (url.pathname === "/api/leave/long" && request.method === "GET") {
+        requireAuth();
+        let rows = [];
+        try {
+          ({ results: rows } = await env.DB.prepare(
+            "SELECT id, member_id, from_date, to_date, reason, created_at, created_by FROM long_leaves WHERE owner = ? ORDER BY from_date DESC"
+          ).bind(user).all());
+        } catch (e) { rows = []; }
+        // 補上名字
+        const nameMap = {};
+        try {
+          const { results: r } = await env.DB.prepare("SELECT member_id, display_name FROM members_roster WHERE owner = ?").bind(user).all();
+          (r || []).forEach(x => { nameMap[x.member_id] = x.display_name; });
+        } catch (e) { }
+        return json((rows || []).map(x => ({ ...x, display_name: nameMap[x.member_id] || x.member_id })));
+      }
+
+      // 長期/預先請假：管理員新增
+      if (url.pathname === "/api/leave/long/create" && request.method === "POST") {
+        requireAuth();
+        const { member_id, from_date, to_date, reason } = await request.json();
+        if (!member_id || !from_date || !to_date) return json({ error: "請填成員與起訖日期" }, 400);
+        if (from_date > to_date) return json({ error: "起始日不能晚於結束日" }, 400);
+        await env.DB.prepare(
+          "INSERT INTO long_leaves (id, owner, member_id, from_date, to_date, reason, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        ).bind(crypto.randomUUID(), user, member_id, from_date, to_date, reason || '', Date.now(), user).run();
+        await writeAudit(env, user, user, 'long_leave', member_id, 'create', { from_date, to_date });
+        return json({ status: "OK" });
+      }
+
+      // 長期/預先請假：管理員刪除
+      if (url.pathname === "/api/leave/long/delete" && request.method === "POST") {
+        requireAuth();
+        const { id } = await request.json();
+        if (!id) return json({ error: "參數錯誤" }, 400);
+        await env.DB.prepare("DELETE FROM long_leaves WHERE owner = ? AND id = ?").bind(user, id).run();
+        await writeAudit(env, user, user, 'long_leave', id, 'delete', {});
+        return json({ status: "OK" });
+      }
+
+      // 🌐 公開頁：成員自助送出長期/預先請假
+      if (url.pathname === "/api/leave/public/long" && request.method === "POST") {
+        if (!shareId) return json({ error: "缺少 share" }, 400);
+        const owner = await getShareOwner();
+        if (!owner) return json({ error: "連結無效" }, 404);
+        const { member_id, from_date, to_date, reason } = await request.json();
+        if (!member_id || !from_date || !to_date) return json({ error: "請填名字與起訖日期" }, 400);
+        if (from_date > to_date) return json({ error: "起始日不能晚於結束日" }, 400);
+        const mem = await env.DB.prepare(
+          "SELECT display_name FROM members_roster WHERE member_id = ? AND owner = ? AND status = 'active'"
+        ).bind(member_id, owner).first();
+        if (!mem) return json({ error: "找不到這個名字，請確認或聯絡管理員" }, 404);
+        // 粗略限流
+        const since = Date.now() - 5000;
+        const recent = await env.DB.prepare(
+          "SELECT COUNT(*) c FROM audit_log WHERE owner = ? AND actor = 'public' AND created_at > ?"
+        ).bind(owner, since).first();
+        if ((recent?.c || 0) > 30) return json({ error: "操作太頻繁，請稍後再試" }, 429);
+        await env.DB.prepare(
+          "INSERT INTO long_leaves (id, owner, member_id, from_date, to_date, reason, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'public')"
+        ).bind(crypto.randomUUID(), owner, member_id, from_date, to_date, reason || '', Date.now()).run();
+        await writeAudit(env, owner, 'public', 'long_leave', member_id, 'create', { from_date, to_date });
+        await notifyDiscord(env, owner, 'leave_submit', {
+          embed: { title: "📅 長期/預先請假", description: `**${mem.display_name}**　${from_date} ~ ${to_date}${reason ? "\n" + reason : ""}`, color: 10181046 }
+        });
+        return json({ status: "OK" });
+      }
+
+      // 代替上號：設定 / 取消（管理員用）
+      if (url.pathname === "/api/leave/substitute" && request.method === "POST") {
+        requireAuth();
+        const { window_id, member_id, substitute_member_id } = await request.json();
+        if (!window_id || !member_id) return json({ error: "參數錯誤" }, 400);
+        const win = await env.DB.prepare("SELECT window_id FROM leave_windows WHERE window_id = ? AND owner = ?").bind(window_id, user).first();
+        if (!win) return json({ error: "找不到場次" }, 404);
+        const now = Date.now();
+        if (!substitute_member_id) {
+          // 取消代替上號
+          await env.DB.prepare("DELETE FROM leave_substitutes WHERE owner = ? AND window_id = ? AND member_id = ?").bind(user, window_id, member_id).run();
+          await writeAudit(env, user, user, 'leave_substitute', window_id, 'unset', { member_id });
+          return json({ status: "OK" });
+        }
+        if (substitute_member_id === member_id) return json({ error: "代打者不能是本人" }, 400);
+        // 設定代替上號（本人 → 代打者），並確保本人在這場記為「請假」，出席才不會誤算
+        await env.DB.prepare(
+          "INSERT INTO leave_substitutes (window_id, owner, member_id, substitute_member_id, created_at) VALUES (?, ?, ?, ?, ?) " +
+          "ON CONFLICT(window_id, owner, member_id) DO UPDATE SET substitute_member_id = excluded.substitute_member_id, created_at = excluded.created_at"
+        ).bind(window_id, user, member_id, substitute_member_id, now).run();
+        await env.DB.prepare(
+          "INSERT INTO leave_actions (action_id, window_id, owner, member_id, action, actor, actor_meta, created_at) VALUES (?, ?, ?, ?, 'leave_request', ?, ?, ?)"
+        ).bind(crypto.randomUUID(), window_id, user, member_id, user, JSON.stringify({ by: 'admin', via: 'substitute' }), now).run();
+        await writeAudit(env, user, user, 'leave_substitute', window_id, 'set', { member_id, substitute_member_id });
+        return json({ status: "OK" });
+      }
+
+      // 代替上號清單（含場次日期/場次/類型，供前端出席計算重導）
+      if (url.pathname === "/api/leave/substitutes" && request.method === "GET") {
+        let owner = user;
+        if (isShareMode) owner = await getShareOwner();
+        if (!owner) return json([]);
+        let out = [];
+        try {
+          const { results } = await env.DB.prepare(
+            "SELECT ls.member_id, ls.substitute_member_id, w.event_date, w.session, w.match_type " +
+            "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner " +
+            "WHERE ls.owner = ?"
+          ).bind(owner).all();
+          out = (results || []).map(r => ({
+            member_id: r.member_id, substitute_member_id: r.substitute_member_id,
+            date: r.event_date, session: r.session, type: r.match_type || '幫戰'
+          }));
+        } catch (e) { out = []; }
+        return json(out);
       }
 
       // 某成員的 No-show / 臨時請假 紀錄（含日期，僅管理員；唯讀分享不提供）
+      // 某成員完整的 請假／臨時／代打／長期請假 記錄（管理員；成員檔案用）
+      if (url.pathname === "/api/leave/member-history" && request.method === "GET") {
+        requireAuth();
+        const memberId = url.searchParams.get("member_id");
+        if (!memberId) return json([]);
+        let wins = [];
+        try { ({ results: wins } = await env.DB.prepare("SELECT window_id, event_date, session, match_type FROM leave_windows WHERE owner = ?").bind(user).all()); } catch (e) { wins = []; }
+        const winMap = {}; (wins || []).forEach(w => { winMap[w.window_id] = w; });
+        const nameMap = {};
+        try { const { results: r } = await env.DB.prepare("SELECT member_id, display_name FROM members_roster WHERE owner = ?").bind(user).all(); (r || []).forEach(x => { nameMap[x.member_id] = x.display_name; }); } catch (e) { }
+        const { results: acts } = await env.DB.prepare(
+          "SELECT window_id, action FROM leave_actions WHERE owner = ? AND member_id = ? ORDER BY created_at ASC"
+        ).bind(user, memberId).all();
+        const leaveSt = {}, lateSt = {};
+        for (const a of acts || []) {
+          if (a.action === 'leave_request') leaveSt[a.window_id] = true;
+          else if (a.action === 'leave_cancel') leaveSt[a.window_id] = false;
+          else if (a.action === 'late_set') lateSt[a.window_id] = true;
+          else if (a.action === 'late_unset') lateSt[a.window_id] = false;
+        }
+        const out = [];
+        const push = (w, kind, extra) => { if (w) out.push({ kind, date: w.event_date, session: w.session, type: w.match_type || '幫戰', ...(extra || {}) }); };
+        for (const wid in leaveSt) if (leaveSt[wid]) push(winMap[wid], 'leave');
+        for (const wid in lateSt) if (lateSt[wid]) push(winMap[wid], 'late');
+        try {
+          const { results: subOut } = await env.DB.prepare("SELECT window_id, substitute_member_id FROM leave_substitutes WHERE owner = ? AND member_id = ?").bind(user, memberId).all();
+          (subOut || []).forEach(s => push(winMap[s.window_id], 'covered_by', { other: nameMap[s.substitute_member_id] || '' }));
+          const { results: subIn } = await env.DB.prepare("SELECT window_id, member_id FROM leave_substitutes WHERE owner = ? AND substitute_member_id = ?").bind(user, memberId).all();
+          (subIn || []).forEach(s => push(winMap[s.window_id], 'covered_for', { other: nameMap[s.member_id] || '' }));
+        } catch (e) { }
+        try {
+          const { results: lls } = await env.DB.prepare("SELECT from_date, to_date, reason FROM long_leaves WHERE owner = ? AND member_id = ?").bind(user, memberId).all();
+          (lls || []).forEach(l => out.push({ kind: 'long', from: l.from_date, to: l.to_date, reason: l.reason || '', date: l.from_date }));
+        } catch (e) { }
+        out.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        return json(out);
+      }
+
       if (url.pathname === "/api/leave/member-flags" && request.method === "GET") {
         requireAuth();
         const memberId = url.searchParams.get("member_id");
@@ -982,7 +1496,9 @@ export default {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
         if (!owner) return json({});
-        const stats = await computeLeaveStats(env, owner);
+        const fromDate = url.searchParams.get("from") || null;
+        const toDate = url.searchParams.get("to") || null;
+        const stats = await computeLeaveStats(env, owner, fromDate, toDate);
         return json(stats.byMember);
       }
 
@@ -1065,10 +1581,46 @@ export default {
           "INSERT INTO member_aliases (alias_name, owner, member_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(alias_name, owner) DO NOTHING"
         ).bind(nm, owner, memberId, now).run();
         await writeAudit(env, owner, 'public', 'roster', memberId, 'self_join', { display_name: nm, job: job || '' });
-        await notifyDiscord(env, owner, {
-          embeds: [{ title: "🆕 自助建檔", description: `**${nm}**${job ? " · " + job : ""}`, color: 3066993 }]
+        await notifyDiscord(env, owner, 'self_join', {
+          embed: { title: "🆕 自助建檔", description: `**${nm}**${job ? " · " + job : ""}`, color: 3066993 }
         });
         return json({ status: "OK", member_id: memberId });
+      }
+
+      // 🌐 公開頁：成員自助改名
+      if (url.pathname === "/api/leave/public/rename" && request.method === "POST") {
+        if (!shareId) return json({ error: "缺少 share" }, 400);
+        const owner = await getShareOwner();
+        if (!owner) return json({ error: "連結無效" }, 404);
+        const { member_id, new_name } = await request.json();
+        const nm = (new_name || "").trim();
+        if (!member_id || !nm) return json({ error: "請填新名字" }, 400);
+        if (nm.length > 20) return json({ error: "名字太長" }, 400);
+        // 粗略限流
+        const since = Date.now() - 5000;
+        const recent = await env.DB.prepare(
+          "SELECT COUNT(*) c FROM audit_log WHERE owner = ? AND actor = 'public' AND created_at > ?"
+        ).bind(owner, since).first();
+        if ((recent?.c || 0) > 30) return json({ error: "操作太頻繁，請稍後再試" }, 429);
+        const mem = await env.DB.prepare(
+          "SELECT display_name FROM members_roster WHERE member_id = ? AND owner = ? AND status = 'active'"
+        ).bind(member_id, owner).first();
+        if (!mem) return json({ error: "找不到成員" }, 404);
+        if (mem.display_name === nm) return json({ status: "OK" });
+        const clash = await env.DB.prepare(
+          "SELECT member_id FROM members_roster WHERE owner = ? AND display_name = ? AND member_id <> ?"
+        ).bind(owner, nm, member_id).first();
+        if (clash) return json({ error: "這個名字已經有人用了" }, 400);
+        const now = Date.now();
+        await env.DB.prepare(
+          "UPDATE members_roster SET display_name = ?, updated_at = ?, version = version + 1 WHERE member_id = ? AND owner = ?"
+        ).bind(nm, now, member_id, owner).run();
+        // 新名字加入 alias（未來戰報用新名字也能歸戶）；舊名字 alias 保留讓舊戰報仍歸戶
+        await env.DB.prepare(
+          "INSERT INTO member_aliases (alias_name, owner, member_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(alias_name, owner) DO NOTHING"
+        ).bind(nm, owner, member_id, now).run();
+        await writeAudit(env, owner, 'public', 'roster', member_id, 'self_rename', { from: mem.display_name, to: nm });
+        return json({ status: "OK", member_id });
       }
 
       // =========================
@@ -1107,12 +1659,12 @@ export default {
         await writeAudit(env, owner, 'public', 'leave_action', window_id, action, { member_id, ip: ipHash });
 
         const verb = action === 'leave_request' ? "🙋 請假" : "↩️ 取消請假";
-        await notifyDiscord(env, owner, {
-          embeds: [{
+        await notifyDiscord(env, owner, 'leave_submit', {
+          embed: {
             title: verb,
             description: `**${mem.display_name}**`,
             color: action === 'leave_request' ? 15158332 : 9807270
-          }]
+          }
         });
         return json({ status: "OK" });
       }
@@ -1134,19 +1686,136 @@ export default {
       // =========================
       if (url.pathname === "/api/settings/discord" && request.method === "GET") {
         requireAuth();
-        const row = await env.DB.prepare(
-          "SELECT discord_webhook_url, discord_guild_id FROM user_settings WHERE owner = ?"
-        ).bind(user).first();
-        return json(row || { discord_webhook_url: "", discord_guild_id: "" });
+        let row;
+        try {
+          row = await env.DB.prepare(
+            "SELECT discord_webhook_url, discord_guild_id, site_base_url FROM user_settings WHERE owner = ?"
+          ).bind(user).first();
+        } catch (e) {
+          // site_base_url 欄位還沒建立（migration 007 未跑）
+          row = await env.DB.prepare(
+            "SELECT discord_webhook_url, discord_guild_id FROM user_settings WHERE owner = ?"
+          ).bind(user).first();
+        }
+        let guild_ids = [];
+        try {
+          const { results } = await env.DB.prepare(
+            "SELECT guild_id FROM discord_guilds WHERE owner = ? ORDER BY created_at ASC"
+          ).bind(user).all();
+          guild_ids = (results || []).map(r => r.guild_id).filter(Boolean);
+        } catch (e) { guild_ids = []; }
+        // 舊資料相容：只在單一欄位設過 → 帶進 guild_ids
+        if (guild_ids.length === 0 && row?.discord_guild_id) guild_ids = [row.discord_guild_id];
+        return json(Object.assign({ discord_webhook_url: "", discord_guild_id: "", site_base_url: "" }, row || {}, { guild_ids }));
       }
       if (url.pathname === "/api/settings/discord" && request.method === "POST") {
         requireAuth();
-        const { webhook_url, guild_id } = await request.json();
-        await env.DB.prepare(
-          "INSERT INTO user_settings (owner, discord_webhook_url, discord_guild_id, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(owner) DO UPDATE SET discord_webhook_url = excluded.discord_webhook_url, discord_guild_id = excluded.discord_guild_id, updated_at = excluded.updated_at"
-        ).bind(user, webhook_url || "", guild_id || "", Date.now()).run();
-        await writeAudit(env, user, user, 'session', '', 'discord_settings', {});
+        const body = await request.json();
+        const { webhook_url, site_base_url } = body;
+        // 支援多伺服器：guild_ids 陣列；相容舊的單一 guild_id
+        let guildIds = Array.isArray(body.guild_ids) ? body.guild_ids : (body.guild_id ? [body.guild_id] : []);
+        guildIds = [...new Set(guildIds.map(g => String(g).trim()).filter(Boolean))];
+        const primaryGuild = guildIds[0] || '';
+        // user_settings：primary guild 供向後相容
+        try {
+          await env.DB.prepare(
+            "INSERT INTO user_settings (owner, discord_webhook_url, discord_guild_id, site_base_url, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(owner) DO UPDATE SET discord_webhook_url = excluded.discord_webhook_url, discord_guild_id = excluded.discord_guild_id, site_base_url = excluded.site_base_url, updated_at = excluded.updated_at"
+          ).bind(user, webhook_url || "", primaryGuild, site_base_url || "", Date.now()).run();
+        } catch (e) {
+          // 舊 schema 無 site_base_url
+          await env.DB.prepare(
+            "INSERT INTO user_settings (owner, discord_webhook_url, discord_guild_id, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(owner) DO UPDATE SET discord_webhook_url = excluded.discord_webhook_url, discord_guild_id = excluded.discord_guild_id, updated_at = excluded.updated_at"
+          ).bind(user, webhook_url || "", primaryGuild, Date.now()).run();
+        }
+        // discord_guilds：整份覆寫
+        try {
+          await env.DB.prepare("DELETE FROM discord_guilds WHERE owner = ?").bind(user).run();
+          const now = Date.now();
+          for (const g of guildIds) {
+            await env.DB.prepare(
+              "INSERT INTO discord_guilds (owner, guild_id, created_at) VALUES (?, ?, ?) ON CONFLICT(owner, guild_id) DO NOTHING"
+            ).bind(user, g, now).run();
+          }
+        } catch (e) { /* discord_guilds 表還沒建立（migration 008 未跑）→ 僅用單一欄位 */ }
+        await writeAudit(env, user, user, 'session', '', 'discord_settings', { guilds: guildIds.length });
         return json({ status: "OK" });
+      }
+
+      // 🤖 多頻道：讀取 / 覆寫整份頻道清單
+      if (url.pathname === "/api/settings/channels" && request.method === "GET") {
+        requireAuth();
+        let results = [];
+        try {
+          ({ results } = await env.DB.prepare(
+            "SELECT id, name, webhook_url, events, mention_role_id, enabled FROM discord_channels WHERE owner = ? ORDER BY created_at ASC"
+          ).bind(user).all());
+        } catch (e) { results = []; }
+        const channels = (results || []).map(c => ({
+          id: c.id, name: c.name || '', webhook_url: c.webhook_url || '',
+          events: (() => { try { return c.events ? JSON.parse(c.events) : []; } catch (e) { return []; } })(),
+          mention_role_id: c.mention_role_id || '', enabled: !!c.enabled
+        }));
+        return json({ channels });
+      }
+      if (url.pathname === "/api/settings/channels" && request.method === "POST") {
+        requireAuth();
+        const { channels } = await request.json();
+        if (!Array.isArray(channels)) return json({ error: "格式錯誤" }, 400);
+        const now = Date.now();
+        await env.DB.prepare("DELETE FROM discord_channels WHERE owner = ?").bind(user).run();
+        for (const c of channels) {
+          const events = Array.isArray(c.events) ? c.events.filter(e => DISCORD_EVENT_KEYS.includes(e)) : [];
+          await env.DB.prepare(
+            "INSERT INTO discord_channels (id, owner, name, webhook_url, events, mention_role_id, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          ).bind(crypto.randomUUID(), user, (c.name || '').slice(0, 40), c.webhook_url || '', JSON.stringify(events), (c.mention_role_id || '').replace(/\D/g, ''), c.enabled ? 1 : 0, now, now).run();
+        }
+        await writeAudit(env, user, user, 'session', '', 'discord_channels', { count: channels.length });
+        return json({ status: "OK" });
+      }
+
+      // 🤖 Bot：註冊 slash 指令（綁定的每個 guild 各註冊一次＝即時生效；沒綁定則全域）
+      if (url.pathname === "/api/discord/register-commands" && request.method === "POST") {
+        requireAuth();
+        if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_APP_ID) {
+          return json({ error: "後端尚未設定 DISCORD_BOT_TOKEN / DISCORD_APP_ID 環境變數" }, 400);
+        }
+        let guildIds = [];
+        try {
+          const { results } = await env.DB.prepare(
+            "SELECT guild_id FROM discord_guilds WHERE owner = ?"
+          ).bind(user).all();
+          guildIds = (results || []).map(r => r.guild_id).filter(Boolean);
+        } catch (e) { guildIds = []; }
+        if (guildIds.length === 0) {
+          const s = await env.DB.prepare("SELECT discord_guild_id FROM user_settings WHERE owner = ?").bind(user).first();
+          if (s?.discord_guild_id) guildIds = [s.discord_guild_id];
+        }
+        const commands = [
+          { name: "查詢", description: "查詢某位成員的出席／請假／後備次數", options: [{ name: "名字", description: "成員名字", type: 3, required: true }] },
+          { name: "出勤榜", description: "顯示出勤前 10 名" },
+          { name: "請假名單", description: "顯示目前開放場次的請假／後備名單", options: [{ name: "日期", description: "只看某天 YYYY-MM-DD（選填）", type: 3, required: false }] }
+        ];
+        const put = async (endpoint) => {
+          const res = await fetch(endpoint, {
+            method: "PUT",
+            headers: { "Authorization": `Bot ${env.DISCORD_BOT_TOKEN}`, "Content-Type": "application/json" },
+            body: JSON.stringify(commands)
+          });
+          const data = await res.json().catch(() => ({}));
+          return { ok: res.ok, status: res.status, count: Array.isArray(data) ? data.length : 0, detail: data };
+        };
+        if (guildIds.length === 0) {
+          const r = await put(`https://discord.com/api/v10/applications/${env.DISCORD_APP_ID}/commands`);
+          if (!r.ok) return json({ error: "註冊失敗", status: r.status, detail: r.detail }, 500);
+          return json({ status: "OK", scope: "global", guilds: 0, registered: r.count });
+        }
+        let okCount = 0, lastErr = null;
+        for (const g of guildIds) {
+          const r = await put(`https://discord.com/api/v10/applications/${env.DISCORD_APP_ID}/guilds/${g}/commands`);
+          if (r.ok) okCount++; else lastErr = r;
+        }
+        if (okCount === 0 && lastErr) return json({ error: "註冊失敗", status: lastErr.status, detail: lastErr.detail }, 500);
+        return json({ status: "OK", scope: "guild", guilds: okCount, registered: commands.length });
       }
 
       // =========================
@@ -1248,13 +1917,45 @@ export default {
       // =========================
       if (url.pathname === "/api/update-note" && request.method === "POST") {
         requireAuth();
-        const { id, note } = await request.json();
-        await env.DB.prepare(`
-          INSERT INTO members (id, last_job, matches, total_dmg, note, owner)
-          VALUES (?, '', 0, 0, ?, ?)
-          ON CONFLICT(id, owner) DO UPDATE SET note = excluded.note
-        `).bind(id, note, user).run();
-        return json({ status: "OK" });
+        const { id, note, expected_version } = await request.json();
+        const legacyUpsert = async () => {
+          await env.DB.prepare(`
+            INSERT INTO members (id, last_job, matches, total_dmg, note, owner)
+            VALUES (?, '', 0, 0, ?, ?)
+            ON CONFLICT(id, owner) DO UPDATE SET note = excluded.note
+          `).bind(id, note, user).run();
+        };
+        try {
+          const cur = await env.DB.prepare(
+            "SELECT version FROM members WHERE id = ? AND owner = ?"
+          ).bind(id, user).first();
+          if (!cur) {
+            // 尚無此列 → 建立（version = 1）
+            await env.DB.prepare(`
+              INSERT INTO members (id, last_job, matches, total_dmg, note, owner, version)
+              VALUES (?, '', 0, 0, ?, ?, 1)
+              ON CONFLICT(id, owner) DO UPDATE SET note = excluded.note, version = COALESCE(members.version, 0) + 1
+            `).bind(id, note, user).run();
+            const nv = await env.DB.prepare("SELECT version FROM members WHERE id = ? AND owner = ?").bind(id, user).first();
+            return json({ status: "OK", version: nv?.version ?? 1 });
+          }
+          // 樂觀鎖：帶了版本又對不上 → 擋下，避免覆蓋別人的修改
+          if (typeof expected_version === 'number' && typeof cur.version === 'number' && expected_version !== cur.version) {
+            return json({ error: "此成員檔案已被其他人更新，請重新整理後再改", current_version: cur.version }, 409);
+          }
+          const upd = await env.DB.prepare(
+            "UPDATE members SET note = ?, version = COALESCE(version, 0) + 1 WHERE id = ? AND owner = ? AND COALESCE(version, 0) = ?"
+          ).bind(note, id, user, cur.version ?? 0).run();
+          if (upd.meta && upd.meta.changes === 0) {
+            const now2 = await env.DB.prepare("SELECT version FROM members WHERE id = ? AND owner = ?").bind(id, user).first();
+            return json({ error: "此成員檔案已被其他人更新，請重新整理後再改", current_version: now2?.version }, 409);
+          }
+          return json({ status: "OK", version: (cur.version ?? 0) + 1 });
+        } catch (e) {
+          // version 欄位還沒建立（migration 008 未跑）→ 退回原本行為
+          await legacyUpsert();
+          return json({ status: "OK" });
+        }
       }
 
       // =========================

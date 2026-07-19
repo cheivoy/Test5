@@ -801,7 +801,7 @@ function renderHistoryList() {
 // =====================================================
 // ===  viewHistory
 // =====================================================
-function viewHistory(id) {
+async function viewHistory(id) {
     currentReportId = id;
     const h = allHistories.find(x => x.id === id);
     if (h) {
@@ -810,6 +810,10 @@ function viewHistory(id) {
         gA = Array.isArray(d.gA) ? d.gA : [];
         gB = Array.isArray(d.gB) ? d.gB : [];
         full = [...gA, ...gB];
+        // 代替上號標示所需：目前戰報的場次鍵 + 對照表
+        window._curRep = { date: h.date, session: d.session || '第一場', type: d.matchType || '幫戰' };
+        if (!Object.keys(memberIdToDisplayName).length) { try { await fetchRosterAliasMap(); } catch (e) { } }
+        if (!Object.keys(subMapByWin).length) { try { await loadSubMap(); } catch (e) { } }
         document.getElementById('display-title').innerText = d.nameA || h.guild_a;
         document.getElementById('name-b-title').innerText = d.nameB || '未知';
         const matchResultEl = document.getElementById('match-result');
@@ -836,12 +840,23 @@ function renderReport() {
     initSections();
     renderMVPs('a', gA); renderMVPs('b', gB);
     const avg = full.reduce((a, b) => a + b.pDmg, 0) / (full.length || 1);
+    const cr = window._curRep || {};
+    const subForCur = subMapByWin[`${cr.date}|${cr.session}|${cr.type}`] || {};
+    // 代打標示：我方(gA)某人這場被誰代打
+    const subBadge = (p, t) => {
+        if (t !== 'a') return '';
+        const pid = aliasToMemberId[p.name];
+        const bId = pid && subForCur[pid];
+        if (!bId) return '';
+        const bName = memberIdToDisplayName[bId] || '代打';
+        return ` <span class="hash-tag" style="background:#5c6bc0; color:#fff;">🔄${bName}代打</span>`;
+    };
     ['a', 'b'].forEach(t => {
         const data = (t === 'a' ? gA : gB).filter(p => currentJobFilter === 'all' || p.job === currentJobFilter);
         document.getElementById('th-' + t).innerHTML = cols.map(c => `<th onclick="sortBy('${t}', '${c.k}')">${c.l} ↕</th>`).join('');
         document.getElementById('tbody-' + t).innerHTML = data.map(p => `
             <tr onclick="openModal('${p.name}')" style="cursor:pointer;">
-                <td>${p.name} ${p.pDmg > avg * 2.5 ? '🔥' : ''}</td>
+                <td>${p.name} ${p.pDmg > avg * 2.5 ? '🔥' : ''}${subBadge(p, t)}</td>
                 <td><span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span></td>
                 ${cols.slice(2).map(c => `<td>${p[c.k] >= 10000 ? (p[c.k] / 10000).toFixed(1) + 'w' : p[c.k]}</td>`).join('')}
             </tr>`).join('');
@@ -854,7 +869,7 @@ function renderReport() {
                 <div class="rcard" onclick="openModal('${p.name}')">
                     <div class="rcard-head">
                         <span class="rcard-dot" style="background:var(--color-${p.job})"></span>
-                        <span class="rcard-name">${p.name} ${p.pDmg > avg * 2.5 ? '🔥' : ''}</span>
+                        <span class="rcard-name">${p.name} ${p.pDmg > avg * 2.5 ? '🔥' : ''}${subBadge(p, t)}</span>
                         <span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span>
                     </div>
                     <div class="rcard-stats">
@@ -1062,6 +1077,22 @@ async function openMemberDetail(id) {
 // =====================================================
 // ===  身分對照表：把歷史戰報裡的名字 resolve 成穩定 member_id
 // =====================================================
+// 載入代替上號對照表到 subMapByWin
+async function loadSubMap() {
+    subMapByWin = {};
+    try {
+        const subUrl = WORKER_URL + "/api/leave/substitutes?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
+        const subHeaders = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
+        if (shareId || (storageMode === 'cloud' && currentUser)) {
+            const subs = await fetch(subUrl, { cache: "no-store", headers: subHeaders }).then(r => r.json()).catch(() => []);
+            (Array.isArray(subs) ? subs : []).forEach(s => {
+                const k = `${s.date}|${s.session}|${s.type}`;
+                (subMapByWin[k] = subMapByWin[k] || {})[s.member_id] = s.substitute_member_id;
+            });
+        }
+    } catch (e) { subMapByWin = {}; }
+}
+
 async function fetchRosterAliasMap() {
     aliasToMemberId = {};
     memberIdToDisplayName = {};
@@ -1138,18 +1169,7 @@ async function loadDbData() {
     totalReportsInTimeframe = filteredHistories.length;
 
     // 代替上號對照表（供出席重導）
-    subMapByWin = {};
-    try {
-        const subUrl = WORKER_URL + "/api/leave/substitutes?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
-        const subHeaders = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
-        if (shareId || (storageMode === 'cloud' && currentUser)) {
-            const subs = await fetch(subUrl, { cache: "no-store", headers: subHeaders }).then(r => r.json()).catch(() => []);
-            (Array.isArray(subs) ? subs : []).forEach(s => {
-                const k = `${s.date}|${s.session}|${s.type}`;
-                (subMapByWin[k] = subMapByWin[k] || {})[s.member_id] = s.substitute_member_id;
-            });
-        }
-    } catch (e) { subMapByWin = {}; }
+    await loadSubMap();
 
     let noteMap = {};
     const jobSet = new Set();
@@ -1199,17 +1219,29 @@ async function loadDbData() {
             const type = d.matchType || "幫戰";
             const session = d.session || "第一場";
             const subForWin = subMapByWin[`${h.date}|${session}|${type}`];
+            const mkEntry = (id, mid) => ({ id, member_id: mid || null, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' });
             d.gA.forEach(p => {
                 // ✅ 改名/合併安全：有對照到穩定 member_id 就用它分組，顯示名稱取當下最新名稱
                 const origId = aliasToMemberId[p.name];
-                // 代替上號：本人請假、他人代打 → 這場出席改算到代打者身上
-                let resolvedId = origId;
-                if (subForWin && origId && subForWin[origId]) resolvedId = subForWin[origId];
-                const key = resolvedId || p.name;
-                const displayName = resolvedId ? (memberIdToDisplayName[resolvedId] || p.name) : p.name;
-                if (!map[key]) {
-                    map[key] = { id: displayName, member_id: resolvedId || null, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' };
+                if (p.job) jobSet.add(p.job);
+                const subB = (subForWin && origId && subForWin[origId]) ? subForWin[origId] : null;
+                if (subB) {
+                    // 代替上號：出勤只加「次數」給代打者（不污染其職業/數據）；本人這場不算出勤
+                    const bName = memberIdToDisplayName[subB] || subB;
+                    if (!map[subB]) map[subB] = mkEntry(bName, subB);
+                    map[subB].matches++;
+                    map[subB].counts[type] = (map[subB].counts[type] || 0) + 1;
+                    const aName2 = origId ? (memberIdToDisplayName[origId] || p.name) : p.name;
+                    (map[subB].subFor = map[subB].subFor || []).push({ date: h.date, session, type, name: aName2 });
+                    // 本人（被代打）：記一筆標示，但不計出勤
+                    const aKey = origId || p.name;
+                    if (!map[aKey]) map[aKey] = mkEntry(aName2, origId || null);
+                    (map[aKey].subBy = map[aKey].subBy || []).push({ date: h.date, session, type, name: bName });
+                    return;
                 }
+                const key = origId || p.name;
+                const displayName = origId ? (memberIdToDisplayName[origId] || p.name) : p.name;
+                if (!map[key]) map[key] = mkEntry(displayName, origId || null);
                 map[key].matches++;
                 map[key].counts[type] = (map[key].counts[type] || 0) + 1;
                 map[key].histories.push({ date: h.date, title: aName, stats: p, type, session });
@@ -1218,7 +1250,6 @@ async function loadDbData() {
                     map[key].latestDate = h.date;
                     map[key].last_job = p.job;
                 }
-                if (p.job) jobSet.add(p.job);
                 cols.slice(2).forEach(c => {
                     map[key].aggr[c.k] = (map[key].aggr[c.k] || 0) + (p[c.k] || 0);
                 });
@@ -1445,11 +1476,17 @@ function onThresholdChange() {
 // 匯出成員名單 CSV（名字/職業/身份/標籤/出席/請假/後備/出席率）
 function exportMembersCSV() {
     if (!dbMembersMap.length) { alert('沒有可匯出的資料'); return; }
-    const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '其中臨時', '後備', '出席率(%)'];
+    const header = ['名字', '職業', '身份', '所屬分類', '總場次', '出席', '請假', '其中臨時', '後備', '出席率(%)', '代打記錄'];
+    const subText = (m) => {
+        const parts = [];
+        (m.subFor || []).forEach(s => parts.push(`${s.date} 代打 ${s.name}`));
+        (m.subBy || []).forEach(s => parts.push(`${s.date} 由 ${s.name} 代打`));
+        return parts.join('；');
+    };
     const rows = dbMembersMap.map(m => [
         m.id, m.last_job || '', m.category || '', (m.tag && m.tag !== 'none') ? m.tag : '',
         m.matches, (m.attendance != null ? m.attendance : m.matches), m.leaveCount || 0, m.lateCount || 0, m.reserveCount || 0,
-        m.rate.toFixed(1)
+        m.rate.toFixed(1), subText(m)
     ]);
     const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
     const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
