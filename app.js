@@ -1247,6 +1247,8 @@ async function loadDbData() {
                 // ✅ 改名/合併安全：有對照到穩定 member_id 就用它分組，顯示名稱取當下最新名稱
                 const origId = aliasToMemberId[p.name];
                 if (p.job) jobSet.add(p.job);
+                // 已移除的成員（有對應 member_id 但不在現行名冊）→ 不計、不顯示
+                if (origId && !memberIdToDisplayName[origId]) return;
                 const subB = (subForWin && origId && subForWin[origId]) ? subForWin[origId] : null;
                 if (subB) {
                     // 代替上號：出勤算給代打者（本人這場不算）；只加次數不污染其數據
@@ -1282,6 +1284,7 @@ async function loadDbData() {
     // 併入手動補登出席（與戰報去重），並結算出席場數
     manualAttendance.forEach(a => {
         const key = a.member_id;
+        if (!memberIdToDisplayName[key]) return; // 已移除的成員不計
         if (!map[key]) map[key] = mkEntry(memberIdToDisplayName[key] || key, key);
         addAtt(map[key], `${a.date}|${a.session}|${a.type}`, a.type);
     });
