@@ -483,7 +483,8 @@ async function buildLeaveOpenEmbed(env, owner, win, request, extraMsg) {
     desc += `\n請到請假連結登記。`;
   }
   desc += `\n\n🤖 也可直接用機器人指令查詢：\n\`/查詢 名字\`　\`/出勤榜\`　\`/請假名單\``;
-  if (extraMsg && String(extraMsg).trim()) desc += `\n\n📢 ${String(extraMsg).trim()}`;
+  // 管理員自訂訊息：加粗加大（Discord ## 標題）置頂，最醒目
+  if (extraMsg && String(extraMsg).trim()) desc = `## 📢 ${String(extraMsg).trim()}\n\n` + desc;
   return { title: "🗓️ 已開放請假", description: desc, color: 3447003 };
 }
 
