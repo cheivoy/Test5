@@ -2795,6 +2795,67 @@ async function wdUnsetSub(memberId) {
     } catch (e) { alert('取消失敗：' + e.message); }
 }
 
+// 批量後備：貼上一串名字，比對名冊後整批設為後備
+function openBulkReserve() {
+    const w = window._wdWindow;
+    if (!w) return;
+    const existing = document.getElementById('bulk-reserve-modal');
+    if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'bulk-reserve-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2400;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+        <div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:22px;border-radius:14px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:12px;">
+            <h3 style="margin:0;">📋 批量設為後備</h3>
+            <p style="font-size:12px;color:var(--muted);margin:0;">貼上名字（每行一個，或用逗號/空白分隔）。系統會比對名冊，整批設為這場（${w.event_date} ${w.session}）的後備。</p>
+            <textarea id="bulk-reserve-input" class="search-input" rows="8" placeholder="小明&#10;阿華&#10;老王" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+            <div id="bulk-reserve-msg" style="font-size:12px;color:var(--muted);"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-outline" onclick="document.getElementById('bulk-reserve-modal').remove()">取消</button>
+                <button class="btn btn-primary" id="bulk-reserve-go" onclick="runBulkReserve()">設為後備</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    setTimeout(() => document.getElementById('bulk-reserve-input')?.focus(), 50);
+}
+
+async function runBulkReserve() {
+    const w = window._wdWindow;
+    const raw = document.getElementById('bulk-reserve-input')?.value || '';
+    const names = [...new Set(raw.split(/[\n,、，\s]+/).map(s => s.trim()).filter(Boolean))];
+    const msg = document.getElementById('bulk-reserve-msg');
+    if (!names.length) { if (msg) msg.textContent = '請先貼上名字'; return; }
+    // 比對名冊
+    const nameToId = {};
+    rosterCache.forEach(m => { nameToId[m.display_name] = m.member_id; });
+    const matched = [], unmatched = [];
+    names.forEach(n => { const id = nameToId[n]; if (id) matched.push({ n, id }); else unmatched.push(n); });
+    if (!matched.length) { if (msg) msg.textContent = '名冊裡都找不到：' + unmatched.join('、'); return; }
+    const btn = document.getElementById('bulk-reserve-go');
+    if (btn) { btn.disabled = true; btn.textContent = '處理中…'; }
+    let ok = 0, fail = 0;
+    for (const { id } of matched) {
+        try {
+            const res = await fetch(WORKER_URL + "/api/leave/actions", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify({ window_id: w.window_id, member_id: id, action: 'reserve_set' })
+            });
+            if (res.ok) { ok++; window._wdReserve.add(id); } else fail++;
+        } catch (e) { fail++; }
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '設為後備'; }
+    renderWindowDetail();
+    loadLeaveWindows();
+    let summary = `✅ 已設為後備 ${ok} 人`;
+    if (fail) summary += `，失敗 ${fail} 人`;
+    if (unmatched.length) summary += `\n⚠️ 名冊找不到（未處理）：${unmatched.join('、')}`;
+    alert(summary);
+    if (!unmatched.length && !fail) document.getElementById('bulk-reserve-modal')?.remove();
+    else if (msg) msg.textContent = summary;
+}
+
 // ---- 名單管理 ----
 async function loadRoster() {
     try {
