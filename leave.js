@@ -195,6 +195,11 @@ function selectMember(memberId) {
     const form = document.getElementById('long-form');
     if (need) need.style.display = 'none';
     if (form) form.style.display = 'block';
+    // 防呆：不給選過去日期
+    const _d = new Date();
+    const _t = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, '0')}-${String(_d.getDate()).padStart(2, '0')}`;
+    const lf = document.getElementById('long-from'), lt = document.getElementById('long-to');
+    if (lf) lf.min = _t; if (lt) lt.min = _t;
 }
 
 async function submitLongLeave() {

@@ -2637,11 +2637,16 @@ function renderLeaveBoardList() {
 }
 
 // ---- 長期／預先請假（管理員） ----
-async function loadLongLeaves() {
+async function loadLongLeaves() { return withLoading(_loadLongLeavesImpl, '努力加載中…'); }
+async function _loadLongLeavesImpl() {
     // 成員 datalist（沿用名冊）
     if (!rosterCache.length) { try { await loadRoster(); } catch (e) { } }
     const dl = document.getElementById('ll-member-list');
     if (dl) dl.innerHTML = rosterCache.map(m => `<option value="${(m.display_name || '').replace(/"/g, '&quot;')}"></option>`).join('');
+    // 防呆：日期選擇器不給選過去
+    const _t = ymd(new Date());
+    const llf = document.getElementById('ll-from'), llt = document.getElementById('ll-to');
+    if (llf) llf.min = _t; if (llt) llt.min = _t;
     let rows = [];
     try {
         const res = await fetch(WORKER_URL + "/api/leave/long?t=" + Date.now(), {

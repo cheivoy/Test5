@@ -1414,6 +1414,14 @@ export default {
         const { member_id, from_date, to_date, reason } = await request.json();
         if (!member_id || !from_date || !to_date) return json({ error: "請填成員與起訖日期" }, 400);
         if (from_date > to_date) return json({ error: "起始日不能晚於結束日" }, 400);
+        {
+          const today = new Date().toISOString().slice(0, 10);
+          if (to_date < today) return json({ error: "不能設定已經過去的日期" }, 400);
+          const overlap = await env.DB.prepare(
+            "SELECT id FROM long_leaves WHERE owner = ? AND member_id = ? AND from_date <= ? AND to_date >= ?"
+          ).bind(user, member_id, to_date, from_date).first();
+          if (overlap) return json({ error: "這個成員在這段期間已有長期請假，請勿重複" }, 400);
+        }
         await env.DB.prepare(
           "INSERT INTO long_leaves (id, owner, member_id, from_date, to_date, reason, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(crypto.randomUUID(), user, member_id, from_date, to_date, reason || '', Date.now(), user).run();
@@ -1439,10 +1447,20 @@ export default {
         const { member_id, from_date, to_date, reason } = await request.json();
         if (!member_id || !from_date || !to_date) return json({ error: "請填名字與起訖日期" }, 400);
         if (from_date > to_date) return json({ error: "起始日不能晚於結束日" }, 400);
+        {
+          const today = new Date().toISOString().slice(0, 10);
+          if (to_date < today) return json({ error: "不能選已經過去的日期" }, 400);
+        }
         const mem = await env.DB.prepare(
           "SELECT display_name FROM members_roster WHERE member_id = ? AND owner = ? AND status = 'active'"
         ).bind(member_id, owner).first();
         if (!mem) return json({ error: "找不到這個名字，請確認或聯絡管理員" }, 404);
+        {
+          const overlap = await env.DB.prepare(
+            "SELECT id FROM long_leaves WHERE owner = ? AND member_id = ? AND from_date <= ? AND to_date >= ?"
+          ).bind(owner, member_id, to_date, from_date).first();
+          if (overlap) return json({ error: "你在這段期間已經送過長期請假了，不用重複" }, 400);
+        }
         // 粗略限流
         const since = Date.now() - 5000;
         const recent = await env.DB.prepare(
