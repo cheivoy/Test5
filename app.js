@@ -1575,11 +1575,16 @@ function exportMembersCSV() {
         (m.subBy || []).forEach(s => parts.push(`${seg(s)} 由 ${s.name} 代打`));
         return parts.join('；');
     };
-    const rows = dbMembersMap.map(m => [
-        m.id, m.last_job || '', m.category || '', (m.tag && m.tag !== 'none') ? m.tag : '',
-        m.matches, (m.attendance != null ? m.attendance : m.matches), m.leaveCount || 0, m.lateCount || 0, m.noshowCount || 0, m.reserveCount || 0,
-        m.rate.toFixed(1), subText(m)
-    ]);
+    // 跟著畫面的「戰報類型」勾選走
+    const selTypes = getDbSelectedTypes();
+    const rows = dbMembersMap.map(m => {
+        const v = dbMemberView(m, selTypes);
+        return [
+            m.id, m.last_job || '', m.category || '', (m.tag && m.tag !== 'none') ? m.tag : '',
+            v.matches, v.att, v.lv, v.late, v.ns, v.rs,
+            v.rate.toFixed(1), subText(m)
+        ];
+    });
     const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
     const csv = [header, ...rows].map(r => r.map(esc).join(',')).join('\r\n');
     // BOM 讓 Excel 正確辨識中文
@@ -1591,7 +1596,8 @@ function exportMembersCSV() {
     let scope;
     if (fromDate || toDate) scope = `${fromDate || '最早'}_至_${toDate || '至今'}`;
     else scope = '全部時間';
-    a.download = `成員出勤_${scope}.csv`;
+    const typeScope = selTypes.length < 3 ? '_' + selTypes.map(fmtType).join('') : '';
+    a.download = `成員出勤_${scope}${typeScope}.csv`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
