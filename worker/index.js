@@ -1201,6 +1201,7 @@ export default {
         } else {
           leaveDesc += `\n請到請假連結登記。`;
         }
+        leaveDesc += `\n\n🤖 也可直接用機器人指令查詢：\n\`/查詢 名字\`　\`/出勤榜\`　\`/請假名單\``;
         await notifyDiscord(env, user, 'leave_open', {
           embed: { title: "🗓️ 已開放請假", description: leaveDesc, color: 3447003 }
         });
