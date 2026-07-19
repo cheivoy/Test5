@@ -18,6 +18,7 @@ let gA = [], gB = [], full = [], nameA = "", nameB = "", focusPlayer = null;
 let chart = null, memberChart = null, currentJobFilter = "all";
 let allHistories = [], dbMembersMap = [], dbSort = { key: 'matches', asc: false };
 let totalReportsInTimeframe = 0, currentReportId = null;
+let dbSessionCountByType = { '幫戰': 0, '約戰': 0, '其他': 0 }; // 各類型場次數（出席率分母用）
 
 // ✅ 身分系統：name -> member_id -> 目前顯示名稱（改名不用重寫歷史戰報）
 let aliasToMemberId = {}, memberIdToDisplayName = {}, memberIdToJob = {};
@@ -1229,6 +1230,9 @@ async function _loadDbDataImpl() {
     filteredHistories.forEach(h => { try { const d = JSON.parse(h.raw_json); sessionSet.add(`${h.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`); } catch (e) { } });
     manualAttendance.forEach(a => sessionSet.add(`${a.date}|${a.session}|${a.type}`));
     totalReportsInTimeframe = sessionSet.size;
+    // 各類型的場次數（供「戰報類型」篩選時算出席率分母）
+    dbSessionCountByType = { '幫戰': 0, '約戰': 0, '其他': 0 };
+    sessionSet.forEach(k => { const t = k.split('|')[2] || '幫戰'; dbSessionCountByType[t] = (dbSessionCountByType[t] || 0) + 1; });
 
     let noteMap = {};
     const jobSet = new Set();
@@ -1431,11 +1435,31 @@ async function mergeLeaveAndOverrides(fromDate, toDate) {
     });
 }
 
+// 戰報類型篩選：勾選的類型（全不勾＝全部）
+function getDbSelectedTypes() {
+    const chks = [...document.querySelectorAll('.db-type-chk')];
+    const sel = chks.filter(c => c.checked).map(c => c.value);
+    return sel.length ? sel : ['幫戰', '約戰', '其他'];
+}
+// 依所選類型算出的檢視數字（出席/請假/後備/缺席/臨時/出席率）
+function dbMemberView(m, selTypes) {
+    const sum = (obj) => selTypes.reduce((s, t) => s + ((obj && obj[t]) || 0), 0);
+    const att = sum(m.attByTypeEff);
+    const denom = selTypes.reduce((s, t) => s + (dbSessionCountByType[t] || 0), 0);
+    return {
+        att, matches: att, lv: sum(m.leaveByType), rs: sum(m.reserveByType),
+        ns: sum(m.noshowByType), late: sum(m.lateByType),
+        rate: denom > 0 ? att / denom * 100 : 0
+    };
+}
+
 function renderDbTable() {
     const search = document.getElementById('db-search').value.toLowerCase();
     const jobF = document.getElementById('db-job').value;
     const tagF = document.getElementById('db-tag').value;
     const catF = document.getElementById('db-category')?.value || 'all';
+    const selTypes = getDbSelectedTypes();
+    dbMembersMap.forEach(m => { m._v = dbMemberView(m, selTypes); });
 
     // 身份類別下拉：預設 + 現有資料裡出現過的
     const catSel = document.getElementById('db-category');
@@ -1455,28 +1479,30 @@ function renderDbTable() {
         const matchJ = jobF === 'all' || m.last_job === jobF;
         const matchT = tagF === 'all' || m.tag === tagF;
         const matchC = catF === 'all' || (catF === 'none' ? !m.category : m.category === catF);
-        const matchLow = !onlyLow || (hasThreshold && m.rate < threshold);
+        const matchLow = !onlyLow || (hasThreshold && m._v.rate < threshold);
         return matchS && matchJ && matchT && matchC && matchLow;
     });
 
     data.sort((a, b) => {
         let va = a[dbSort.key], vb = b[dbSort.key];
+        if (dbSort.key === 'rate') { va = a._v.rate; vb = b._v.rate; }
+        else if (dbSort.key === 'matches') { va = a._v.matches; vb = b._v.matches; }
         if (typeof va === 'string') return dbSort.asc ? va.localeCompare(vb) : vb.localeCompare(va);
         return dbSort.asc ? va - vb : vb - va;
     });
 
     document.getElementById('db-table-body').innerHTML = data.map(m => {
-        const low = hasThreshold && m.rate < threshold;
+        const low = hasThreshold && m._v.rate < threshold;
         return `
         <tr onclick="openMemberDetail('${m.id}')" style="cursor:pointer; ${low ? 'background:#fff0f0;' : ''}">
             <td><b>${m.id}</b>${low ? ' <span style="color:var(--danger); font-size:11px;">⚠️低出席</span>' : ''}</td>
             <td><span class="job-tag" style="background:var(--color-${m.last_job})">${m.last_job}</span></td>
             <td>${m.category ? `<span class="cat-chip">${m.category}</span>` : '<span style="color:var(--muted);">—</span>'}</td>
             <td>${m.tag !== 'none' ? `<span class="hash-tag">${m.tag}</span>` : ''}</td>
-            <td>${m.matches} 場</td>
+            <td>${m._v.matches} 場</td>
             <td class="nowrap" style="font-size:11px; color:#666;" title="幫戰/約戰/領地戰 出席次數">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 🏰${m.counts['其他'] || 0}</td>
             <td class="nowrap">${renderStatBadge(m)}</td>
-            <td class="nowrap" style="${low ? 'color:var(--danger); font-weight:bold;' : ''}">${m.rate.toFixed(1)}%</td>
+            <td class="nowrap" style="${low ? 'color:var(--danger); font-weight:bold;' : ''}">${m._v.rate.toFixed(1)}%</td>
             <td>${m.note || ''}</td>
             <td class="admin-only">
                 <button class="btn btn-outline" style="padding:2px 8px;" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
@@ -1495,7 +1521,8 @@ function renderDbCards(data, hasThreshold, threshold) {
     if (!wrap) return;
     const admin = !isViewMode;
     wrap.innerHTML = data.map(m => {
-        const low = hasThreshold && m.rate < threshold;
+        const v = m._v || { rate: m.rate, matches: m.matches };
+        const low = hasThreshold && v.rate < threshold;
         const jobColor = `var(--color-${m.last_job})`;
         const badge = renderStatBadge(m);
         const actions = admin ? `
@@ -1511,11 +1538,11 @@ function renderDbCards(data, hasThreshold, threshold) {
                     <div class="nm">${m.id}${low ? ' <span style="color:var(--danger);font-size:11px;">⚠️</span>' : ''}</div>
                     <div class="sub"><span class="job-tag" style="background:${jobColor}">${m.last_job}</span>${m.category ? ` <span class="cat-chip">${m.category}</span>` : ''}${m.tag !== 'none' ? ` <span class="hash-tag">${m.tag}</span>` : ''}</div>
                 </div>
-                <div class="mcard-rate ${low ? 'low' : ''}"><b>${m.rate.toFixed(1)}%</b><span>出席率</span></div>
+                <div class="mcard-rate ${low ? 'low' : ''}"><b>${v.rate.toFixed(1)}%</b><span>出席率</span></div>
             </div>
-            <div class="mcard-bar ${low ? 'low' : ''}"><span style="width:${Math.min(100, m.rate)}%"></span></div>
+            <div class="mcard-bar ${low ? 'low' : ''}"><span style="width:${Math.min(100, v.rate)}%"></span></div>
             <div class="mcard-stat">
-                <div><b>${m.matches}</b><span>總場次</span></div>
+                <div><b>${v.matches}</b><span>總場次</span></div>
                 <div>${badge}<span>出席/請假/後備/缺席</span></div>
             </div>
             <div class="mcard-break">${TYPE_ORDER.map(t => {
@@ -1589,12 +1616,14 @@ function statBreakdownTooltip(m) {
 }
 
 function renderStatBadge(m) {
-    const att = m.attendance != null ? m.attendance : m.matches;
-    const lv = m.leaveCount || 0;
-    const rs = m.reserveCount || 0;
+    // 若有戰報類型篩選（m._v），數字依所選類型；否則用全部
+    const v = m._v || {};
+    const att = (v.att != null) ? v.att : (m.attendance != null ? m.attendance : m.matches);
+    const lv = (v.lv != null) ? v.lv : (m.leaveCount || 0);
+    const rs = (v.rs != null) ? v.rs : (m.reserveCount || 0);
     const star = m.hasOverride ? '*' : '';
-    const ns = m.noshowCount || 0;   // 缺席（No-show）：大家可看，算缺席
-    const late = m.lateCount || 0;
+    const ns = (v.ns != null) ? v.ns : (m.noshowCount || 0);   // 缺席（No-show）：大家可看，算缺席
+    const late = (v.late != null) ? v.late : (m.lateCount || 0);
     const adminView = !isViewMode && !shareId && storageMode === 'cloud' && currentUser;
     // 臨時請假：其中一部分，僅管理員可看
     const lateTag = (adminView && late > 0) ? ` <span class="late-tag" title="其中臨時請假 ${late} 次（含在請假內，僅管理員可見）">臨時${late}</span>` : '';

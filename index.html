@@ -3,7 +3,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=35">
+    <link rel="stylesheet" href="style.css?v=36">
 </head>
 
 <body>
@@ -214,6 +214,12 @@
                 <label style="font-size:12px; color:#97a0ad; display:flex; align-items:center; gap:4px;">
                     <input type="checkbox" id="db-only-low" onchange="renderDbTable()"> 只看未達標
                 </label>
+                <span style="font-size:12px; color:#97a0ad; display:flex; align-items:center; gap:8px; padding-left:6px; border-left:1px solid var(--border);">
+                    戰報類型：
+                    <label style="display:flex; align-items:center; gap:3px;"><input type="checkbox" class="db-type-chk" value="幫戰" checked onchange="renderDbTable()"> 幫戰</label>
+                    <label style="display:flex; align-items:center; gap:3px;"><input type="checkbox" class="db-type-chk" value="約戰" checked onchange="renderDbTable()"> 約戰</label>
+                    <label style="display:flex; align-items:center; gap:3px;"><input type="checkbox" class="db-type-chk" value="其他" checked onchange="renderDbTable()"> 領地戰</label>
+                </span>
             </div>
             <div class="table-card" id="db-table-wrap">
                 <table>
@@ -701,5 +707,5 @@
 
     <div id="loading-overlay"><div class="load-box"><div class="load-spin"></div><div class="load-text">努力加載中…</div></div></div>
 
-    <script src="app.js?v=35"></script>
+    <script src="app.js?v=36"></script>
 </body></html>
