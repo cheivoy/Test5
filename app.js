@@ -335,7 +335,8 @@ window.onload = async () => {
 // =====================================================
 // ===  fetchAllHistories
 // =====================================================
-async function fetchAllHistories() {
+async function fetchAllHistories() { return withLoading(_fetchAllHistoriesImpl, '努力加載中…'); }
+async function _fetchAllHistoriesImpl() {
     try {
         let apiUrl = WORKER_URL + "/api/histories?t=" + Date.now();
 
