@@ -114,14 +114,18 @@ function groupByJob(memberIds) {
     return groups;
 }
 
-function renderJobGroups(memberIds, withStats) {
+function renderJobGroups(memberIds) {
     const groups = groupByJob(memberIds);
     const jobs = Object.keys(groups).sort();
     if (jobs.length === 0) return '<div class="muted" style="padding:6px;">目前沒有人。</div>';
     return jobs.map(job => `
         <div class="job-group">
             <div class="job-head">${job}（${groups[job].length}）</div>
-            ${groups[job].map(m => `<span class="job-chip" title="${memberTypeTooltip(m)}">${m.display_name}${withStats ? ` <span class="stat-num">${m.attendance}/${m.leave}/${m.reserve}</span>` : ''}</span>`).join('')}
+            ${groups[job].map(m => `
+                <div class="lb-row">
+                    <span class="lb-name">${m.display_name}</span>
+                    <span class="lb-rec">出席 ${m.attendance}　請假 ${m.leave}　後備 ${m.reserve}</span>
+                </div>`).join('')}
         </div>`).join('');
 }
 

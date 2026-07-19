@@ -2792,15 +2792,14 @@ function updateTopbarContext(p) {
     const el = document.getElementById('topbar-context');
     if (!el) return;
     const admin = !isViewMode && storageMode === 'cloud' && currentUser;
+    const b = (icon, text, fn) => `<button class="btn btn-outline ctx-btn" onclick="${fn}"><span class="ci">${icon}</span><span class="ct">${text}</span></button>`;
     let html = '';
     if (p === 'report' && !isViewMode) {
-        html = `<button class="btn btn-outline" onclick="openImportModal()">📁 導入</button>`;
+        html = b('📁', '導入', 'openImportModal()');
     } else if (p === 'db' && admin) {
-        html = `<button class="btn btn-outline" onclick="openAddMemberModal()">➕ 新增</button>`
-             + `<button class="btn btn-outline" onclick="syncMemberData()">🔄 同步</button>`
-             + `<button class="btn btn-outline" onclick="exportMembersCSV()">📤 匯出</button>`;
+        html = b('➕', '新增', 'openAddMemberModal()') + b('🔄', '同步', 'syncMemberData()') + b('📤', '匯出', 'exportMembersCSV()');
     } else if (p === 'leave' && admin) {
-        html = `<button class="btn btn-outline" onclick="openWindowModal()">➕ 場次</button>`;
+        html = b('➕', '場次', 'openWindowModal()');
     }
     el.innerHTML = html;
 }

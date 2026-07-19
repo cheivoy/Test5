@@ -563,7 +563,14 @@ th { background: var(--surface-2) !important; }
 .mcard-break { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mcard-break span { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 3px 7px; }
 
-/* 頂欄情境按鈕（桌機顯示，手機隱藏以免擁擠） */
+/* 頂欄情境按鈕 */
 .topbar-context { display: flex; gap: 6px; align-items: center; }
 .topbar-context .btn { font-size: 12px; padding: 7px 11px; margin: 0; }
-@media (max-width: 768px) { .topbar-context { display: none; } }
+.ctx-btn .ci { margin-right: 4px; }
+@media (max-width: 768px) {
+    /* 手機也把功能收到頂欄，但只留圖示以免擁擠 */
+    .ctx-btn .ct { display: none; }
+    .ctx-btn .ci { margin-right: 0; }
+    .topbar-context .btn { padding: 8px 9px; }
+    .brand-title { max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
