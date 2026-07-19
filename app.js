@@ -1160,7 +1160,7 @@ async function loadDbData() {
                 tagStr = p.tag || "none";
                 if (p.last_job) storedJob = p.last_job;
             } catch (e) { noteStr = m.note || ""; }
-            noteMap[m.id] = { note: noteStr, tag: tagStr, lastJob: storedJob };
+            noteMap[m.id] = { note: noteStr, tag: tagStr, lastJob: storedJob, version: (typeof m.version === 'number' ? m.version : null) };
             if (m.last_job) jobSet.add(m.last_job);
         });
     } catch (e) { console.error("載入成員備註失敗", e); }
@@ -1232,6 +1232,7 @@ async function loadDbData() {
         if (!m.last_job) m.last_job = noteMap[m.id]?.lastJob || (m.member_id ? memberIdToJob[m.member_id] : '') || "未知";
         m.category = m.member_id ? (memberIdToCategory[m.member_id] || '') : '';
         m.rate = totalReportsInTimeframe > 0 ? (m.matches / totalReportsInTimeframe * 100) : 0;
+        m.noteVersion = noteMap[m.id]?.version ?? null; // 成員檔案版本（防覆寫）
         return m;
     });
 
@@ -1674,12 +1675,32 @@ async function saveMemberProfile() {
     const newCategory = (catEl && catEl.value !== '__new__') ? catEl.value : (focusPlayer.category || '');
 
     if (storageMode === 'cloud' && currentUser) {
-        const payload = { id: focusPlayer.id, note: JSON.stringify({ text: newNote, tag: newTag, last_job: newJob }) };
-        await fetch(WORKER_URL + "/api/update-note", {
+        const payload = {
+            id: focusPlayer.id,
+            note: JSON.stringify({ text: newNote, tag: newTag, last_job: newJob }),
+            expected_version: (typeof focusPlayer.noteVersion === 'number' ? focusPlayer.noteVersion : undefined)
+        };
+        const res = await fetch(WORKER_URL + "/api/update-note", {
             method: 'POST',
-            headers: { 'Authorization': 'Bearer ' + currentUser.token },
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
             body: JSON.stringify(payload)
         });
+        if (res.status === 409) {
+            const d = await res.json().catch(() => ({}));
+            alert('⚠️ ' + (d.error || '此成員檔案已被其他人更新') + '\n將重新載入最新資料，請再改一次。');
+            closeModal('member-modal');
+            await loadDbData();
+            return;
+        }
+        if (res.ok) {
+            const d = await res.json().catch(() => ({}));
+            // 更新前端持有的版本，讓同一頁可連續存檔不誤判衝突
+            if (typeof d.version === 'number') {
+                focusPlayer.noteVersion = d.version;
+                const t2 = dbMembersMap.find(x => x.id === focusPlayer.id);
+                if (t2) t2.noteVersion = d.version;
+            }
+        }
         // 身份類別存到 members_roster（穩定身分）
         if (focusPlayer.member_id) {
             await fetch(WORKER_URL + "/api/roster/category", {
@@ -2772,7 +2793,10 @@ async function loadDiscordSettings() {
         const siteEl = document.getElementById('discord-site-url');
         if (siteEl) siteEl.value = data.site_base_url || '';
         const guildEl = document.getElementById('discord-guild-id');
-        if (guildEl) guildEl.value = data.discord_guild_id || '';
+        if (guildEl) {
+            const ids = Array.isArray(data.guild_ids) && data.guild_ids.length ? data.guild_ids : (data.discord_guild_id ? [data.discord_guild_id] : []);
+            guildEl.value = ids.join('\n');
+        }
         window._legacyWebhook = data.discord_webhook_url || '';
     } catch (e) { }
     // 多頻道清單
@@ -2862,15 +2886,16 @@ async function saveDiscordChannels() {
 
 async function saveDiscordSettings() {
     const site_base_url = document.getElementById('discord-site-url')?.value.trim() || '';
-    const guild_id = document.getElementById('discord-guild-id')?.value.trim() || '';
+    const raw = document.getElementById('discord-guild-id')?.value || '';
+    const guild_ids = [...new Set(raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean))];
     try {
         const res = await fetch(WORKER_URL + "/api/settings/discord", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
-            body: JSON.stringify({ webhook_url: window._legacyWebhook || '', guild_id, site_base_url })
+            body: JSON.stringify({ webhook_url: window._legacyWebhook || '', guild_ids, site_base_url })
         });
         if (!res.ok) { const d = await res.json(); alert('儲存失敗：' + (d.error || res.status)); return; }
-        alert('✅ 站台與伺服器設定已儲存');
+        alert(`✅ 站台與伺服器設定已儲存（綁定 ${guild_ids.length} 個伺服器）`);
     } catch (e) { alert('儲存失敗：' + e.message); }
 }
 
@@ -2887,7 +2912,7 @@ async function registerDiscordCommands() {
             if (msg) msg.textContent = '❌ ' + (d.error || res.status) + (d.detail ? '（' + JSON.stringify(d.detail).slice(0, 160) + '）' : '');
             return;
         }
-        if (msg) msg.textContent = `✅ 已註冊 ${d.registered} 個指令（${d.scope === 'guild' ? '本伺服器即時生效' : '全域，最多等 1 小時'}）`;
+        if (msg) msg.textContent = `✅ 已註冊 ${d.registered} 個指令（${d.scope === 'guild' ? `${d.guilds} 個伺服器即時生效` : '全域，最多等 1 小時'}）`;
     } catch (e) { if (msg) msg.textContent = '❌ ' + e.message; }
 }
 

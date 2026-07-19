@@ -3,7 +3,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=12">
+    <link rel="stylesheet" href="style.css?v=13">
 </head>
 
 <body>
@@ -312,8 +312,9 @@
                         <div style="display:flex; flex-direction:column; gap:8px; max-width:520px;">
                             <label style="font-size:12px; font-weight:bold;">站台網址（選填）</label>
                             <input type="text" id="discord-site-url" class="search-input" placeholder="https://你的網域　（留空則自動用目前網址）">
-                            <label style="font-size:12px; font-weight:bold;">Discord 伺服器 ID（選填，機器人查詢需要）</label>
-                            <input type="text" id="discord-guild-id" class="search-input" placeholder="例如 123456789012345678">
+                            <label style="font-size:12px; font-weight:bold;">Discord 伺服器 ID（選填，機器人查詢需要，可多個）</label>
+                            <textarea id="discord-guild-id" class="search-input" rows="3" placeholder="一行一個伺服器 ID，例如：&#10;123456789012345678&#10;987654321098765432" style="resize:vertical; font-family:inherit;"></textarea>
+                            <small style="font-size:11px; color:var(--muted);">綁多個伺服器就每行填一個；註冊指令時會對每個伺服器各註冊一次。</small>
                             <div>
                                 <button class="btn btn-primary" onclick="saveDiscordSettings()">💾 儲存</button>
                             </div>
@@ -652,5 +653,5 @@
         </div>
     </div>
 
-    <script src="app.js?v=12"></script>
+    <script src="app.js?v=13"></script>
 </body></html>
