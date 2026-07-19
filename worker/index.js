@@ -1733,9 +1733,16 @@ export default {
         if (!window_id || !member_id || !['leave_request', 'leave_cancel'].includes(action)) {
           return json({ error: "參數錯誤" }, 400);
         }
-        const win = await env.DB.prepare(
-          "SELECT status FROM leave_windows WHERE window_id = ? AND owner = ?"
-        ).bind(window_id, owner).first();
+        let win;
+        try {
+          win = await env.DB.prepare(
+            "SELECT status, event_date, session, match_type FROM leave_windows WHERE window_id = ? AND owner = ?"
+          ).bind(window_id, owner).first();
+        } catch (e) {
+          win = await env.DB.prepare(
+            "SELECT status, event_date, session FROM leave_windows WHERE window_id = ? AND owner = ?"
+          ).bind(window_id, owner).first();
+        }
         if (!win) return json({ error: "找不到場次" }, 404);
         if (win.status !== 'open') return json({ error: "這個場次已關閉，無法再請假" }, 403);
         const mem = await env.DB.prepare(
@@ -1758,10 +1765,11 @@ export default {
         await writeAudit(env, owner, 'public', 'leave_action', window_id, action, { member_id, ip: ipHash });
 
         const verb = action === 'leave_request' ? "🙋 請假" : "↩️ 取消請假";
+        const winTypeLabel = win.match_type === '其他' ? '領地戰' : (win.match_type || '幫戰');
         await notifyDiscord(env, owner, 'leave_submit', {
           embed: {
             title: verb,
-            description: `**${mem.display_name}**`,
+            description: `**${mem.display_name}**\n📅 ${win.event_date}　${win.session}　[${winTypeLabel}]`,
             color: action === 'leave_request' ? 15158332 : 9807270
           }
         });
