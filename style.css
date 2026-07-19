@@ -1,15 +1,25 @@
 :root {
-    --bg: #f5f6f8;
+    --bg: #eef1f5;
     --sidebar: #ffffff;
     --card: #ffffff;
-    --text: #5a6473;
-    --accent: #8e9aaf;
-    --accent-soft: #d1d9e6;
-    --border: #edf0f2;
-    --danger: #e57373;
-    --gold: #fbc02d;
-    --win: #4caf50;
-    --loss: #e57373;
+    --surface: #ffffff;
+    --surface-2: #f4f6fa;
+    --text: #333b48;
+    --ink: #1f2733;
+    --muted: #78859a;
+    --accent: #6b78b5;
+    --accent-strong: #5766ab;
+    --accent-soft: #e9ecf7;
+    --on-accent: #ffffff;
+    --border: #e6eaf1;
+    --danger: #e5544b;
+    --gold: #e0a12a;
+    --win: #1f9d63;
+    --loss: #e5544b;
+    --reserve: #d9812a;
+    --shadow-sm: 0 1px 2px rgba(24,33,52,.05);
+    --shadow: 0 1px 2px rgba(24,33,52,.05), 0 6px 20px rgba(24,33,52,.06);
+    --radius: 16px;
     --color-碎夢: #5b9bd5;
     --color-神相: #4fc3f7;
     --color-血河: #e57373;
@@ -20,17 +30,16 @@
     --color-素問: #f06292;
     --color-潮光: #4dd0e1;
 }
-
 * { box-sizing: border-box; }
 
 body {
     margin: 0;
-    display: flex;
+    display: block;
     background: var(--bg);
     color: var(--text);
-    font-family: "PingFang TC", sans-serif;
-    height: 100vh;
-    overflow: hidden;
+    font-family: "PingFang TC", "Microsoft JhengHei", system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
 }
 
 .sidebar {
@@ -371,3 +380,69 @@ th:hover { background: #eee; }
     #report-hist-mount .history-list { max-height: 46vh; overflow-y: auto; border-top: none; }
     #report-hist-mount .hist-card { padding: 14px; border-radius: 14px; }
 }
+
+/* =====================================================
+   ===  現代化外殼（頂欄 + 分頁 + 卡片）取代側欄
+   ===================================================== */
+.sidebar { display: none !important; }
+#menu-toggle { display: none !important; }
+
+.topbar {
+    position: sticky; top: 0; z-index: 200;
+    display: flex; align-items: center; gap: 18px;
+    padding: 10px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border); box-shadow: var(--shadow-sm);
+}
+.brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.brand-mark { background: var(--accent); color: var(--on-accent); font-weight: 800; font-size: 13px; padding: 6px 9px; border-radius: 9px; letter-spacing: .02em; }
+.brand-title { font-weight: 700; font-size: 16px; color: var(--ink); }
+.topnav { display: flex; gap: 4px; flex: 1; }
+.tnav { border: none; background: none; cursor: pointer; color: var(--muted); font-weight: 600; font-size: 14px; padding: 9px 14px; border-radius: 10px; font-family: inherit; transition: background .15s, color .15s; }
+.tnav:hover { background: var(--surface-2); color: var(--ink); }
+.tnav.active { background: var(--accent-soft); color: var(--accent-strong); }
+.topbar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.iconbtn { width: 40px; height: 40px; border-radius: 12px; border: none; background: var(--surface-2); color: var(--ink); display: grid; place-items: center; cursor: pointer; transition: background .15s; }
+.iconbtn:hover { background: var(--accent-soft); color: var(--accent-strong); }
+.iconbtn svg { width: 20px; height: 20px; }
+
+.main-content { display: block; overflow: visible; max-width: 1060px; margin: 0 auto; width: 100%; height: auto; }
+.container { padding: 22px 20px 48px; max-width: 100%; }
+
+/* 元件現代化 */
+.table-card, .leave-block, .hist-card, .mvp-card { background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: var(--radius); }
+.btn { border-radius: 11px; font-weight: 600; }
+.btn-primary { background: var(--accent); color: var(--on-accent); box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 40%, transparent); }
+.btn-outline { background: var(--surface); border: 1px solid var(--border); color: var(--ink); }
+.search-input, .select-input { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; color: var(--ink); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent-strong); }
+th { background: var(--surface-2) !important; }
+
+/* FAB（手機主要動作） */
+.fab { position: fixed; right: 20px; bottom: 84px; width: 56px; height: 56px; border-radius: 18px; background: var(--accent); color: var(--on-accent); border: none; cursor: pointer; place-items: center; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 45%, transparent); z-index: 180; }
+.fab svg { width: 26px; height: 26px; }
+.fab:active { transform: scale(.92); }
+
+@media (min-width: 769px) {
+    #mobile-tabbar { display: none !important; }
+    .fab { display: none !important; }
+}
+@media (max-width: 768px) {
+    .topnav { display: none; }
+    .topbar { padding: 10px 14px; gap: 10px; }
+    .brand-mark { display: none; }
+    .brand-title { font-size: 17px; }
+    .main-content, .container { padding-left: 12px; padding-right: 12px; padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
+    #mobile-tabbar { display: flex; }
+}
+
+/* 戰報頁的歷史清單：限制高度可捲動，別把戰報詳情推太下面 */
+#report-hist-mount { margin-bottom: 18px; }
+#report-hist-mount .history-list { max-height: 420px; overflow-y: auto; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+#report-hist-mount .hist-card { border-radius: 12px; }
+@media (max-width: 768px) {
+    #report-hist-mount .history-list { max-height: 52vh; }
+}
+/* 我的頁帳號按鈕做成整齊直排大按鈕 */
+#me-account-mount { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+#me-account-mount .btn { width: 100%; min-height: 46px; justify-content: center; font-size: 14px; }
+#me-account-mount #mode-banner { margin-bottom: 4px; }

@@ -8,7 +8,23 @@
 
 <body>
 
-    <button id="menu-toggle" class="admin-only-false" onclick="toggleMobileMenu()" style="display:none; position:fixed; top:10px; right:10px; z-index:1001; background:var(--accent); color:white; border:none; padding:10px; border-radius:5px; font-size:20px; cursor:pointer;">☰</button>
+    <button id="menu-toggle" class="admin-only-false" onclick="toggleMobileMenu()" style="display:none;">☰</button>
+
+    <!-- 頂欄 -->
+    <header class="topbar">
+        <div class="brand"><span class="brand-mark">NSH</span><span id="topbar-title" class="brand-title">戰報解析</span></div>
+        <nav class="topnav" id="topnav">
+            <button class="tnav active" data-page="report" onclick="switchPage('report')">戰報解析</button>
+            <button class="tnav" data-page="db" onclick="switchPage('db')">成員檔案室</button>
+            <button class="tnav admin-only" data-page="leave" onclick="switchPage('leave')">請假管理</button>
+            <button class="tnav" data-page="me" onclick="switchPage('me')">我的</button>
+        </nav>
+        <div class="topbar-actions">
+            <button class="iconbtn" id="topbar-search-btn" onclick="focusPageSearch()" aria-label="搜尋">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            </button>
+        </div>
+    </header>
 
     <div class="sidebar">
         <h2 style="font-size: 18px;" id="sys-title">NSH 戰績管理 Pro</h2>
@@ -322,6 +338,10 @@
             <span>我的</span>
         </button>
     </nav>
+
+    <button class="fab admin-only" id="fab" onclick="fabAction()" style="display:none;" aria-label="新增">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
 
     <!-- 出席/請假/後備 人工覆蓋 Modal（依類型：幫戰/約戰/領地戰） -->
     <div id="override-modal" onclick="closeModal('override-modal')">

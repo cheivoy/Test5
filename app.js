@@ -297,6 +297,7 @@ window.onload = async () => {
     updateModeBanner();
     initSections();
     layoutForViewport();
+    switchPage('report'); // 初始化頂欄/分頁/FAB 狀態
 
     await fetchAllHistories();
     const reportId = urlParams.get('id');
@@ -2641,7 +2642,11 @@ async function loadAuditLog() {
 // =====================================================
 // ===  UI 工具函數
 // =====================================================
+let currentPageId = 'report';
+const PAGE_TITLES = { report: '戰報解析', db: '成員檔案室', leave: '請假管理', me: '我的' };
+
 function switchPage(p) {
+    currentPageId = p;
     ['report', 'db', 'leave', 'me'].forEach(x => {
         const el = document.getElementById('page-' + x);
         if (el) el.style.display = (x === p) ? 'block' : 'none';
@@ -2650,39 +2655,53 @@ function switchPage(p) {
     const nav = document.getElementById('nav-' + p);
     if (nav) nav.classList.add('active');
     document.querySelectorAll('.mtab').forEach(el => el.classList.toggle('active', el.dataset.page === p));
-    // 捲回頂端（手機切分頁時體驗較好）
-    const mc = document.querySelector('.main-content');
-    if (mc) mc.scrollTop = 0;
+    document.querySelectorAll('.tnav').forEach(el => el.classList.toggle('active', el.dataset.page === p));
+    const tt = document.getElementById('topbar-title');
+    if (tt) tt.textContent = PAGE_TITLES[p] || '';
+    updateFab(p);
     window.scrollTo(0, 0);
     if (p === 'db') loadDbData();
     if (p === 'leave') loadLeavePage();
 }
 
-// 手機/桌機版面切換：把「歷史列表」「帳號區」搬到合適位置
+// 側欄已移除：把「歷史列表」搬到戰報頁、「帳號區」搬到我的頁（只需做一次）
 function layoutForViewport() {
-    const mobile = window.innerWidth <= 768;
-    const sidebar = document.querySelector('.sidebar');
     const histBlock = document.getElementById('hist-block');
     const acct = document.getElementById('account-block');
     const banner = document.getElementById('mode-banner');
     const reportMount = document.getElementById('report-hist-mount');
     const meMount = document.getElementById('me-account-mount');
-    if (!sidebar) return;
-    if (mobile) {
-        if (histBlock && reportMount && histBlock.parentElement !== reportMount) reportMount.appendChild(histBlock);
-        if (banner && meMount && banner.parentElement !== meMount) meMount.appendChild(banner);
-        if (acct && meMount && acct.parentElement !== meMount) meMount.appendChild(acct);
-    } else {
-        const navReport = document.getElementById('nav-report');
-        if (banner && navReport && banner.parentElement !== sidebar) sidebar.insertBefore(banner, navReport);
-        if (acct && navReport && acct.parentElement !== sidebar) sidebar.insertBefore(acct, navReport);
-        if (histBlock && histBlock.parentElement !== sidebar) sidebar.appendChild(histBlock);
-    }
+    if (histBlock && reportMount && histBlock.parentElement !== reportMount) reportMount.appendChild(histBlock);
+    if (banner && meMount && banner.parentElement !== meMount) meMount.appendChild(banner);
+    if (acct && meMount && acct.parentElement !== meMount) meMount.appendChild(acct);
 }
+
+// FAB（手機）：戰報→導入CSV、請假→開場次
+function updateFab(p) {
+    const fab = document.getElementById('fab');
+    if (!fab) return;
+    const isMobile = window.innerWidth <= 768;
+    let action = null;
+    if (p === 'report') action = 'csv';
+    else if (p === 'leave') action = 'window';
+    window._fabAction = action;
+    fab.style.display = (isMobile && action) ? 'grid' : 'none';
+}
+function fabAction() {
+    if (window._fabAction === 'csv') { const i = document.getElementById('csv-input'); if (i) i.click(); }
+    else if (window._fabAction === 'window') { const d = document.getElementById('lw-date'); if (d) { d.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+}
+// 頂欄搜尋鈕：聚焦目前頁面的搜尋欄
+function focusPageSearch() {
+    const map = { report: 'hist-search', db: 'db-search', leave: 'roster-search' };
+    const el = document.getElementById(map[currentPageId]);
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.focus(), 200); }
+}
+
 let _resizeTimer = null;
 window.addEventListener('resize', () => {
     clearTimeout(_resizeTimer);
-    _resizeTimer = setTimeout(layoutForViewport, 150);
+    _resizeTimer = setTimeout(() => updateFab(currentPageId), 150);
 });
 
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
