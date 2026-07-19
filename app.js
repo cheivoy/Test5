@@ -58,6 +58,7 @@ function updateModeBanner() {
     const syncBtn = document.getElementById('sync-btn');
     const memberSyncBtn = document.getElementById('member-sync-btn');
     const rosterCheckBtn = document.getElementById('roster-check-btn');
+    const addMemberBtn = document.getElementById('add-member-btn');
     const sessionsBtn = document.getElementById('sessions-btn');
     const shareNote = document.getElementById('share-local-note');
 
@@ -68,6 +69,7 @@ function updateModeBanner() {
         if (syncBtn && !isViewMode) syncBtn.style.display = '';
         if (memberSyncBtn && !isViewMode) memberSyncBtn.style.display = '';
         if (rosterCheckBtn && !isViewMode) rosterCheckBtn.style.display = '';
+        if (addMemberBtn && !isViewMode) addMemberBtn.style.display = '';
         if (sessionsBtn && !isViewMode) sessionsBtn.style.display = '';
         if (shareNote) shareNote.style.display = 'none';
     } else {
@@ -77,6 +79,7 @@ function updateModeBanner() {
         if (syncBtn) syncBtn.style.display = 'none';
         if (memberSyncBtn) memberSyncBtn.style.display = 'none';
         if (rosterCheckBtn) rosterCheckBtn.style.display = 'none';
+        if (addMemberBtn) addMemberBtn.style.display = 'none';
         if (sessionsBtn) sessionsBtn.style.display = 'none';
         if (shareNote) shareNote.style.display = '';
     }
@@ -528,6 +531,8 @@ function saveHistoryToLocal(payload) {
     currentReportId = payload.id;
     const shareSec = document.getElementById('share-section');
     if (shareSec) shareSec.style.display = 'block';
+    closeModal('import-modal');
+    showReportDetail();
     fetchAllHistories();
 }
 
@@ -543,6 +548,8 @@ async function saveHistoryToCloud(payload) {
         currentReportId = payload.id;
         const shareSec = document.getElementById('share-section');
         if (shareSec) shareSec.style.display = 'block';
+        closeModal('import-modal');
+        showReportDetail();
         await fetchAllHistories();
     } catch (e) { alert("儲存失敗: " + e.message); }
 }
@@ -665,6 +672,10 @@ async function deleteHist(e, id) {
 // =====================================================
 function handleCSV(file) {
     if (!file) return;
+    const fn = document.getElementById('import-filename');
+    if (fn) fn.textContent = '📄 ' + file.name;
+    const hint = document.getElementById('import-hint');
+    if (hint) hint.style.display = 'none';
     const parts = file.name.replace('.csv', '').split('_');
     if (parts.length >= 4) {
         const d = parts[0];
@@ -794,6 +805,7 @@ function viewHistory(id) {
         renderFilterButtons();
         renderReport();
         showShareSection();
+        showReportDetail();
     }
 }
 
@@ -814,6 +826,26 @@ function renderReport() {
                 <td><span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span></td>
                 ${cols.slice(2).map(c => `<td>${p[c.k] >= 10000 ? (p[c.k] / 10000).toFixed(1) + 'w' : p[c.k]}</td>`).join('')}
             </tr>`).join('');
+        // 手機卡片版
+        const cardsEl = document.getElementById('cards-' + t);
+        if (cardsEl) {
+            const fmt = v => v >= 10000 ? (v / 10000).toFixed(1) + 'w' : (v || 0);
+            const keyCols = [
+                { l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '人傷', k: 'pDmg' },
+                { l: '塔傷', k: 'bDmg' }, { l: '治療', k: 'heal' }, { l: '承傷', k: 'takeDmg' }
+            ];
+            cardsEl.innerHTML = data.map(p => `
+                <div class="rcard" onclick="openModal('${p.name}')">
+                    <div class="rcard-head">
+                        <span class="rcard-dot" style="background:var(--color-${p.job})"></span>
+                        <span class="rcard-name">${p.name} ${p.pDmg > avg * 2.5 ? '🔥' : ''}</span>
+                        <span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span>
+                    </div>
+                    <div class="rcard-stats">
+                        ${keyCols.map(c => `<div><b>${fmt(p[c.k])}</b><span>${c.l}</span></div>`).join('')}
+                    </div>
+                </div>`).join('');
+        }
     });
 }
 
@@ -2724,8 +2756,70 @@ function updateFab(p) {
     fab.style.display = (isMobile && action) ? 'grid' : 'none';
 }
 function fabAction() {
-    if (window._fabAction === 'csv') { const i = document.getElementById('csv-input'); if (i) i.click(); }
-    else if (window._fabAction === 'window') { const d = document.getElementById('lw-date'); if (d) { d.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+    if (window._fabAction === 'csv') openImportModal();
+    else if (window._fabAction === 'window') openWindowModal();
+}
+
+// 戰報：歷史列表 ↔ 戰報詳情 切換
+function showReportBrowse() {
+    const b = document.getElementById('report-browse'), d = document.getElementById('report-detail');
+    if (b) b.style.display = 'block';
+    if (d) d.style.display = 'none';
+    window.scrollTo(0, 0);
+}
+function showReportDetail() {
+    const b = document.getElementById('report-browse'), d = document.getElementById('report-detail');
+    if (b) b.style.display = 'none';
+    if (d) d.style.display = 'block';
+    window.scrollTo(0, 0);
+}
+function openImportModal() {
+    const m = document.getElementById('import-modal'); if (!m) return;
+    const dt = document.getElementById('match-date'); if (dt && !dt.value) dt.valueAsDate = new Date();
+    const fn = document.getElementById('import-filename'); if (fn) fn.textContent = '';
+    m.style.display = 'flex';
+}
+function openWindowModal() {
+    if (storageMode !== 'cloud' || !currentUser) { alert('請先登入雲端帳號'); return; }
+    const m = document.getElementById('window-modal'); if (!m) return;
+    const d = document.getElementById('lw-date'); if (d && !d.value) d.valueAsDate = new Date();
+    m.style.display = 'flex';
+}
+function openAddMemberModal() {
+    if (storageMode !== 'cloud' || !currentUser) { alert('請先登入雲端帳號才能新增成員'); return; }
+    const m = document.getElementById('add-member-modal'); if (!m) return;
+    document.getElementById('add-member-name').value = '';
+    document.getElementById('add-member-msg').textContent = '';
+    const sel = document.getElementById('add-member-category');
+    const cats = [...new Set([...CATEGORY_PRESETS, ...dbMembersMap.map(x => x.category).filter(Boolean)])];
+    sel.innerHTML = '<option value="">未分類</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    m.style.display = 'flex';
+}
+async function submitAddMember() {
+    const name = document.getElementById('add-member-name').value.trim();
+    const category = document.getElementById('add-member-category').value;
+    const msg = document.getElementById('add-member-msg');
+    if (!name) { msg.textContent = '請輸入名字'; return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster/add", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ display_name: name })
+        });
+        const data = await res.json();
+        if (!res.ok) { msg.textContent = data.error || '新增失敗'; return; }
+        if (category && data.member_id) {
+            await fetch(WORKER_URL + "/api/roster/category", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify({ member_id: data.member_id, category })
+            });
+        }
+        closeModal('add-member-modal');
+        await loadDbData();
+        const leaveVisible = document.getElementById('page-leave')?.style.display !== 'none';
+        if (leaveVisible) loadRoster();
+    } catch (e) { msg.textContent = '連線失敗：' + e.message; }
 }
 // 可收合篩選：手機點「篩選」展開/收起額外下拉
 function toggleFilter(id, btn) {

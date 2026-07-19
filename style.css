@@ -129,7 +129,8 @@ th:hover { background: #eee; }
 
 #modal, #member-modal, #auth-modal, #sync-confirm-modal,
 #sync-report-modal, #receive-transfer-modal,
-#override-modal, #window-detail-modal, #sessions-modal {
+#override-modal, #window-detail-modal, #sessions-modal,
+#import-modal, #window-modal, #add-member-modal {
     display: none;
     position: fixed;
     top: 0; left: 0;
@@ -486,3 +487,26 @@ th { background: var(--surface-2) !important; }
 .mcard-stat span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 .mcard-actions { display: flex; gap: 8px; margin-top: 12px; }
 .mcard-actions .btn { flex: 1; min-height: 40px; font-size: 13px; }
+
+/* ===== 戰報詳情卡片（手機取代寬表格） ===== */
+.report-cards { display: none; }
+@media (max-width: 768px) {
+    .report-table { display: none; }
+    .report-cards { display: flex; flex-direction: column; gap: 10px; }
+}
+.rcard { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow-sm); cursor: pointer; }
+.rcard-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.rcard-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.rcard-name { font-weight: 700; font-size: 15px; color: var(--ink); flex: 1; }
+.rcard-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.rcard-stats > div { text-align: center; background: var(--surface-2); border-radius: 9px; padding: 7px 2px; }
+.rcard-stats b { font-size: 14px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rcard-stats span { display: block; font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+
+/* ===== 覆蓋視窗（依類型）手機不再左右拉 ===== */
+@media (max-width: 768px) {
+    #override-modal table { width: 100%; table-layout: fixed; }
+    #override-modal th, #override-modal td { padding: 5px 3px !important; text-align: center; }
+    #override-modal th:first-child, #override-modal td:first-child { text-align: left; width: 64px; }
+    .ov-cell { width: 100% !important; min-width: 0 !important; padding: 8px 4px !important; }
+}

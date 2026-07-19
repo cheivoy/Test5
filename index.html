@@ -93,29 +93,15 @@
 
     <div class="main-content">
         <div class="container" id="page-report">
-            <div id="report-hist-mount"></div>
-            <div style="background:#fff; padding:15px; border-radius:12px; margin-bottom:20px; display:flex; gap:12px; align-items:center; border: 1px solid var(--border); flex-wrap: wrap;">
-                <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
-                <button class="btn btn-primary admin-only" onclick="document.getElementById('csv-input').click()">📁 導入 CSV</button>
-                <input type="text" id="custom-title" placeholder="戰報標題" style="padding:7px; border:1px solid #ddd; border-radius:5px; width:220px;">
-                <input type="date" id="match-date" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                <select id="match-session" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                    <option value="第一場">第一場</option>
-                    <option value="第二場">第二場</option>
-                </select>
-                <select id="match-result" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                    <option value="win">🏆 勝利</option>
-                    <option value="loss">💀 失敗</option>
-                </select>
-                <select id="match-type" class="admin-only" style="padding:6px; border:1px solid #ddd; border-radius:5px;">
-                    <option value="幫戰">⚔️ 幫戰</option>
-                    <option value="約戰">🤝 約戰</option>
-                    <option value="其他">🏰 領地戰</option>
-                </select>
-                <button class="btn btn-primary admin-only" onclick="saveHistory()" id="save-btn" style="display:none; background: #4caf50;">💾 點此保存</button>
+            <div id="report-browse">
+                <div id="report-hist-mount"></div>
+                <button class="btn btn-primary admin-only" onclick="openImportModal()" style="margin-top:6px;">📁 導入戰報</button>
             </div>
 
-            <div id="share-section" class="share-links">
+            <div id="report-detail" style="display:none;">
+                <button class="btn btn-outline" onclick="showReportBrowse()" style="margin-bottom:14px;">← 返回歷史記錄</button>
+
+                <div id="share-section" class="share-links">
                 <p style="margin:0 0 10px 0; font-weight:bold; font-size:13px;">🔗 戰報分享鏈結：</p>
                 <button class="btn btn-outline" onclick="copyShareLink('view')">📋 複製幫眾版 (唯讀)</button>
                 <button class="btn btn-outline admin-only" onclick="copyShareLink('admin')">📋 複製管理版 (可編輯)</button>
@@ -143,9 +129,10 @@
                     <span class="section-toggle-icon" id="icon-sec-table-a">▼</span>
                 </div>
                 <div class="section-body" id="sec-table-a">
-                    <div class="table-card" style="overflow-x: auto;">
+                    <div class="table-card report-table" style="overflow-x: auto;">
                         <table><thead><tr id="th-a"></tr></thead><tbody id="tbody-a"></tbody></table>
                     </div>
+                    <div id="cards-a" class="report-cards"></div>
                 </div>
 
                 <div class="section-header" onclick="toggleSection('sec-mvp-b')">
@@ -161,10 +148,12 @@
                     <span class="section-toggle-icon" id="icon-sec-table-b">▼</span>
                 </div>
                 <div class="section-body" id="sec-table-b">
-                    <div class="table-card" style="overflow-x: auto;">
+                    <div class="table-card report-table" style="overflow-x: auto;">
                         <table><thead><tr id="th-b"></tr></thead><tbody id="tbody-b"></tbody></table>
                     </div>
+                    <div id="cards-b" class="report-cards"></div>
                 </div>
+            </div>
             </div>
         </div>
 
@@ -176,6 +165,8 @@
                     style="background:#e3f2fd; border:1px solid #90caf9; color:#1565c0; font-size:12px; padding:6px 14px; border-radius:8px; display:none;">
                     🔄 同步成員資料
                 </button>
+                <button class="btn btn-primary admin-only" id="add-member-btn" onclick="openAddMemberModal()"
+                    style="font-size:12px; padding:6px 14px; display:none;">➕ 新增成員</button>
                 <button class="btn admin-only" id="roster-check-btn" onclick="checkUnresolvedRoster()"
                     style="background:#fff8e1; border:1px solid #ffd54f; color:#f57c00; font-size:12px; padding:6px 14px; border-radius:8px; display:none;">
                     🆕 檢查待確認名字
@@ -249,21 +240,8 @@
 
             <div class="leave-block">
                 <div class="leave-block-title">📅 請假場次</div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
-                    <input type="date" id="lw-date" class="select-input">
-                    <select id="lw-session" class="select-input">
-                        <option value="第一場">第一場</option>
-                        <option value="第二場">第二場</option>
-                    </select>
-                    <select id="lw-type" class="select-input">
-                        <option value="幫戰">⚔️ 幫戰</option>
-                        <option value="約戰">🤝 約戰</option>
-                        <option value="其他">🏰 領地戰</option>
-                    </select>
-                    <input type="text" id="lw-title" class="search-input" style="max-width:220px;" placeholder="場次備註（選填）">
-                    <button class="btn btn-primary" onclick="createLeaveWindow()">➕ 開放請假</button>
-                </div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding-top:10px; border-top:1px dashed #eee;">
+                <button class="btn btn-primary" onclick="openWindowModal()" style="margin-bottom:12px;">➕ 開放場次</button>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding-top:10px; border-top:1px dashed var(--border);">
                     <span style="font-size:12px; color:#97a0ad;">篩選：</span>
                     <select id="lw-filter-status" class="select-input" onchange="renderLeaveWindows()">
                         <option value="all">全部狀態</option>
@@ -347,6 +325,74 @@
     <button class="fab admin-only" id="fab" onclick="fabAction()" style="display:none;" aria-label="新增">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     </button>
+
+    <!-- 導入戰報 Modal -->
+    <div id="import-modal" onclick="closeModal('import-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:440px;">
+            <h3 style="margin-top:0;">📁 導入戰報</h3>
+            <input type="file" id="csv-input" hidden="" onchange="handleCSV(this.files[0])">
+            <button class="btn btn-primary" onclick="document.getElementById('csv-input').click()" style="width:100%; margin-bottom:14px;">📄 選擇 CSV 檔案</button>
+            <div id="import-filename" style="font-size:12px; color:#97a0ad; margin-bottom:12px;"></div>
+            <label style="font-size:13px; font-weight:bold;">戰報標題</label>
+            <input type="text" id="custom-title" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="例如：風花雪月 VS 天涯客">
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                <input type="date" id="match-date" class="select-input" style="flex:1; min-width:130px;">
+                <select id="match-session" class="select-input" style="flex:1;">
+                    <option value="第一場">第一場</option>
+                    <option value="第二場">第二場</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <select id="match-result" class="select-input" style="flex:1;">
+                    <option value="win">🏆 勝利</option>
+                    <option value="loss">💀 失敗</option>
+                </select>
+                <select id="match-type" class="select-input" style="flex:1;">
+                    <option value="幫戰">⚔️ 幫戰</option>
+                    <option value="約戰">🤝 約戰</option>
+                    <option value="其他">🏰 領地戰</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="saveHistory()" id="save-btn" style="display:none; width:100%; margin-top:14px; background:#4caf50;">💾 保存戰報</button>
+            <div id="import-hint" style="font-size:12px; color:#97a0ad; margin-top:10px;">選好 CSV 檔案後，會出現「保存戰報」按鈕。</div>
+        </div>
+    </div>
+
+    <!-- 開放請假場次 Modal -->
+    <div id="window-modal" onclick="closeModal('window-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:420px;">
+            <h3 style="margin-top:0;">🗓️ 開放請假場次</h3>
+            <label style="font-size:13px; font-weight:bold;">日期</label>
+            <input type="date" id="lw-date" class="search-input" style="width:100%; margin-bottom:10px;">
+            <div style="display:flex; gap:8px; margin-bottom:10px;">
+                <select id="lw-session" class="select-input" style="flex:1;">
+                    <option value="第一場">第一場</option>
+                    <option value="第二場">第二場</option>
+                </select>
+                <select id="lw-type" class="select-input" style="flex:1;">
+                    <option value="幫戰">⚔️ 幫戰</option>
+                    <option value="約戰">🤝 約戰</option>
+                    <option value="其他">🏰 領地戰</option>
+                </select>
+            </div>
+            <label style="font-size:13px; font-weight:bold;">場次備註（選填）</label>
+            <input type="text" id="lw-title" class="search-input" style="width:100%; margin-bottom:14px;" placeholder="選填">
+            <button class="btn btn-primary" style="width:100%;" onclick="createLeaveWindow()">➕ 開放請假</button>
+        </div>
+    </div>
+
+    <!-- 新增成員 Modal -->
+    <div id="add-member-modal" onclick="closeModal('add-member-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:380px;">
+            <h3 style="margin-top:0;">➕ 新增成員</h3>
+            <label style="font-size:13px; font-weight:bold;">名字</label>
+            <input type="text" id="add-member-name" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="成員名字">
+            <label style="font-size:13px; font-weight:bold;">身份類別（選填）</label>
+            <select id="add-member-category" class="select-input" style="width:100%; margin-bottom:14px;"></select>
+            <button class="btn btn-primary" style="width:100%;" onclick="submitAddMember()">建立</button>
+            <div id="add-member-msg" style="margin-top:10px; font-size:13px; color:var(--danger);"></div>
+        </div>
+    </div>
 
     <!-- 出席/請假/後備 人工覆蓋 Modal（依類型：幫戰/約戰/領地戰） -->
     <div id="override-modal" onclick="closeModal('override-modal')">
