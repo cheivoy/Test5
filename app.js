@@ -1272,6 +1272,42 @@ function renderDbTable() {
             </td>
         </tr>`;
     }).join('');
+
+    renderDbCards(data, hasThreshold, threshold);
+}
+
+// 手機版：成員以卡片呈現（不用左右滑表格）
+function renderDbCards(data, hasThreshold, threshold) {
+    const wrap = document.getElementById('db-cards');
+    if (!wrap) return;
+    const admin = !isViewMode;
+    wrap.innerHTML = data.map(m => {
+        const low = hasThreshold && m.rate < threshold;
+        const jobColor = `var(--color-${m.last_job})`;
+        const badge = renderStatBadge(m);
+        const actions = admin ? `
+            <div class="mcard-actions">
+                <button class="btn btn-outline" onclick="event.stopPropagation(); renameP('${m.id}')">更名</button>
+                <button class="btn btn-outline" onclick="event.stopPropagation(); mergeP('${m.id}')">合併</button>
+                ${m.member_id ? `<button class="btn btn-outline" style="color:var(--danger);" onclick="event.stopPropagation(); deleteRosterMember('${m.member_id}', '${(m.id || '').replace(/'/g, "\\'")}')">移除</button>` : ''}
+            </div>` : '';
+        return `<div class="mcard ${low ? 'low' : ''}" onclick="openMemberDetail('${m.id}')">
+            <div class="mcard-top">
+                <span class="mcard-dot" style="background:${jobColor}"></span>
+                <div class="mcard-name">
+                    <div class="nm">${m.id}${low ? ' <span style="color:var(--danger);font-size:11px;">⚠️</span>' : ''}</div>
+                    <div class="sub"><span class="job-tag" style="background:${jobColor}">${m.last_job}</span>${m.category ? ` <span class="hash-tag" style="background:#e3ecf7;">${m.category}</span>` : ''}${m.tag !== 'none' ? ` <span class="hash-tag">${m.tag}</span>` : ''}</div>
+                </div>
+                <div class="mcard-rate ${low ? 'low' : ''}"><b>${m.rate.toFixed(1)}%</b><span>出席率</span></div>
+            </div>
+            <div class="mcard-bar ${low ? 'low' : ''}"><span style="width:${Math.min(100, m.rate)}%"></span></div>
+            <div class="mcard-stat">
+                <div><b>${m.matches}</b><span>總場次</span></div>
+                <div>${badge}<span>出席/請假/後備</span></div>
+            </div>
+            ${actions}
+        </div>`;
+    }).join('') || '<div style="color:#aaa; text-align:center; padding:24px;">沒有符合的成員</div>';
 }
 
 // 出席率門檻：記在 localStorage
@@ -2691,6 +2727,14 @@ function fabAction() {
     if (window._fabAction === 'csv') { const i = document.getElementById('csv-input'); if (i) i.click(); }
     else if (window._fabAction === 'window') { const d = document.getElementById('lw-date'); if (d) { d.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
 }
+// 可收合篩選：手機點「篩選」展開/收起額外下拉
+function toggleFilter(id, btn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('open');
+    if (btn) btn.textContent = el.classList.contains('open') ? '⚙ 收起' : '⚙ 篩選';
+}
+
 // 頂欄搜尋鈕：聚焦目前頁面的搜尋欄
 function focusPageSearch() {
     const map = { report: 'hist-search', db: 'db-search', leave: 'roster-search' };

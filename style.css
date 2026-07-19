@@ -446,3 +446,43 @@ th { background: var(--surface-2) !important; }
 #me-account-mount { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
 #me-account-mount .btn { width: 100%; min-height: 46px; justify-content: center; font-size: 14px; }
 #me-account-mount #mode-banner { margin-bottom: 4px; }
+
+/* ===== 可收合篩選（手機只留搜尋，點「篩選」才展開） ===== */
+.filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+.filter-bar .search-input { flex: 1; }
+.filter-toggle { display: none; flex-shrink: 0; white-space: nowrap; }
+.filter-extra { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 15px; }
+@media (max-width: 768px) {
+    .filter-toggle { display: inline-flex; }
+    .filter-extra { display: none; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+    .filter-extra.open { display: flex; }
+    .filter-extra .controls-row { width: 100%; }
+}
+
+/* ===== 成員卡片（手機取代表格） ===== */
+#db-cards { display: none; }
+@media (max-width: 768px) {
+    #db-table-wrap { display: none; }
+    #db-cards { display: flex; flex-direction: column; gap: 12px; }
+}
+.mcard { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px; box-shadow: var(--shadow); cursor: pointer; }
+.mcard.low { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 5%, var(--surface)); }
+.mcard-top { display: flex; align-items: center; gap: 10px; }
+.mcard-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.mcard-name { flex: 1; min-width: 0; }
+.mcard-name .nm { font-weight: 700; font-size: 16px; color: var(--ink); }
+.mcard-name .sub { margin-top: 3px; display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.mcard-rate { text-align: right; flex-shrink: 0; }
+.mcard-rate b { font-size: 18px; color: var(--ink); }
+.mcard-rate span { display: block; font-size: 11px; color: var(--muted); }
+.mcard-rate.low b { color: var(--danger); }
+.mcard-bar { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; margin: 10px 0; }
+.mcard-bar > span { display: block; height: 100%; border-radius: 6px; background: var(--accent); }
+.mcard-bar.low > span { background: var(--danger); }
+.mcard-stat { display: flex; gap: 12px; }
+.mcard-stat > div { flex: 1; text-align: center; background: var(--surface-2); border-radius: 10px; padding: 8px 4px; }
+.mcard-stat b { font-size: 17px; font-weight: 800; color: var(--ink); }
+.mcard-stat .stat-badge { font-size: 15px; }
+.mcard-stat span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.mcard-actions { display: flex; gap: 8px; margin-top: 12px; }
+.mcard-actions .btn { flex: 1; min-height: 40px; font-size: 13px; }

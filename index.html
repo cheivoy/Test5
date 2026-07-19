@@ -46,11 +46,13 @@
         <div class="nav-item admin-only" id="nav-leave" onclick="switchPage('leave')">🗓️ 請假管理</div>
 
         <div id="hist-block">
-        <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+        <div style="margin-top: 15px; padding-top: 5px;">
             <!-- 歷史記錄搜索區域 -->
-            <div class="controls-row">
+            <div class="filter-bar">
                 <input type="text" id="hist-search" class="search-input" placeholder="搜索幫會..." onkeyup="renderHistoryList()">
+                <button class="btn btn-outline filter-toggle" onclick="toggleFilter('hist-filter-extra', this)">⚙ 篩選</button>
             </div>
+            <div class="filter-extra" id="hist-filter-extra">
             <div class="controls-row">
                 <!-- 時間篩選：改為快捷+自訂日期範圍 -->
                 <select id="hist-time" class="select-input" style="flex:1;" onchange="onHistTimeChange()">
@@ -84,6 +86,7 @@
         </div>
         <div class="history-list">
             <div id="hist-items"></div>
+        </div>
         </div>
         </div>
     </div>
@@ -179,8 +182,11 @@
                 </button>
                 <span id="db-last-sync" style="font-size:11px; color:#aaa;"></span>
             </div>
-            <div style="margin-bottom: 15px; display:flex; gap:10px; flex-wrap: wrap;">
+            <div class="filter-bar">
                 <input type="text" id="db-search" class="search-input" placeholder="搜索成員 ID..." onkeyup="renderDbTable()">
+                <button class="btn btn-outline filter-toggle" onclick="toggleFilter('db-filter-extra', this)">⚙ 篩選</button>
+            </div>
+            <div class="filter-extra" id="db-filter-extra">
                 <select id="db-time" class="select-input" onchange="loadDbData()">
                     <option value="all">全部時間</option>
                     <option value="7">最近一周</option>
@@ -201,8 +207,6 @@
                 <select id="db-category" class="select-input" onchange="renderDbTable()">
                     <option value="all">全部身份</option>
                 </select>
-            </div>
-            <div style="margin-bottom:15px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
                 <span style="font-size:12px; color:#97a0ad;">⚠️ 出席率低於</span>
                 <input type="number" id="db-threshold" class="select-input" style="width:70px;" min="0" max="100" placeholder="%" onchange="onThresholdChange()" oninput="renderDbTable()">
                 <span style="font-size:12px; color:#97a0ad;">% 標紅</span>
@@ -211,7 +215,7 @@
                 </label>
                 <button class="btn btn-outline admin-only" onclick="exportMembersCSV()" style="font-size:12px;">📤 匯出 CSV</button>
             </div>
-            <div class="table-card">
+            <div class="table-card" id="db-table-wrap">
                 <table>
                     <thead>
                         <tr>
@@ -230,6 +234,7 @@
                     <tbody id="db-table-body"></tbody>
                 </table>
             </div>
+            <div id="db-cards"></div>
         </div>
 
         <div class="container" id="page-leave" style="display:none;">
