@@ -49,7 +49,8 @@
         <input type="text" id="name-search" class="search-input" placeholder="🔍 輸入你的名字搜尋…" oninput="renderNames()">
         <div id="name-list" style="margin-top:12px;"></div>
         <div style="margin-top:10px; border-top:1px dashed #e5e8ec; padding-top:10px;">
-            <div style="font-size:12px; color:#97a0ad;">找不到自己的名字？（改名了或還沒建檔）</div>
+            <div style="font-size:12px; color:#97a0ad;">遊戲裡改名了？先搜尋並點你<b>原本的名字</b>，再按「✏️ 改名」改成新名字（不要建檔，會變兩個人）。找不到舊名字才用建檔。</div>
+            <button class="name-btn" style="margin-top:6px; border-color:#8e9aaf;" onclick="renameSelf()">✏️ 改名</button>
             <button class="name-btn" style="margin-top:6px;" onclick="toggleJoinForm()">➕ 自助建檔</button>
             <div id="join-form" style="display:none; margin-top:10px;">
                 <input type="text" id="join-name" class="search-input" style="margin-bottom:8px;" placeholder="你的遊戲名字">
@@ -101,5 +102,5 @@
 
     <div class="toast" id="toast"></div>
 
-    <script src="leave.js?v=3"></script>
+    <script src="leave.js?v=4"></script>
 </body></html>

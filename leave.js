@@ -213,7 +213,11 @@ async function submitLongLeave() {
 }
 
 async function renameSelf() {
-    if (!selectedMemberId) return;
+    if (!selectedMemberId) {
+        toast('請先在上面搜尋並點選你「目前/原本的名字」，再改名');
+        document.getElementById('name-search')?.focus();
+        return;
+    }
     const cur = memberById[selectedMemberId];
     const nn = prompt('輸入你的新名字（改名後未來戰報也請用新名字）：', cur?.display_name || '');
     if (nn == null) return;
