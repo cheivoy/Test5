@@ -23,6 +23,9 @@
             <button class="iconbtn" id="topbar-search-btn" onclick="focusPageSearch()" aria-label="搜尋">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             </button>
+            <button class="iconbtn" id="theme-btn" onclick="toggleTheme()" aria-label="切換深/淺色">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+            </button>
         </div>
     </header>
 
@@ -50,9 +53,17 @@
             <!-- 歷史記錄搜索區域 -->
             <div class="filter-bar">
                 <input type="text" id="hist-search" class="search-input" placeholder="搜索幫會..." onkeyup="renderHistoryList()">
+                <button class="btn btn-primary admin-only" onclick="openImportModal()" style="flex-shrink:0;">📁 導入</button>
                 <button class="btn btn-outline filter-toggle" onclick="toggleFilter('hist-filter-extra', this)">⚙ 篩選</button>
             </div>
             <div class="filter-extra" id="hist-filter-extra">
+            <div class="controls-row">
+                <select id="hist-sort" class="select-input" style="flex:1;" onchange="renderHistoryList()">
+                    <option value="date_desc">日期：新 → 舊</option>
+                    <option value="date_asc">日期：舊 → 新</option>
+                    <option value="guild">幫會名稱</option>
+                </select>
+            </div>
             <div class="controls-row">
                 <!-- 時間篩選：改為快捷+自訂日期範圍 -->
                 <select id="hist-time" class="select-input" style="flex:1;" onchange="onHistTimeChange()">
@@ -95,7 +106,6 @@
         <div class="container" id="page-report">
             <div id="report-browse">
                 <div id="report-hist-mount"></div>
-                <button class="btn btn-primary admin-only" onclick="openImportModal()" style="margin-top:6px;">📁 導入戰報</button>
             </div>
 
             <div id="report-detail" style="display:none;">
@@ -114,7 +124,22 @@
             </div>
 
             <div id="report-view" style="display:none;">
-                <div id="job-filters" style="margin-bottom:20px;"></div>
+                <div id="job-filters" style="margin-bottom:12px;"></div>
+                <div style="margin-bottom:16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <span style="font-size:12px; color:var(--muted);">排序：</span>
+                    <select id="report-sort" class="select-input" onchange="applyReportSort()">
+                        <option value="pDmg">人傷</option>
+                        <option value="bDmg">塔傷</option>
+                        <option value="kill">擊敗</option>
+                        <option value="assist">助攻</option>
+                        <option value="heal">治療</option>
+                        <option value="takeDmg">承傷</option>
+                        <option value="resource">資源</option>
+                        <option value="death">重傷</option>
+                        <option value="spring">化羽/清泉</option>
+                        <option value="bone">焚骨</option>
+                    </select>
+                </div>
 
                 <div class="section-header" onclick="toggleSection('sec-mvp-a')">
                     <span><b id="display-title">我方</b> MVP 榜</span>
@@ -229,65 +254,83 @@
         </div>
 
         <div class="container" id="page-leave" style="display:none;">
-            <h3 style="margin-top:0;">🗓️ 請假管理</h3>
-
-            <div class="leave-block">
-                <div class="leave-block-title">🔗 公開請假連結</div>
-                <p style="font-size:12px; color:#97a0ad; margin:4px 0 10px;">把這個連結給幫眾，他們無需登入即可搜尋自己名字、打勾請假。只有「開放中」的場次會顯示。</p>
-                <button class="btn btn-primary" onclick="copyLeaveLink()">📋 複製請假連結</button>
-                <span id="leave-link-preview" style="font-size:11px; color:#aaa; margin-left:8px; word-break:break-all;"></span>
-            </div>
-
-            <div class="leave-block">
-                <div class="leave-block-title">📅 請假場次</div>
-                <button class="btn btn-primary" onclick="openWindowModal()" style="margin-bottom:12px;">➕ 開放場次</button>
-                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding-top:10px; border-top:1px dashed var(--border);">
-                    <span style="font-size:12px; color:#97a0ad;">篩選：</span>
-                    <select id="lw-filter-status" class="select-input" onchange="renderLeaveWindows()">
-                        <option value="all">全部狀態</option>
-                        <option value="open">開放中</option>
-                        <option value="closed">已關閉</option>
-                    </select>
-                    <input type="date" id="lw-filter-from" class="select-input" onchange="renderLeaveWindows()" title="起始日期">
-                    <span style="color:#aaa; font-size:12px;">至</span>
-                    <input type="date" id="lw-filter-to" class="select-input" onchange="renderLeaveWindows()" title="結束日期">
-                    <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="clearLeaveWindowFilter()">清除</button>
-                    <span id="lw-filter-hint" style="font-size:11px; color:#aaa;"></span>
-                </div>
-                <div id="leave-windows-list"></div>
-            </div>
-
-            <div class="leave-block">
-                <div class="leave-block-title">📋 各場次請假名單（依職業）</div>
-                <div id="leave-board-list"></div>
-            </div>
-
-            <div class="leave-block">
-                <div class="leave-block-title">👥 人員名單</div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; margin-bottom:12px;">
-                    <textarea id="roster-import-text" placeholder="一行一個名字，可一次貼多個" style="flex:1; min-width:200px; height:70px; border:1px solid #ddd; border-radius:8px; padding:8px;"></textarea>
-                    <button class="btn btn-primary" onclick="importRoster()">📥 批次匯入</button>
-                </div>
-                <div style="display:flex; gap:8px; margin-bottom:12px;">
-                    <input type="text" id="roster-search" class="search-input" placeholder="搜尋名單…" oninput="renderRosterList()">
-                </div>
-                <div id="roster-list" class="table-card" style="max-height:340px; overflow-y:auto;"></div>
-            </div>
-
-            <div class="leave-block">
-                <div class="leave-block-title">🤖 Discord 通知設定</div>
-                <p style="font-size:12px; color:#97a0ad; margin:4px 0 10px;">貼上 Discord 頻道的 Incoming Webhook 網址，有人請假／開放場次時會自動在頻道發訊息。留空即關閉。</p>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <input type="text" id="discord-webhook" class="search-input" style="flex:1; min-width:240px;" placeholder="https://discord.com/api/webhooks/...">
-                    <button class="btn btn-primary" onclick="saveDiscordSettings()">💾 儲存</button>
+            <div id="leave-menu">
+                <h3 style="margin-top:0;">🗓️ 請假管理</h3>
+                <div class="menu-list">
+                    <button class="menu-row" onclick="leaveGoto('windows')"><span class="mr-ico">📅</span><span class="mr-txt"><b>請假場次</b><small>開放／關閉場次、查看請假人數</small></span><span class="mr-arr">›</span></button>
+                    <button class="menu-row" onclick="leaveGoto('board')"><span class="mr-ico">📋</span><span class="mr-txt"><b>各場次請假名單</b><small>依職業分類查看已請假／後備</small></span><span class="mr-arr">›</span></button>
+                    <button class="menu-row" onclick="leaveGoto('roster')"><span class="mr-ico">👥</span><span class="mr-txt"><b>人員名單</b><small>匯入、更名、移除成員</small></span><span class="mr-arr">›</span></button>
+                    <button class="menu-row" onclick="copyLeaveLink()"><span class="mr-ico">🔗</span><span class="mr-txt"><b>複製請假連結</b><small>給幫眾免登入請假</small></span><span class="mr-arr">›</span></button>
+                    <button class="menu-row" onclick="leaveGoto('discord')"><span class="mr-ico">🤖</span><span class="mr-txt"><b>Discord 通知設定</b><small>連結頻道 Webhook</small></span><span class="mr-arr">›</span></button>
+                    <button class="menu-row" onclick="leaveGoto('audit')"><span class="mr-ico">🧾</span><span class="mr-txt"><b>操作紀錄</b><small>所有請假／管理行為</small></span><span class="mr-arr">›</span></button>
                 </div>
             </div>
 
-            <div class="leave-block">
-                <div class="leave-block-title">🧾 操作紀錄</div>
-                <button class="btn btn-outline" onclick="loadAuditLog()" style="margin-bottom:10px;">🔄 重新整理</button>
-                <div id="audit-log-list" class="table-card" style="max-height:360px; overflow-y:auto;"></div>
+            <div id="leave-sub" style="display:none;">
+                <button class="btn btn-outline" onclick="leaveBack()" style="margin-bottom:14px;">← 返回請假管理</button>
+
+                <div class="leave-sub-view" id="lsub-windows" style="display:none;">
+                    <div class="leave-block">
+                        <div class="leave-block-title">📅 請假場次</div>
+                        <button class="btn btn-primary" onclick="openWindowModal()" style="margin-bottom:12px;">➕ 開放場次</button>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; padding-top:10px; border-top:1px dashed var(--border);">
+                            <span style="font-size:12px; color:var(--muted);">篩選：</span>
+                            <select id="lw-filter-status" class="select-input" onchange="renderLeaveWindows()">
+                                <option value="all">全部狀態</option>
+                                <option value="open">開放中</option>
+                                <option value="closed">已關閉</option>
+                            </select>
+                            <input type="date" id="lw-filter-from" class="select-input" onchange="renderLeaveWindows()" title="起始日期">
+                            <span style="color:var(--muted); font-size:12px;">至</span>
+                            <input type="date" id="lw-filter-to" class="select-input" onchange="renderLeaveWindows()" title="結束日期">
+                            <button class="btn btn-outline" style="font-size:12px; padding:4px 10px;" onclick="clearLeaveWindowFilter()">清除</button>
+                            <span id="lw-filter-hint" style="font-size:11px; color:var(--muted);"></span>
+                        </div>
+                        <div id="leave-windows-list"></div>
+                    </div>
+                </div>
+
+                <div class="leave-sub-view" id="lsub-board" style="display:none;">
+                    <div class="leave-block">
+                        <div class="leave-block-title">📋 各場次請假名單（依職業）</div>
+                        <div id="leave-board-list"></div>
+                    </div>
+                </div>
+
+                <div class="leave-sub-view" id="lsub-roster" style="display:none;">
+                    <div class="leave-block">
+                        <div class="leave-block-title">👥 人員名單</div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; margin-bottom:12px;">
+                            <textarea id="roster-import-text" placeholder="一行一個名字，可一次貼多個" style="flex:1; min-width:200px; height:70px; border:1px solid var(--border); border-radius:8px; padding:8px; background:var(--surface-2); color:var(--ink);"></textarea>
+                            <button class="btn btn-primary" onclick="importRoster()">📥 批次匯入</button>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-bottom:12px;">
+                            <input type="text" id="roster-search" class="search-input" placeholder="搜尋名單…" oninput="renderRosterList()">
+                        </div>
+                        <div id="roster-list" class="table-card" style="max-height:360px; overflow-y:auto;"></div>
+                    </div>
+                </div>
+
+                <div class="leave-sub-view" id="lsub-discord" style="display:none;">
+                    <div class="leave-block">
+                        <div class="leave-block-title">🤖 Discord 通知設定</div>
+                        <p style="font-size:12px; color:var(--muted); margin:4px 0 10px;">貼上 Discord 頻道的 Incoming Webhook 網址，有人請假／開放場次時會自動在頻道發訊息。留空即關閉。</p>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <input type="text" id="discord-webhook" class="search-input" style="flex:1; min-width:240px;" placeholder="https://discord.com/api/webhooks/...">
+                            <button class="btn btn-primary" onclick="saveDiscordSettings()">💾 儲存</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="leave-sub-view" id="lsub-audit" style="display:none;">
+                    <div class="leave-block">
+                        <div class="leave-block-title">🧾 操作紀錄</div>
+                        <button class="btn btn-outline" onclick="loadAuditLog()" style="margin-bottom:10px;">🔄 重新整理</button>
+                        <div id="audit-log-list" class="table-card" style="max-height:400px; overflow-y:auto;"></div>
+                    </div>
+                </div>
             </div>
+            <span id="leave-link-preview" style="display:none;"></span>
         </div>
 
         <div class="container" id="page-me" style="display:none;">
@@ -295,7 +338,7 @@
             <div id="me-account-mount"></div>
             <div class="leave-block" style="margin-top:14px;">
                 <div class="leave-block-title">說明</div>
-                <div style="font-size:12px; color:#97a0ad; line-height:1.7;">
+                <div style="font-size:12px; color:var(--muted); line-height:1.7;">
                     系統會延遲，有問題先刷新，再重登。<br>實在不行找 🍒 櫻桃白蘭地 · DC：cherrycywong
                 </div>
             </div>

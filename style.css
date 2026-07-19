@@ -30,6 +30,12 @@
     --color-素問: #f06292;
     --color-潮光: #4dd0e1;
 }
+:root[data-theme="dark"] {
+    --bg: #0c1017; --sidebar: #151c26; --card: #151c26; --surface: #151c26; --surface-2: #1b2430;
+    --text: #c9d2de; --ink: #eef2f7; --muted: #8a97a9; --accent: #8592d8; --accent-strong: #9aa5e6;
+    --accent-soft: #222b3d; --on-accent: #0b0f16; --border: #263140;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.4); --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
 * { box-sizing: border-box; }
 
 body {
@@ -66,12 +72,12 @@ body {
 }
 .nav-item.active { background: var(--accent-soft); font-weight: bold; }
 
-.history-list { flex: 1; overflow-y: auto; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; }
+.history-list { flex: 1; overflow-y: auto; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
 
 .hist-card {
     font-size: 12px;
     padding: 12px;
-    background: #fff;
+    background: var(--surface);
     border-radius: 6px;
     margin-bottom: 8px;
     border: 1px solid var(--border);
@@ -95,35 +101,35 @@ body {
 }
 
 .mvp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; margin-bottom: 25px; }
-.mvp-card { background: white; padding: 16px; border-radius: 12px; border-left: 6px solid var(--gold); box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
-.mvp-label { font-size: 14px; color: #888; margin-bottom: 6px; font-weight: 500; }
-.mvp-name { font-weight: bold; font-size: 18px; color: #222; margin-bottom: 4px; }
+.mvp-card { background: var(--surface); padding: 16px; border-radius: 12px; border-left: 6px solid var(--gold); box-shadow: var(--shadow-sm); }
+.mvp-label { font-size: 14px; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+.mvp-name { font-weight: bold; font-size: 18px; color: var(--ink); margin-bottom: 4px; }
 .mvp-val { font-size: 15px; color: var(--accent); font-weight: bold; }
 
-.table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); margin-bottom: 30px; overflow: hidden; }
+.table-card { background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-sm); margin-bottom: 30px; overflow: hidden; }
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 12px; border-bottom: 1px solid #f8f9fa; }
-th { background: #fafbfc; cursor: pointer; user-select: none; position: relative; }
-th:hover { background: #eee; }
+th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); color: var(--text); }
+th { background: var(--surface-2); cursor: pointer; user-select: none; position: relative; color: var(--ink); }
+th:hover { background: var(--accent-soft); }
 
 .job-tag { padding: 2px 6px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; }
-.hash-tag { padding: 2px 6px; border-radius: 4px; background: #e0e0e0; color: #333; font-size: 11px; }
+.hash-tag { padding: 2px 6px; border-radius: 4px; background: var(--surface-2); color: var(--ink); font-size: 11px; border: 1px solid var(--border); }
 .result-tag { padding: 2px 6px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; }
 .win { background: var(--win); }
 .loss { background: var(--loss); }
 
 .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; margin-right: 5px; }
 .btn-primary { background: var(--accent); color: white; }
-.btn-outline { background: white; border: 1px solid #ddd; }
+.btn-outline { background: var(--surface); border: 1px solid var(--border); color: var(--ink); }
 
-.filter-btn { padding: 5px 12px; border-radius: 15px; border: 1px solid #ddd; background: white; margin-right: 5px; margin-bottom: 5px; cursor: pointer; font-size: 12px; }
+.filter-btn { padding: 5px 12px; border-radius: 15px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); margin-right: 5px; margin-bottom: 5px; cursor: pointer; font-size: 12px; }
 .filter-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
 
 .controls-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 
-.search-input { padding: 6px; border: 1px solid #ddd; border-radius: 5px; flex: 1; min-width: 100px; }
-.select-input { padding: 6px; border: 1px solid #ddd; border-radius: 5px; }
+.search-input { padding: 6px; border: 1px solid var(--border); border-radius: 5px; flex: 1; min-width: 100px; background: var(--surface-2); color: var(--ink); }
+.select-input { padding: 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--ink); }
 
 #radarChart, #memberRadarChart { width: 100% !important; height: auto !important; max-height: 300px; }
 
@@ -143,7 +149,7 @@ th:hover { background: #eee; }
 
 .modal-body {
     position: relative;
-    background: white;
+    background: var(--surface);
     padding: 30px;
     border-radius: 20px;
     width: 850px;
@@ -153,8 +159,8 @@ th:hover { background: #eee; }
     overflow-y: auto;
 }
 
-.share-links { margin: 15px 0; padding: 15px; background: #eef2f7; border-radius: 10px; display: none; }
-.scroll-list { max-height: 200px; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; padding: 10px; font-size: 12px; }
+.share-links { margin: 15px 0; padding: 15px; background: var(--surface-2); border-radius: 10px; display: none; }
+.scroll-list { max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 12px; }
 
 /* ===== 模式切換 banner ===== */
 #mode-banner { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 10px; font-weight: bold; }
@@ -162,22 +168,22 @@ th:hover { background: #eee; }
 #mode-banner.cloud { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
 
 /* ===== 折疊板塊 ===== */
-.section-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 8px 12px; background: #f8f9fa; border-radius: 8px; margin-bottom: 8px; user-select: none; border: 1px solid var(--border); }
-.section-header:hover { background: #eee; }
+.section-header { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 8px 12px; background: var(--surface-2); border-radius: 8px; margin-bottom: 8px; user-select: none; border: 1px solid var(--border); color: var(--ink); }
+.section-header:hover { background: var(--accent-soft); }
 .section-toggle-icon { font-size: 14px; transition: transform 0.2s; }
 .section-toggle-icon.collapsed { transform: rotate(-90deg); }
 .section-body { overflow: hidden; transition: max-height 0.3s ease; }
 .section-body.collapsed { max-height: 0 !important; }
 
 /* ===== Auth Modal ===== */
-.auth-modal-body { background: white; padding: 30px; border-radius: 20px; width: 380px; max-height: 90vh; overflow-y: auto; }
+.auth-modal-body { background: var(--surface); padding: 30px; border-radius: 20px; width: 380px; max-height: 90vh; overflow-y: auto; color: var(--text); }
 
 /* ===== 模式指示 (hist card) ===== */
 .local-badge { font-size: 10px; background: #fff3e0; color: #e65100; border-radius: 3px; padding: 1px 4px; border: 1px solid #ffcc80; }
 .cloud-badge { font-size: 10px; background: #e8f5e9; color: #2e7d32; border-radius: 3px; padding: 1px 4px; border: 1px solid #a5d6a7; }
 
 /* ===== 彈窗關閉按鈕 ===== */
-.close-modal-btn { position: absolute; top: 15px; right: 20px; font-size: 24px; font-weight: bold; color: #888; cursor: pointer; line-height: 1; z-index: 2010; transition: color 0.2s; }
+.close-modal-btn { position: absolute; top: 15px; right: 20px; font-size: 24px; font-weight: bold; color: var(--muted); cursor: pointer; line-height: 1; z-index: 2010; transition: color 0.2s; }
 .close-modal-btn:hover { color: var(--danger); }
 
 /* ===== 同步 Loading Spinner ===== */
@@ -355,14 +361,14 @@ th:hover { background: #eee; }
     #mobile-tabbar {
         display: flex;
         position: fixed; left: 0; right: 0; bottom: 0; z-index: 1500;
-        background: rgba(255,255,255,0.94);
+        background: color-mix(in srgb, var(--surface) 92%, transparent);
         backdrop-filter: saturate(180%) blur(12px);
         -webkit-backdrop-filter: saturate(180%) blur(12px);
         border-top: 1px solid var(--border);
         padding: 7px 4px calc(7px + env(safe-area-inset-bottom));
     }
     .mtab {
-        flex: 1; border: none; background: none; cursor: pointer; color: #9aa4b2;
+        flex: 1; border: none; background: none; cursor: pointer; color: var(--muted);
         display: flex; flex-direction: column; align-items: center; gap: 3px;
         padding: 4px 0; font-size: 11px; font-weight: 600;
     }
@@ -438,10 +444,10 @@ th { background: var(--surface-2) !important; }
 
 /* 戰報頁的歷史清單：限制高度可捲動，別把戰報詳情推太下面 */
 #report-hist-mount { margin-bottom: 18px; }
-#report-hist-mount .history-list { max-height: 420px; overflow-y: auto; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+#report-hist-mount .history-list { max-height: none; overflow: visible; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
 #report-hist-mount .hist-card { border-radius: 12px; }
 @media (max-width: 768px) {
-    #report-hist-mount .history-list { max-height: 52vh; }
+    #report-hist-mount .history-list { max-height: none; }
 }
 /* 我的頁帳號按鈕做成整齊直排大按鈕 */
 #me-account-mount { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
@@ -510,3 +516,26 @@ th { background: var(--surface-2) !important; }
     #override-modal th:first-child, #override-modal td:first-child { text-align: left; width: 64px; }
     .ov-cell { width: 100% !important; min-width: 0 !important; padding: 8px 4px !important; }
 }
+
+/* ===== 功能選單列（乾淨的功能按鈕，點擊跳轉） ===== */
+.menu-list { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+.menu-row {
+    display: flex; align-items: center; gap: 14px; width: 100%;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 16px; cursor: pointer; text-align: left; box-shadow: var(--shadow-sm);
+    font-family: inherit; color: var(--ink); transition: border-color .15s, transform .1s;
+}
+.menu-row:hover { border-color: var(--accent); }
+.menu-row:active { transform: scale(.99); }
+.mr-ico { font-size: 22px; width: 30px; text-align: center; flex-shrink: 0; }
+.mr-txt { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mr-txt b { font-size: 15px; }
+.mr-txt small { font-size: 12px; color: var(--muted); }
+.mr-arr { font-size: 22px; color: var(--muted); flex-shrink: 0; }
+
+/* 我的頁帳號按鈕也採用一致的圓角/風格 */
+#me-account-mount .btn { border-radius: 12px; }
+
+/* 戰報詳情卡片：全部欄位用小格自動排列 */
+.rcard-stats { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 400px) { .rcard-stats { grid-template-columns: repeat(3, 1fr); } }

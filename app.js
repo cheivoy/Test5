@@ -297,6 +297,7 @@ window.onload = async () => {
     const thEl = document.getElementById('db-threshold');
     if (thEl) { const saved = localStorage.getItem('nsh_attendance_threshold'); if (saved) thEl.value = saved; }
 
+    initTheme();
     updateModeBanner();
     initSections();
     layoutForViewport();
@@ -763,6 +764,13 @@ function renderHistoryList() {
         return matchSearch && matchTime && matchWL && matchType;
     });
 
+    const sortVal = document.getElementById('hist-sort')?.value || 'date_desc';
+    filtered.sort((a, b) => {
+        if (sortVal === 'date_asc') return (a.date || '').localeCompare(b.date || '');
+        if (sortVal === 'guild') return (a.guild_a || '').localeCompare(b.guild_a || '');
+        return (b.date || '').localeCompare(a.date || ''); // date_desc 預設
+    });
+
     document.getElementById('hist-items').innerHTML = filtered.map(h => {
         let resTag = '', typeLabel = '', sessionLabel = '', sourceBadge = '';
         try {
@@ -830,10 +838,7 @@ function renderReport() {
         const cardsEl = document.getElementById('cards-' + t);
         if (cardsEl) {
             const fmt = v => v >= 10000 ? (v / 10000).toFixed(1) + 'w' : (v || 0);
-            const keyCols = [
-                { l: '擊敗', k: 'kill' }, { l: '助攻', k: 'assist' }, { l: '人傷', k: 'pDmg' },
-                { l: '塔傷', k: 'bDmg' }, { l: '治療', k: 'heal' }, { l: '承傷', k: 'takeDmg' }
-            ];
+            const statCols = cols.slice(2); // 全部數據欄位（擊敗…焚骨）
             cardsEl.innerHTML = data.map(p => `
                 <div class="rcard" onclick="openModal('${p.name}')">
                     <div class="rcard-head">
@@ -842,7 +847,7 @@ function renderReport() {
                         <span class="job-tag" style="background:var(--color-${p.job})">${p.job}</span>
                     </div>
                     <div class="rcard-stats">
-                        ${keyCols.map(c => `<div><b>${fmt(p[c.k])}</b><span>${c.l}</span></div>`).join('')}
+                        ${statCols.map(c => `<div><b>${fmt(p[c.k])}</b><span>${c.l}</span></div>`).join('')}
                     </div>
                 </div>`).join('');
         }
@@ -862,6 +867,13 @@ function renderFilterButtons() {
 }
 function setJobFilter(j) { currentJobFilter = j; renderFilterButtons(); renderReport(); }
 function sortBy(team, key) { (team === 'a' ? gA : gB).sort((a, b) => b[key] - a[key]); renderReport(); }
+// 戰報詳情排序：兩隊都依所選數據由高到低（表格與卡片同步）
+function applyReportSort() {
+    const key = document.getElementById('report-sort')?.value || 'pDmg';
+    gA.sort((a, b) => (b[key] || 0) - (a[key] || 0));
+    gB.sort((a, b) => (b[key] || 0) - (a[key] || 0));
+    renderReport();
+}
 
 // =====================================================
 // ===  Modal：單場詳細
@@ -2224,12 +2236,30 @@ async function loadLeavePage() {
         switchPage('report');
         return;
     }
-    // 預設日期為今天
-    const dateEl = document.getElementById('lw-date');
-    if (dateEl && !dateEl.value) dateEl.valueAsDate = new Date();
-    updateLeaveLinkPreview();
-    await Promise.all([loadLeaveWindows(), loadLeaveBoard(), loadRoster(), loadDiscordSettings()]);
-    loadAuditLog();
+    leaveBack(); // 進入請假管理先顯示選單
+}
+
+// 請假管理：選單 ↔ 單一功能子頁
+function leaveGoto(name) {
+    document.getElementById('leave-menu').style.display = 'none';
+    document.getElementById('leave-sub').style.display = 'block';
+    ['windows', 'board', 'roster', 'discord', 'audit'].forEach(n => {
+        const el = document.getElementById('lsub-' + n);
+        if (el) el.style.display = (n === name) ? 'block' : 'none';
+    });
+    if (name === 'windows') loadLeaveWindows();
+    else if (name === 'board') loadLeaveBoard();
+    else if (name === 'roster') loadRoster();
+    else if (name === 'discord') loadDiscordSettings();
+    else if (name === 'audit') loadAuditLog();
+    window.scrollTo(0, 0);
+}
+function leaveBack() {
+    const menu = document.getElementById('leave-menu');
+    const sub = document.getElementById('leave-sub');
+    if (menu) menu.style.display = 'block';
+    if (sub) sub.style.display = 'none';
+    window.scrollTo(0, 0);
 }
 
 // ---- 各場次請假名單（依職業） ----
@@ -2821,6 +2851,19 @@ async function submitAddMember() {
         if (leaveVisible) loadRoster();
     } catch (e) { msg.textContent = '連線失敗：' + e.message; }
 }
+// 深色 / 淺色 切換（記憶於 localStorage）
+function toggleTheme() {
+    const root = document.documentElement;
+    const dark = root.getAttribute('data-theme') === 'dark';
+    const next = dark ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    localStorage.setItem('nsh_theme', next);
+}
+function initTheme() {
+    const saved = localStorage.getItem('nsh_theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+}
+
 // 可收合篩選：手機點「篩選」展開/收起額外下拉
 function toggleFilter(id, btn) {
     const el = document.getElementById(id);
