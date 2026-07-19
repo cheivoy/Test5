@@ -421,7 +421,8 @@ async function notifyDiscord(env, owner, eventKey, message) {
         if (roleId) { mention = `<@&${roleId}>`; allowed = { roles: [roleId] }; }
       }
       const hasMention = !!mention;
-      const content = [mention, message.content || ''].filter(Boolean).join(' ').trim();
+      // 用換行接，讓 message.content 裡的 ## 標題能在行首生效（大字粗體）
+      const content = [mention, message.content || ''].filter(Boolean).join('\n').trim();
       const body = {};
       if (content) body.content = content;
       if (message.embed) body.embeds = [message.embed];
@@ -483,8 +484,6 @@ async function buildLeaveOpenEmbed(env, owner, win, request, extraMsg) {
     desc += `\n請到請假連結登記。`;
   }
   desc += `\n\n🤖 也可直接用機器人指令查詢：\n\`/查詢 名字\`　\`/出勤榜\`　\`/請假名單\``;
-  // 管理員自訂訊息：加粗加大（Discord ## 標題）置頂，最醒目
-  if (extraMsg && String(extraMsg).trim()) desc = `## 📢 ${String(extraMsg).trim()}\n\n` + desc;
   return { title: "🗓️ 已開放請假", description: desc, color: 3447003 };
 }
 
@@ -1257,8 +1256,10 @@ export default {
           ).bind(window_id, user).first();
         }
         if (!win) return json({ error: "找不到場次" }, 404);
-        const embed = await buildLeaveOpenEmbed(env, user, win, request, message);
-        await notifyDiscord(env, user, 'leave_open', { embed });
+        const embed = await buildLeaveOpenEmbed(env, user, win, request);
+        // 自訂訊息用「訊息本文」的 ## 大標（embed 內文吃不到標題語法）
+        const content = (message && String(message).trim()) ? `## 📢 ${String(message).trim()}` : '';
+        await notifyDiscord(env, user, 'leave_open', { embed, content });
         await writeAudit(env, user, user, 'leave_window', window_id, 'notify', { hasMessage: !!(message && String(message).trim()) });
         return json({ status: "OK" });
       }
