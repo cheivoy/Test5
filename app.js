@@ -426,7 +426,11 @@ async function openRosterResolveModal(names, onDone) {
         roster = await res.json();
     } catch (e) { }
 
-    const rosterOptions = roster.map(m => `<option value="${m.member_id}">${m.display_name}</option>`).join('');
+    // 名字→member_id 對照（供搜尋輸入框解析），與共用 datalist
+    const nameToId = {};
+    roster.forEach(m => { nameToId[m.display_name] = m.member_id; });
+    window._rrNameToId = nameToId;
+    const datalistOptions = roster.map(m => `<option value="${m.display_name}"></option>`).join('');
 
     const modal = document.createElement('div');
     modal.id = 'roster-resolve-modal';
@@ -435,6 +439,7 @@ async function openRosterResolveModal(names, onDone) {
         <div style="background:white;padding:28px;border-radius:16px;width:560px;max-width:95vw;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px;">
             <h3 style="margin:0;">🆕 發現 ${names.length} 個陌生名字</h3>
             <p style="font-size:13px;color:#666;margin:0;">請確認每個名字是既有成員改名，還是全新成員。確認後出席次數才會正確歸戶，歷史戰報資料不會被改寫。</p>
+            <datalist id="rr-roster-datalist">${datalistOptions}</datalist>
             <div style="display:flex;gap:8px;">
                 <button type="button" class="btn btn-outline" style="font-size:12px;" onclick="document.querySelectorAll('.roster-resolve-row .rr-new').forEach(r=>{r.checked=true; r.dispatchEvent(new Event('change'));})">全部視為新成員</button>
             </div>
@@ -445,7 +450,7 @@ async function openRosterResolveModal(names, onDone) {
                         <label style="margin-right:12px;font-size:13px;"><input type="radio" name="rr-choice-${i}" class="rr-new" checked onchange="updateRosterResolveRow(${i})"> 全新成員</label>
                         <label style="font-size:13px;"><input type="radio" name="rr-choice-${i}" class="rr-existing" onchange="updateRosterResolveRow(${i})"> 既有成員改名</label>
                         <div class="rr-existing-box" id="rr-existing-box-${i}" style="display:none;margin-top:8px;">
-                            <select class="select-input rr-member-select" style="width:100%;margin-bottom:6px;"><option value="">選擇成員…</option>${rosterOptions}</select>
+                            <input type="text" class="search-input rr-member-input" list="rr-roster-datalist" placeholder="🔍 輸入名字搜尋既有成員…" style="width:100%;margin-bottom:6px;box-sizing:border-box;" autocomplete="off">
                             <label style="font-size:12px;"><input type="checkbox" class="rr-set-current" checked> 設為此成員目前顯示名稱</label>
                         </div>
                     </div>
@@ -472,8 +477,9 @@ async function confirmRosterResolve() {
         const name = row.dataset.name;
         const isExisting = row.querySelector('.rr-existing').checked;
         if (isExisting) {
-            const memberId = row.querySelector('.rr-member-select').value;
-            if (!memberId) { alert(`請幫「${name}」選擇對應的既有成員，或改選「全新成員」`); return; }
+            const typed = row.querySelector('.rr-member-input').value.trim();
+            const memberId = (window._rrNameToId || {})[typed];
+            if (!memberId) { alert(`「${name}」對應的既有成員「${typed || '（空白）'}」找不到，請從清單選一個正確名字，或改選「全新成員」`); return; }
             const setCurrent = row.querySelector('.rr-set-current').checked;
             await fetch(WORKER_URL + "/api/roster/resolve-name", {
                 method: 'POST',
@@ -2749,28 +2755,140 @@ async function deleteRosterMember(memberId, name) {
 }
 
 // ---- Discord 設定 ----
+const DISCORD_EVENTS = [
+    { key: 'leave_open', label: '🗓️ 開放請假' },
+    { key: 'leave_submit', label: '🙋 請假/取消' },
+    { key: 'self_join', label: '🆕 自助建檔' },
+    { key: 'noshow', label: '⚠️ No-show 警示' },
+];
+
 async function loadDiscordSettings() {
+    // 站台網址 / 伺服器 ID
     try {
         const res = await fetch(WORKER_URL + "/api/settings/discord?t=" + Date.now(), {
             cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
         });
         const data = await res.json();
-        const el = document.getElementById('discord-webhook');
-        if (el) el.value = data.discord_webhook_url || '';
+        const siteEl = document.getElementById('discord-site-url');
+        if (siteEl) siteEl.value = data.site_base_url || '';
+        const guildEl = document.getElementById('discord-guild-id');
+        if (guildEl) guildEl.value = data.discord_guild_id || '';
+        window._legacyWebhook = data.discord_webhook_url || '';
     } catch (e) { }
+    // 多頻道清單
+    let channels = [];
+    try {
+        const res = await fetch(WORKER_URL + "/api/settings/channels?t=" + Date.now(), {
+            cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const data = await res.json();
+        channels = data.channels || [];
+    } catch (e) { }
+    // 舊的單一 webhook 尚未搬過來 → 幫忙帶入成第一個頻道（全部事件）
+    if (channels.length === 0 && window._legacyWebhook) {
+        channels = [{ name: '主頻道', webhook_url: window._legacyWebhook, events: [], mention_role_id: '', enabled: true }];
+    }
+    renderDiscordChannels(channels);
+}
+
+function renderDiscordChannels(channels) {
+    const wrap = document.getElementById('discord-channels-list');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    (channels || []).forEach(c => wrap.appendChild(buildDiscordChannelRow(c)));
+    if (!channels || channels.length === 0) {
+        wrap.innerHTML = '<p style="font-size:12px;color:var(--muted);">尚未新增任何頻道，點「➕ 新增頻道」開始。</p>';
+    }
+}
+
+function buildDiscordChannelRow(c) {
+    c = c || {};
+    const row = document.createElement('div');
+    row.className = 'dc-channel';
+    row.style.cssText = 'border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--surface-2);display:flex;flex-direction:column;gap:8px;';
+    const evChecks = DISCORD_EVENTS.map(e => {
+        const checked = (Array.isArray(c.events) && c.events.length > 0) ? c.events.includes(e.key) : true;
+        return `<label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;margin-right:6px;">
+            <input type="checkbox" class="dc-event" data-key="${e.key}" ${checked ? 'checked' : ''}> ${e.label}</label>`;
+    }).join('');
+    row.innerHTML = `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" class="search-input dc-name" placeholder="頻道名稱（自訂）" value="${(c.name || '').replace(/"/g, '&quot;')}" style="width:160px;">
+            <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;"><input type="checkbox" class="dc-enabled" ${c.enabled === false ? '' : 'checked'}> 啟用</label>
+            <button class="btn btn-outline dc-remove" style="font-size:12px;padding:4px 10px;margin-left:auto;" onclick="this.closest('.dc-channel').remove()">🗑️ 移除</button>
+        </div>
+        <input type="text" class="search-input dc-webhook" placeholder="https://discord.com/api/webhooks/..." value="${(c.webhook_url || '').replace(/"/g, '&quot;')}" style="width:100%;box-sizing:border-box;">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:2px;">${evChecks}</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span style="font-size:12px;color:var(--muted);">@身分組 ID（選填）：</span>
+            <input type="text" class="search-input dc-role" placeholder="留空＝不 @" value="${(c.mention_role_id || '').replace(/"/g, '&quot;')}" style="width:200px;">
+        </div>`;
+    return row;
+}
+
+function addDiscordChannel() {
+    const wrap = document.getElementById('discord-channels-list');
+    if (!wrap) return;
+    // 若目前是「尚未新增」提示，先清掉
+    if (wrap.querySelector('p')) wrap.innerHTML = '';
+    wrap.appendChild(buildDiscordChannelRow({ name: '', webhook_url: '', events: [], mention_role_id: '', enabled: true }));
+}
+
+function collectDiscordChannels() {
+    return [...document.querySelectorAll('#discord-channels-list .dc-channel')].map(row => {
+        const events = [...row.querySelectorAll('.dc-event')].filter(cb => cb.checked).map(cb => cb.dataset.key);
+        return {
+            name: row.querySelector('.dc-name').value.trim(),
+            webhook_url: row.querySelector('.dc-webhook').value.trim(),
+            events,
+            mention_role_id: row.querySelector('.dc-role').value.trim(),
+            enabled: row.querySelector('.dc-enabled').checked
+        };
+    }).filter(c => c.webhook_url);
+}
+
+async function saveDiscordChannels() {
+    const channels = collectDiscordChannels();
+    try {
+        const res = await fetch(WORKER_URL + "/api/settings/channels", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ channels })
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); alert('儲存失敗：' + (d.error || res.status)); return; }
+        alert(`✅ 已儲存 ${channels.length} 個通知頻道`);
+    } catch (e) { alert('儲存失敗：' + e.message); }
 }
 
 async function saveDiscordSettings() {
-    const webhook_url = document.getElementById('discord-webhook').value.trim();
+    const site_base_url = document.getElementById('discord-site-url')?.value.trim() || '';
+    const guild_id = document.getElementById('discord-guild-id')?.value.trim() || '';
     try {
         const res = await fetch(WORKER_URL + "/api/settings/discord", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
-            body: JSON.stringify({ webhook_url })
+            body: JSON.stringify({ webhook_url: window._legacyWebhook || '', guild_id, site_base_url })
         });
         if (!res.ok) { const d = await res.json(); alert('儲存失敗：' + (d.error || res.status)); return; }
-        alert('✅ Discord 設定已儲存' + (webhook_url ? '' : '（已關閉通知）'));
+        alert('✅ 站台與伺服器設定已儲存');
     } catch (e) { alert('儲存失敗：' + e.message); }
+}
+
+async function registerDiscordCommands() {
+    const msg = document.getElementById('discord-bot-msg');
+    if (msg) msg.textContent = '註冊中…';
+    try {
+        const res = await fetch(WORKER_URL + "/api/discord/register-commands", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token }
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (msg) msg.textContent = '❌ ' + (d.error || res.status) + (d.detail ? '（' + JSON.stringify(d.detail).slice(0, 160) + '）' : '');
+            return;
+        }
+        if (msg) msg.textContent = `✅ 已註冊 ${d.registered} 個指令（${d.scope === 'guild' ? '本伺服器即時生效' : '全域，最多等 1 小時'}）`;
+    } catch (e) { if (msg) msg.textContent = '❌ ' + e.message; }
 }
 
 // ---- 操作紀錄 ----

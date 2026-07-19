@@ -3,7 +3,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=11">
+    <link rel="stylesheet" href="style.css?v=12">
 </head>
 
 <body>
@@ -297,12 +297,44 @@
 
                 <div class="leave-sub-view" id="lsub-discord" style="display:none;">
                     <div class="leave-block">
-                        <div class="leave-block-title">🤖 Discord 通知設定</div>
-                        <p style="font-size:12px; color:var(--muted); margin:4px 0 10px;">貼上 Discord 頻道的 Incoming Webhook 網址，有人請假／開放場次時會自動在頻道發訊息。留空即關閉。</p>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <input type="text" id="discord-webhook" class="search-input" style="flex:1; min-width:240px;" placeholder="https://discord.com/api/webhooks/...">
-                            <button class="btn btn-primary" onclick="saveDiscordSettings()">💾 儲存</button>
+                        <div class="leave-block-title">📢 通知頻道</div>
+                        <p style="font-size:12px; color:var(--muted); margin:4px 0 10px;">可新增多個頻道，每個頻道貼上 Discord 的 Incoming Webhook 網址，並各自勾選要接收哪些通知、要不要 @ 身分組。「開放請假」通知會自動附上請假連結。</p>
+                        <div id="discord-channels-list" style="display:flex; flex-direction:column; gap:12px;"></div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+                            <button class="btn btn-outline" onclick="addDiscordChannel()">➕ 新增頻道</button>
+                            <button class="btn btn-primary" onclick="saveDiscordChannels()">💾 儲存頻道設定</button>
                         </div>
+                    </div>
+
+                    <div class="leave-block" style="margin-top:14px;">
+                        <div class="leave-block-title">🔗 站台與伺服器</div>
+                        <p style="font-size:12px; color:var(--muted); margin:4px 0 10px;">站台網址用來在通知附上正確的請假連結；伺服器 ID 用來讓機器人指令對應到你的戰隊（在 Discord 開啟開發者模式後，右鍵伺服器→複製伺服器 ID）。</p>
+                        <div style="display:flex; flex-direction:column; gap:8px; max-width:520px;">
+                            <label style="font-size:12px; font-weight:bold;">站台網址（選填）</label>
+                            <input type="text" id="discord-site-url" class="search-input" placeholder="https://你的網域　（留空則自動用目前網址）">
+                            <label style="font-size:12px; font-weight:bold;">Discord 伺服器 ID（選填，機器人查詢需要）</label>
+                            <input type="text" id="discord-guild-id" class="search-input" placeholder="例如 123456789012345678">
+                            <div>
+                                <button class="btn btn-primary" onclick="saveDiscordSettings()">💾 儲存</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="leave-block" style="margin-top:14px;">
+                        <div class="leave-block-title">🤖 機器人查詢指令</div>
+                        <p style="font-size:12px; color:var(--muted); margin:4px 0 10px;">在 Discord 綁定機器人後，成員可用 <code>/查詢 名字</code>、<code>/出勤榜</code> 直接查出席。設定完成後按下方按鈕註冊指令（有填伺服器 ID 會即時生效；否則全域最多等 1 小時）。</p>
+                        <button class="btn btn-outline" onclick="registerDiscordCommands()">🔧 註冊 / 更新 slash 指令</button>
+                        <div id="discord-bot-msg" style="font-size:12px; color:var(--muted); margin-top:8px;"></div>
+                        <details style="margin-top:10px;">
+                            <summary style="cursor:pointer; font-size:12px; color:var(--muted);">後端需要設定的環境變數（管理員看）</summary>
+                            <div style="font-size:12px; color:var(--muted); margin-top:6px; line-height:1.7;">
+                                在 Worker 設定三個變數（Discord 開發者後台 → 你的 Application）：<br>
+                                • <code>DISCORD_APP_ID</code>：Application ID<br>
+                                • <code>DISCORD_PUBLIC_KEY</code>：Public Key（給互動驗簽用）<br>
+                                • <code>DISCORD_BOT_TOKEN</code>：Bot Token（Secret）<br>
+                                並把 Interactions Endpoint URL 設為 <code>你的Worker網址/api/discord/interactions</code>。
+                            </div>
+                        </details>
                     </div>
                 </div>
 
@@ -620,5 +652,5 @@
         </div>
     </div>
 
-    <script src="app.js?v=11"></script>
+    <script src="app.js?v=12"></script>
 </body></html>
