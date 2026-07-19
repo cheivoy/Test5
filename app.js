@@ -1167,10 +1167,25 @@ async function loadDbData() {
         if (toDate && h.date > toDate) return false;
         return true;
     });
-    totalReportsInTimeframe = filteredHistories.length;
-
     // 代替上號對照表（供出席重導）
     await loadSubMap();
+
+    // 手動補登出席（漏戰報時）
+    let manualAttendance = [];
+    try {
+        const aUrl = WORKER_URL + "/api/leave/attendance?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
+        const aHeaders = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
+        if (shareId || (storageMode === 'cloud' && currentUser)) {
+            const r = await fetch(aUrl, { cache: "no-store", headers: aHeaders }).then(r => r.json()).catch(() => []);
+            manualAttendance = (Array.isArray(r) ? r : []).filter(a => (!fromDate || a.date >= fromDate) && (!toDate || a.date <= toDate));
+        }
+    } catch (e) { manualAttendance = []; }
+
+    // 出席以「場次(date|session|type)」為單位；分母＝戰報場 ∪ 補登場
+    const sessionSet = new Set();
+    filteredHistories.forEach(h => { try { const d = JSON.parse(h.raw_json); sessionSet.add(`${h.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`); } catch (e) { } });
+    manualAttendance.forEach(a => sessionSet.add(`${a.date}|${a.session}|${a.type}`));
+    totalReportsInTimeframe = sessionSet.size;
 
     let noteMap = {};
     const jobSet = new Set();
@@ -1213,25 +1228,31 @@ async function loadDbData() {
         map[mid] = { id: memberIdToDisplayName[mid], member_id: mid, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' };
     });
 
+    const mkEntry = (id, mid) => ({ id, member_id: mid || null, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' });
+    // 出席以場次(date|session|type)去重：戰報＋補登不重複算
+    const addAtt = (entry, sk, type) => {
+        entry._att = entry._att || new Set();
+        if (!entry._att.has(sk)) { entry._att.add(sk); entry.counts[type] = (entry.counts[type] || 0) + 1; }
+    };
+
     filteredHistories.forEach(h => {
         try {
             const d = JSON.parse(h.raw_json);
             const aName = d.nameA || h.guild_a;
             const type = d.matchType || "幫戰";
             const session = d.session || "第一場";
+            const sk = `${h.date}|${session}|${type}`;
             const subForWin = subMapByWin[`${h.date}|${session}|${type}`];
-            const mkEntry = (id, mid) => ({ id, member_id: mid || null, matches: 0, histories: [], aggr: {}, counts: { "幫戰": 0, "約戰": 0, "其他": 0 }, latestDate: '', last_job: '' });
             d.gA.forEach(p => {
                 // ✅ 改名/合併安全：有對照到穩定 member_id 就用它分組，顯示名稱取當下最新名稱
                 const origId = aliasToMemberId[p.name];
                 if (p.job) jobSet.add(p.job);
                 const subB = (subForWin && origId && subForWin[origId]) ? subForWin[origId] : null;
                 if (subB) {
-                    // 代替上號：出勤只加「次數」給代打者（不污染其職業/數據）；本人這場不算出勤
+                    // 代替上號：出勤算給代打者（本人這場不算）；只加次數不污染其數據
                     const bName = memberIdToDisplayName[subB] || subB;
                     if (!map[subB]) map[subB] = mkEntry(bName, subB);
-                    map[subB].matches++;
-                    map[subB].counts[type] = (map[subB].counts[type] || 0) + 1;
+                    addAtt(map[subB], sk, type);
                     const aName2 = origId ? (memberIdToDisplayName[origId] || p.name) : p.name;
                     (map[subB].subFor = map[subB].subFor || []).push({ date: h.date, session, type, name: aName2 });
                     // 本人（被代打）：不計出勤、不進雷達平均，但保留這場快照（標示代打）
@@ -1244,8 +1265,7 @@ async function loadDbData() {
                 const key = origId || p.name;
                 const displayName = origId ? (memberIdToDisplayName[origId] || p.name) : p.name;
                 if (!map[key]) map[key] = mkEntry(displayName, origId || null);
-                map[key].matches++;
-                map[key].counts[type] = (map[key].counts[type] || 0) + 1;
+                addAtt(map[key], sk, type);
                 map[key].histories.push({ date: h.date, title: aName, stats: p, type, session });
                 // ✅ 判定最新職業：比較日期，取最新的
                 if (!map[key].latestDate || h.date > map[key].latestDate) {
@@ -1258,6 +1278,14 @@ async function loadDbData() {
             });
         } catch (e) { }
     });
+
+    // 併入手動補登出席（與戰報去重），並結算出席場數
+    manualAttendance.forEach(a => {
+        const key = a.member_id;
+        if (!map[key]) map[key] = mkEntry(memberIdToDisplayName[key] || key, key);
+        addAtt(map[key], `${a.date}|${a.session}|${a.type}`, a.type);
+    });
+    Object.values(map).forEach(m => { m.matches = m._att ? m._att.size : 0; });
 
     // ✅ 修復：同日期多場時取最後一場（session 排序）
     // 對每個成員的 histories 按日期+場次排序，確保 latestDate 計算正確
@@ -2877,6 +2905,7 @@ async function openWindowDetail(windowId) {
         window._wdNoshow = new Set(data.noshow || []);
         window._wdLate = new Set(data.late || []);
         window._wdSub = data.substitutes || {}; // 本人 -> 代打者
+        window._wdAttend = new Set(data.attend || []); // 手動補登出席
         renderWindowDetail();
     } catch (e) {
         document.getElementById('wd-list').innerHTML = '<div style="color:var(--danger);">載入失敗：' + e.message + '</div>';
@@ -2918,6 +2947,7 @@ function renderWindowDetail() {
                 const onReserve = reserveSet.has(m.member_id);
                 const onNoshow = (window._wdNoshow || new Set()).has(m.member_id);
                 const onLate = (window._wdLate || new Set()).has(m.member_id);
+                const onAttend = (window._wdAttend || new Set()).has(m.member_id);
                 const subId = (window._wdSub || {})[m.member_id];
                 const subName = subId ? (memberIdToDisplayName[subId] || rosterCache.find(x => x.member_id === subId)?.display_name || subId.slice(0, 6)) : '';
                 const bm = boardMemberById[m.member_id];
@@ -2928,9 +2958,11 @@ function renderWindowDetail() {
                         ${onReserve ? '<span class="badge-reserve" style="display:inline-block;">後備</span>' : ''}
                         ${onNoshow ? '<span class="status-pill status-closed">No-show</span>' : ''}
                         ${onLate ? '<span class="badge-reserve" style="display:inline-block;">臨時</span>' : ''}
+                        ${onAttend ? '<span class="status-pill" style="background:#e8f5e9; color:#2e7d32;">補登出席</span>' : ''}
                         ${subId ? `<span class="badge-reserve" style="display:inline-block; background:#5c6bc0;">代打：${subName} <span style="cursor:pointer;" onclick="wdUnsetSub('${m.member_id}')">✕</span></span>` : ''}
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap; margin-left:auto;">
+                        <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#2e7d32;" onclick="wdAction('${m.member_id}', '${onAttend ? 'attend_unset' : 'attend_set'}')">${onAttend ? '取消出席' : '補登出席'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px;" onclick="wdAction('${m.member_id}', '${onLeave ? 'leave_cancel' : 'leave_request'}')">${onLeave ? '取消請假' : '請假'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:#e65100;" onclick="wdAction('${m.member_id}', '${onReserve ? 'reserve_unset' : 'reserve_set'}')">${onReserve ? '取消後備' : '後備'}</button>
                         <button class="btn btn-outline" style="font-size:11px; padding:3px 7px; color:var(--danger);" onclick="wdAction('${m.member_id}', '${onNoshow ? 'noshow_unset' : 'noshow_set'}')">${onNoshow ? '取消No-show' : 'No-show'}</button>
@@ -2961,6 +2993,8 @@ async function wdAction(memberId, action) {
         else if (action === 'noshow_unset') window._wdNoshow.delete(memberId);
         else if (action === 'late_set') window._wdLate.add(memberId);
         else if (action === 'late_unset') window._wdLate.delete(memberId);
+        else if (action === 'attend_set') (window._wdAttend = window._wdAttend || new Set()).add(memberId);
+        else if (action === 'attend_unset') window._wdAttend && window._wdAttend.delete(memberId);
         renderWindowDetail();
         loadLeaveWindows();
     } catch (e) { alert('操作失敗：' + e.message); }
@@ -3088,6 +3122,65 @@ async function runBulkReserve() {
     if (unmatched.length) summary += `\n⚠️ 名冊找不到（未處理）：${unmatched.join('、')}`;
     alert(summary);
     if (!unmatched.length && !fail) document.getElementById('bulk-reserve-modal')?.remove();
+    else if (msg) msg.textContent = summary;
+}
+
+// 補登出席：漏戰報時貼上出席名單，整批標記為出席
+function openBulkAttend() {
+    const w = window._wdWindow;
+    if (!w) return;
+    const existing = document.getElementById('bulk-attend-modal');
+    if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'bulk-attend-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2400;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `
+        <div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:22px;border-radius:14px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:12px;">
+            <h3 style="margin:0;">✅ 補登出席</h3>
+            <p style="font-size:12px;color:var(--muted);margin:0;">漏生成戰報時用這個。貼上實際出席的名字（每行一個，或逗號/空白分隔），系統比對名冊後整批標記為這場（${w.event_date} ${w.session}）出席。出席率會把這場也算進分母。</p>
+            <textarea id="bulk-attend-input" class="search-input" rows="8" placeholder="小明&#10;阿華&#10;老王" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+            <div id="bulk-attend-msg" style="font-size:12px;color:var(--muted);"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-outline" onclick="document.getElementById('bulk-attend-modal').remove()">取消</button>
+                <button class="btn btn-primary" id="bulk-attend-go" onclick="runBulkAttend()">標記為出席</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    setTimeout(() => document.getElementById('bulk-attend-input')?.focus(), 50);
+}
+
+async function runBulkAttend() {
+    const w = window._wdWindow;
+    const raw = document.getElementById('bulk-attend-input')?.value || '';
+    const names = [...new Set(raw.split(/[\n,、，\s]+/).map(s => s.trim()).filter(Boolean))];
+    const msg = document.getElementById('bulk-attend-msg');
+    if (!names.length) { if (msg) msg.textContent = '請先貼上名字'; return; }
+    const nameToId = {};
+    rosterCache.forEach(m => { nameToId[m.display_name] = m.member_id; });
+    const matched = [], unmatched = [];
+    names.forEach(n => { const id = nameToId[n]; if (id) matched.push(id); else unmatched.push(n); });
+    if (!matched.length) { if (msg) msg.textContent = '名冊裡都找不到：' + unmatched.join('、'); return; }
+    const btn = document.getElementById('bulk-attend-go');
+    if (btn) { btn.disabled = true; btn.textContent = '處理中…'; }
+    let ok = 0, fail = 0;
+    for (const id of matched) {
+        try {
+            const res = await fetch(WORKER_URL + "/api/leave/actions", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                body: JSON.stringify({ window_id: w.window_id, member_id: id, action: 'attend_set' })
+            });
+            if (res.ok) { ok++; (window._wdAttend = window._wdAttend || new Set()).add(id); } else fail++;
+        } catch (e) { fail++; }
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '標記為出席'; }
+    renderWindowDetail();
+    let summary = `✅ 已補登出席 ${ok} 人`;
+    if (fail) summary += `，失敗 ${fail} 人`;
+    if (unmatched.length) summary += `\n⚠️ 名冊找不到（未處理）：${unmatched.join('、')}`;
+    alert(summary);
+    if (!unmatched.length && !fail) document.getElementById('bulk-attend-modal')?.remove();
     else if (msg) msg.textContent = summary;
 }
 
