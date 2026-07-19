@@ -797,8 +797,11 @@ function viewHistory(id) {
     currentReportId = id;
     const h = allHistories.find(x => x.id === id);
     if (h) {
-        const d = JSON.parse(h.raw_json);
-        gA = d.gA; gB = d.gB; full = [...gA, ...gB];
+        let d;
+        try { d = JSON.parse(h.raw_json); } catch (e) { alert('這筆戰報資料損毀，無法開啟'); return; }
+        gA = Array.isArray(d.gA) ? d.gA : [];
+        gB = Array.isArray(d.gB) ? d.gB : [];
+        full = [...gA, ...gB];
         document.getElementById('display-title').innerText = d.nameA || h.guild_a;
         document.getElementById('name-b-title').innerText = d.nameB || '未知';
         const matchResultEl = document.getElementById('match-result');
@@ -1302,7 +1305,7 @@ function renderDbTable() {
         <tr onclick="openMemberDetail('${m.id}')" style="cursor:pointer; ${low ? 'background:#fff0f0;' : ''}">
             <td><b>${m.id}</b>${low ? ' <span style="color:var(--danger); font-size:11px;">⚠️低出席</span>' : ''}</td>
             <td><span class="job-tag" style="background:var(--color-${m.last_job})">${m.last_job}</span></td>
-            <td>${m.category ? `<span class="hash-tag" style="background:#e3ecf7;">${m.category}</span>` : '<span style="color:#ccc;">—</span>'}</td>
+            <td>${m.category ? `<span class="cat-chip">${m.category}</span>` : '<span style="color:var(--muted);">—</span>'}</td>
             <td>${m.tag !== 'none' ? `<span class="hash-tag">${m.tag}</span>` : ''}</td>
             <td>${m.matches} 場</td>
             <td style="font-size:11px; color:#666;" title="幫戰/約戰/領地戰 出席次數">⚔️${m.counts['幫戰'] || 0} / 🤝${m.counts['約戰'] || 0} / 🏰${m.counts['其他'] || 0}</td>
@@ -1340,7 +1343,7 @@ function renderDbCards(data, hasThreshold, threshold) {
                 <span class="mcard-dot" style="background:${jobColor}"></span>
                 <div class="mcard-name">
                     <div class="nm">${m.id}${low ? ' <span style="color:var(--danger);font-size:11px;">⚠️</span>' : ''}</div>
-                    <div class="sub"><span class="job-tag" style="background:${jobColor}">${m.last_job}</span>${m.category ? ` <span class="hash-tag" style="background:#e3ecf7;">${m.category}</span>` : ''}${m.tag !== 'none' ? ` <span class="hash-tag">${m.tag}</span>` : ''}</div>
+                    <div class="sub"><span class="job-tag" style="background:${jobColor}">${m.last_job}</span>${m.category ? ` <span class="cat-chip">${m.category}</span>` : ''}${m.tag !== 'none' ? ` <span class="hash-tag">${m.tag}</span>` : ''}</div>
                 </div>
                 <div class="mcard-rate ${low ? 'low' : ''}"><b>${m.rate.toFixed(1)}%</b><span>出席率</span></div>
             </div>
@@ -1349,6 +1352,12 @@ function renderDbCards(data, hasThreshold, threshold) {
                 <div><b>${m.matches}</b><span>總場次</span></div>
                 <div>${badge}<span>出席/請假/後備</span></div>
             </div>
+            <div class="mcard-break">${TYPE_ORDER.map(t => {
+                const a = (m.attByTypeEff && m.attByTypeEff[t]) || 0;
+                const l = (m.leaveByType && m.leaveByType[t]) || 0;
+                const r = (m.reserveByType && m.reserveByType[t]) || 0;
+                return `<span>${fmtType(t)} ${a}/${l}/${r}</span>`;
+            }).join('')}</div>
             ${actions}
         </div>`;
     }).join('') || '<div style="color:#aaa; text-align:center; padding:24px;">沒有符合的成員</div>';
@@ -2287,14 +2296,17 @@ function adminGroupByJob(memberIds, withStats) {
         (groups[job] = groups[job] || []).push(m);
     });
     const jobs = Object.keys(groups).sort();
-    if (!jobs.length) return '<div style="color:#aaa; font-size:12px; padding:4px;">目前沒有人。</div>';
+    if (!jobs.length) return '<div style="color:var(--muted); font-size:12px; padding:4px;">目前沒有人。</div>';
     return jobs.map(job => `
-        <div style="margin:6px 0;">
-            <span class="job-tag" style="background:var(--color-${job})">${job}</span>
-            <span style="font-size:12px; color:#6b7684;">（${groups[job].length}）</span>
-            <div style="margin-top:4px;">
-                ${groups[job].map(m => `<span class="hash-tag" style="margin:2px 4px 2px 0; display:inline-block;">${m.display_name}${withStats ? ` <span style="color:#97a0ad;">${m.attendance}/${m.leave}/${m.reserve}</span>` : ''}</span>`).join('')}
+        <div style="margin:8px 0;">
+            <div style="font-size:12px; font-weight:bold; color:var(--muted); margin-bottom:4px;">
+                <span class="job-tag" style="background:var(--color-${job})">${job}</span>　${groups[job].length} 人
             </div>
+            ${groups[job].map(m => `
+                <div class="lb-row">
+                    <span class="lb-name">${m.display_name}</span>
+                    <span class="lb-rec">出席 <b>${m.attendance}</b>　請假 <b>${m.leave}</b>　後備 <b>${m.reserve}</b></span>
+                </div>`).join('')}
         </div>`).join('');
 }
 
@@ -2756,6 +2768,7 @@ function switchPage(p) {
     document.querySelectorAll('.tnav').forEach(el => el.classList.toggle('active', el.dataset.page === p));
     const tt = document.getElementById('topbar-title');
     if (tt) tt.textContent = PAGE_TITLES[p] || '';
+    updateTopbarContext(p);
     updateFab(p);
     window.scrollTo(0, 0);
     if (p === 'db') loadDbData();
@@ -2772,6 +2785,24 @@ function layoutForViewport() {
     if (histBlock && reportMount && histBlock.parentElement !== reportMount) reportMount.appendChild(histBlock);
     if (banner && meMount && banner.parentElement !== meMount) meMount.appendChild(banner);
     if (acct && meMount && acct.parentElement !== meMount) meMount.appendChild(acct);
+}
+
+// 頂欄情境按鈕（桌機）：把常用功能放到頂欄，捲動時也能操作
+function updateTopbarContext(p) {
+    const el = document.getElementById('topbar-context');
+    if (!el) return;
+    const admin = !isViewMode && storageMode === 'cloud' && currentUser;
+    let html = '';
+    if (p === 'report' && !isViewMode) {
+        html = `<button class="btn btn-outline" onclick="openImportModal()">📁 導入</button>`;
+    } else if (p === 'db' && admin) {
+        html = `<button class="btn btn-outline" onclick="openAddMemberModal()">➕ 新增</button>`
+             + `<button class="btn btn-outline" onclick="syncMemberData()">🔄 同步</button>`
+             + `<button class="btn btn-outline" onclick="exportMembersCSV()">📤 匯出</button>`;
+    } else if (p === 'leave' && admin) {
+        html = `<button class="btn btn-outline" onclick="openWindowModal()">➕ 場次</button>`;
+    }
+    el.innerHTML = html;
 }
 
 // FAB（手機）：戰報→導入CSV、請假→開場次
@@ -2801,6 +2832,7 @@ function showReportDetail() {
     const b = document.getElementById('report-browse'), d = document.getElementById('report-detail');
     if (b) b.style.display = 'none';
     if (d) d.style.display = 'block';
+    const rv = document.getElementById('report-view'); if (rv) rv.style.display = 'block';
     window.scrollTo(0, 0);
 }
 function openImportModal() {

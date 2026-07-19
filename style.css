@@ -539,3 +539,31 @@ th { background: var(--surface-2) !important; }
 /* 戰報詳情卡片：全部欄位用小格自動排列 */
 .rcard-stats { grid-template-columns: repeat(4, 1fr); }
 @media (max-width: 400px) { .rcard-stats { grid-template-columns: repeat(3, 1fr); } }
+
+/* 身份類別晶片（深色可讀） */
+.cat-chip { display: inline-block; padding: 2px 8px; border-radius: 7px; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent-strong); }
+
+/* 請假名單：列表樣式（名字 + 出勤/請假記錄） */
+.lb-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.lb-row:last-child { border-bottom: none; }
+.lb-name { font-weight: 600; font-size: 14px; color: var(--ink); }
+.lb-rec { font-size: 12px; color: var(--muted); }
+.lb-rec b { color: var(--ink); }
+
+/* 戰報詳情卡片：更緊湊，減少下拉 */
+.rcard { padding: 10px 12px; }
+.rcard-head { margin-bottom: 8px; }
+.rcard-stats { grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.rcard-stats > div { padding: 5px 1px; border-radius: 7px; }
+.rcard-stats b { font-size: 12.5px; }
+.rcard-stats span { font-size: 9.5px; }
+@media (max-width: 360px) { .rcard-stats { grid-template-columns: repeat(4, 1fr); } }
+
+/* 成員卡片：各類型明細（手機無需懸停即可看） */
+.mcard-break { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.mcard-break span { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 3px 7px; }
+
+/* 頂欄情境按鈕（桌機顯示，手機隱藏以免擁擠） */
+.topbar-context { display: flex; gap: 6px; align-items: center; }
+.topbar-context .btn { font-size: 12px; padding: 7px 11px; margin: 0; }
+@media (max-width: 768px) { .topbar-context { display: none; } }
