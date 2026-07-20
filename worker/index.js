@@ -234,7 +234,8 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
 
 // 彙整每個在職成員的：職業（依最新一場）、出席次數、請假次數、後備次數（含人工覆蓋）
 // 回傳 map: member_id -> { member_id, display_name, job, attendance, leave, reserve }
-async function computeMemberStats(env, owner) {
+async function computeMemberStats(env, owner, fromDate, toDate) {
+  const inR = (d) => (!fromDate || (d && d >= fromDate)) && (!toDate || (d && d <= toDate));
   const { results: aliases } = await env.DB.prepare(
     "SELECT alias_name, member_id FROM member_aliases WHERE owner = ?"
   ).bind(owner).all();
@@ -290,6 +291,7 @@ async function computeMemberStats(env, owner) {
     "SELECT date, raw_json FROM reports WHERE owner = ?"
   ).bind(owner).all();
   for (const rep of reports || []) {
+    if (!inR(rep.date)) continue; // 時間範圍過濾
     let d; try { d = JSON.parse(rep.raw_json); } catch { continue; }
     const session = d.session || '第一場';
     const type = d.matchType || '幫戰';
@@ -328,6 +330,7 @@ async function computeMemberStats(env, owner) {
       const wid = k.slice(0, idx), mid = k.slice(idx + 1);
       const w = winInfo[wid];
       if (!w) continue;
+      if (!inR(w.event_date)) continue; // 時間範圍過濾
       const type = w.match_type || '幫戰';
       addAtt(mid, `${w.event_date}|${w.session}|${type}`, type);
     }
@@ -336,7 +339,7 @@ async function computeMemberStats(env, owner) {
   // 出席次數＝去重後的場次數
   Object.values(members).forEach(m => { m.attendance = m._att ? m._att.size : 0; });
 
-  const stats = await computeLeaveStats(env, owner);
+  const stats = await computeLeaveStats(env, owner, fromDate, toDate);
   let ovs;
   try {
     ({ results: ovs } = await env.DB.prepare(
@@ -602,11 +605,19 @@ async function handleDiscordCommand(env, interaction) {
   if (cmd === '查詢') {
     const q = String(getOpt('名字') || '').trim();
     if (!q) return reply("請輸入要查詢的名字。");
-    const m = members.find(x => x.display_name === q) || members.find(x => x.display_name.includes(q));
+    // 天數：只算最近 N 天（選填，例：30＝近一個月）
+    const days = parseInt(getOpt('天數'));
+    let list = members, rangeNote = '（全部時間）';
+    if (Number.isFinite(days) && days > 0) {
+      const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      list = Object.values(await computeMemberStats(env, owner, from, null));
+      rangeNote = `（近 ${days} 天）`;
+    }
+    const m = list.find(x => x.display_name === q) || list.find(x => x.display_name.includes(q));
     if (!m) return reply(`找不到「${q}」，請確認名字是否正確。`);
     const total = m.attendance + m.leave + m.reserve;
     const rate = total > 0 ? Math.round(m.attendance / total * 100) : 0;
-    return reply(`📊 **${m.display_name}**（${m.job || '未知'}）\n出席 **${m.attendance}**　請假 **${m.leave}**　後備 **${m.reserve}**　出席率約 **${rate}%**${m.hasOverride ? '\n（含管理員手動調整）' : ''}`);
+    return reply(`📊 **${m.display_name}**（${m.job || '未知'}）${rangeNote}\n出席 **${m.attendance}**　請假 **${m.leave}**　後備 **${m.reserve}**　出席率約 **${rate}%**${m.hasOverride ? '\n（含管理員手動調整）' : ''}`);
   }
 
   if (cmd === '出勤榜') {
@@ -2078,7 +2089,7 @@ export default {
           if (s?.discord_guild_id) guildIds = [s.discord_guild_id];
         }
         const commands = [
-          { name: "查詢", description: "查詢某位成員的出席／請假／後備次數", options: [{ name: "名字", description: "成員名字", type: 3, required: true }] },
+          { name: "查詢", description: "查詢某位成員的出席／請假／後備次數", options: [{ name: "名字", description: "成員名字", type: 3, required: true }, { name: "天數", description: "只算最近 N 天（選填，例 30）", type: 4, required: false }] },
           { name: "出勤榜", description: "顯示出勤前 10 名" },
           { name: "請假名單", description: "顯示目前開放場次的請假／後備名單", options: [{ name: "日期", description: "只看某天 YYYY-MM-DD（選填）", type: 3, required: false }] }
         ];
