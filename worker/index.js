@@ -1015,9 +1015,27 @@ export default {
         const { display_name, job } = await request.json();
         if (!display_name) return json({ error: "名稱不能為空" }, 400);
         const exist = await env.DB.prepare(
-          "SELECT member_id FROM members_roster WHERE owner = ? AND display_name = ?"
+          "SELECT member_id, status FROM members_roster WHERE owner = ? AND display_name = ?"
         ).bind(user, display_name).first();
-        if (exist) return json({ error: "名稱已存在" }, 400);
+        if (exist) {
+          if (exist.status === 'active') return json({ error: "名稱已存在" }, 400);
+          // 同名但已移除 → 復原（保留原本 member_id 與歷史，不建分身）
+          const now2 = Date.now();
+          try {
+            await env.DB.prepare(
+              "UPDATE members_roster SET status='active', job=COALESCE(?, job), updated_at=?, version=version+1 WHERE owner=? AND member_id=?"
+            ).bind(job || null, now2, user, exist.member_id).run();
+          } catch (e) {
+            await env.DB.prepare(
+              "UPDATE members_roster SET status='active', updated_at=?, version=version+1 WHERE owner=? AND member_id=?"
+            ).bind(now2, user, exist.member_id).run();
+          }
+          await env.DB.prepare(
+            "INSERT INTO member_aliases (alias_name, owner, member_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(alias_name, owner) DO NOTHING"
+          ).bind(display_name, user, exist.member_id, now2).run();
+          await writeAudit(env, user, user, 'roster', exist.member_id, 'restore', { display_name });
+          return json({ status: "OK", member_id: exist.member_id, restored: true });
+        }
         const memberId = crypto.randomUUID();
         const now = Date.now();
         try {
@@ -1790,11 +1808,22 @@ export default {
         ).bind(owner, since).first();
         if ((recent?.c || 0) > 30) return json({ error: "操作太頻繁，請稍後再試" }, 429);
 
-        // 已存在 → 直接回傳，讓他找到自己就好（不重複建）
+        // 已存在（含已移除）→ 復原或直接回傳，不重複建
         const exist = await env.DB.prepare(
-          "SELECT member_id FROM members_roster WHERE owner = ? AND display_name = ? AND status = 'active'"
+          "SELECT member_id, status FROM members_roster WHERE owner = ? AND display_name = ?"
         ).bind(owner, nm).first();
-        if (exist) return json({ status: "OK", member_id: exist.member_id, existed: true });
+        if (exist) {
+          if (exist.status !== 'active') {
+            await env.DB.prepare(
+              "UPDATE members_roster SET status='active', updated_at=?, version=version+1 WHERE owner=? AND member_id=?"
+            ).bind(Date.now(), owner, exist.member_id).run();
+            await env.DB.prepare(
+              "INSERT INTO member_aliases (alias_name, owner, member_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(alias_name, owner) DO NOTHING"
+            ).bind(nm, owner, exist.member_id, Date.now()).run();
+            await writeAudit(env, owner, 'public', 'roster', exist.member_id, 'restore', { display_name: nm });
+          }
+          return json({ status: "OK", member_id: exist.member_id, existed: true });
+        }
 
         const memberId = crypto.randomUUID();
         const now = Date.now();
