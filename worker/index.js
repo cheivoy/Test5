@@ -290,6 +290,7 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
   const { results: reports } = await env.DB.prepare(
     "SELECT date, raw_json FROM reports WHERE owner = ?"
   ).bind(owner).all();
+  const sessionSet = new Set(); // 全隊不重複場次（出席率分母，與網頁一致）
   for (const rep of reports || []) {
     if (!inR(rep.date)) continue; // 時間範圍過濾
     let d; try { d = JSON.parse(rep.raw_json); } catch { continue; }
@@ -297,6 +298,7 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
     const type = d.matchType || '幫戰';
     const sortKey = (rep.date || '') + '|' + (session === '第二場' ? '2' : '1');
     const sk = `${rep.date}|${session}|${type}`;
+    sessionSet.add(sk);
     const subForWin = subMap[`${rep.date}|${session}|${type}`];
     (d.gA || []).forEach(p => {
       const origId = aliasMap[p.name];
@@ -332,12 +334,17 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
       if (!w) continue;
       if (!inR(w.event_date)) continue; // 時間範圍過濾
       const type = w.match_type || '幫戰';
-      addAtt(mid, `${w.event_date}|${w.session}|${type}`, type);
+      const sk = `${w.event_date}|${w.session}|${type}`;
+      sessionSet.add(sk);
+      addAtt(mid, sk, type);
     }
   } catch (e) { /* 補登出席尚未使用 */ }
 
-  // 出席次數＝去重後的場次數
-  Object.values(members).forEach(m => { m.attendance = m._att ? m._att.size : 0; });
+  // 出席次數＝去重後的場次數；並記全隊總場次（出席率分母）＋各類型場次
+  const totalSessions = sessionSet.size;
+  const sessionByType = { '幫戰': 0, '約戰': 0, '其他': 0 };
+  sessionSet.forEach(k => { const t = k.split('|')[2] || '幫戰'; sessionByType[t] = (sessionByType[t] || 0) + 1; });
+  Object.values(members).forEach(m => { m.attendance = m._att ? m._att.size : 0; m.totalSessions = totalSessions; m.sessionByType = sessionByType; });
 
   const stats = await computeLeaveStats(env, owner, fromDate, toDate);
   let ovs;
@@ -393,6 +400,8 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
     m.attendanceByType = attByType;
     m.leaveByType = leaveByType;
     m.reserveByType = reserveByType;
+    m.noshowByType = sm?.noshowByType || {};
+    m.noshow = TYPES.reduce((s, t) => s + (m.noshowByType[t] || 0), 0);
     m.hasOverride = hasOverride;
     delete m._latest;
     delete m._att;
@@ -615,9 +624,23 @@ async function handleDiscordCommand(env, interaction) {
     }
     const m = list.find(x => x.display_name === q) || list.find(x => x.display_name.includes(q));
     if (!m) return reply(`找不到「${q}」，請確認名字是否正確。`);
-    const total = m.attendance + m.leave + m.reserve;
-    const rate = total > 0 ? Math.round(m.attendance / total * 100) : 0;
-    return reply(`📊 **${m.display_name}**（${m.job || '未知'}）${rangeNote}\n出席 **${m.attendance}**　請假 **${m.leave}**　後備 **${m.reserve}**　出席率約 **${rate}%**${m.hasOverride ? '\n（含管理員手動調整）' : ''}`);
+    // 類型：全部 / 幫戰 / 約戰 / 領地戰(其他)
+    const typeOpt = String(getOpt('類型') || '全部').trim();
+    const typeMap = { '全部': null, '幫戰': '幫戰', '約戰': '約戰', '領地戰': '其他', '其他': '其他' };
+    const T = typeMap[typeOpt] !== undefined ? typeMap[typeOpt] : null;
+    let att, lv, rs, ns, denom, typeNote;
+    if (T) {
+      att = (m.attendanceByType && m.attendanceByType[T]) || 0;
+      lv = (m.leaveByType && m.leaveByType[T]) || 0;
+      rs = (m.reserveByType && m.reserveByType[T]) || 0;
+      ns = (m.noshowByType && m.noshowByType[T]) || 0;
+      denom = (m.sessionByType && m.sessionByType[T]) || 0;
+      typeNote = `　類型：${typeOpt}`;
+    } else {
+      att = m.attendance; lv = m.leave; rs = m.reserve; ns = m.noshow || 0; denom = m.totalSessions || 0; typeNote = '';
+    }
+    const rate = denom > 0 ? Math.min(100, Math.round((att + rs) / denom * 100)) : 0;
+    return reply(`📊 **${m.display_name}**（${m.job || '未知'}）${rangeNote}${typeNote}\n出席 **${att}**　請假 **${lv}**　後備 **${rs}**　缺席 **${ns}**\n出席率約 **${rate}%**（${att}+${rs} ÷ ${denom} 場）${m.hasOverride ? '\n（含管理員手動調整）' : ''}`);
   }
 
   if (cmd === '出勤榜') {
@@ -2089,7 +2112,11 @@ export default {
           if (s?.discord_guild_id) guildIds = [s.discord_guild_id];
         }
         const commands = [
-          { name: "查詢", description: "查詢某位成員的出席／請假／後備次數", options: [{ name: "名字", description: "成員名字", type: 3, required: true }, { name: "天數", description: "只算最近 N 天（選填，例 30）", type: 4, required: false }] },
+          { name: "查詢", description: "查詢某位成員的出席／請假／後備次數", options: [
+            { name: "名字", description: "成員名字", type: 3, required: true },
+            { name: "類型", description: "戰報類型（預設全部）", type: 3, required: false, choices: [{ name: "全部", value: "全部" }, { name: "幫戰", value: "幫戰" }, { name: "約戰", value: "約戰" }, { name: "領地戰", value: "領地戰" }] },
+            { name: "天數", description: "只算最近 N 天（選填，例 30）", type: 4, required: false }
+          ] },
           { name: "出勤榜", description: "顯示出勤前 10 名" },
           { name: "請假名單", description: "顯示目前開放場次的請假／後備名單", options: [{ name: "日期", description: "只看某天 YYYY-MM-DD（選填）", type: 3, required: false }] }
         ];
