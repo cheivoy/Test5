@@ -403,6 +403,7 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
     m.noshowByType = sm?.noshowByType || {};
     m.noshow = TYPES.reduce((s, t) => s + (m.noshowByType[t] || 0), 0);
     m.hasOverride = hasOverride;
+    m.attendedSessions = m._att ? [...m._att] : []; // 該員實際上場的場次 key（date|session|type）
     delete m._latest;
     delete m._att;
   });
@@ -597,6 +598,25 @@ async function verifyDiscordSig(publicKeyHex, signatureHex, timestamp, body) {
 }
 
 // 處理 slash 指令，回傳 Discord interaction response
+// 解析日期範圍字串："20260701-0731"、"20260701-20260731"、"2026-07-01~2026-07-31" 皆可
+// 右邊 4 碼＝沿用左邊年份的 MMDD；2 碼＝沿用左邊年月的 DD。回傳 {from, to}（YYYY-MM-DD）或 null。
+function parseDateRange(raw) {
+  if (!raw) return null;
+  const parts = String(raw).split(/[-~到至]/).map(s => s.replace(/\D/g, '')).filter(Boolean);
+  if (parts.length < 2) return null;
+  const L = parts[0], R = parts[parts.length - 1];
+  if (L.length !== 8) return null;
+  const ly = L.slice(0, 4), lm = L.slice(4, 6), ld = L.slice(6, 8);
+  let ry, rm, rd;
+  if (R.length === 8) { ry = R.slice(0, 4); rm = R.slice(4, 6); rd = R.slice(6, 8); }
+  else if (R.length === 4) { ry = ly; rm = R.slice(0, 2); rd = R.slice(2, 4); }
+  else if (R.length === 2) { ry = ly; rm = lm; rd = R; }
+  else return null;
+  const from = `${ly}-${lm}-${ld}`, to = `${ry}-${rm}-${rd}`;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return null;
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
 async function handleDiscordCommand(env, interaction) {
   const reply = (content) => ({ type: 4, data: { content, allowed_mentions: { parse: [] } } });
   const guildId = interaction.guild_id;
@@ -614,13 +634,20 @@ async function handleDiscordCommand(env, interaction) {
   if (cmd === '查詢') {
     const q = String(getOpt('名字') || '').trim();
     if (!q) return reply("請輸入要查詢的名字。");
-    // 天數：只算最近 N 天（選填，例：30＝近一個月）
-    const days = parseInt(getOpt('天數'));
     let list = members, rangeNote = '（全部時間）';
-    if (Number.isFinite(days) && days > 0) {
-      const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-      list = Object.values(await computeMemberStats(env, owner, from, null));
-      rangeNote = `（近 ${days} 天）`;
+    // 日期範圍（選填）：20260701-0731 或 20260701-20260731 → 2026-07-01 ~ 2026-07-31
+    const range = parseDateRange(getOpt('日期範圍'));
+    if (range) {
+      list = Object.values(await computeMemberStats(env, owner, range.from, range.to));
+      rangeNote = `（${range.from} ~ ${range.to}）`;
+    } else {
+      // 天數：只算最近 N 天（選填，例：30＝近一個月）
+      const days = parseInt(getOpt('天數'));
+      if (Number.isFinite(days) && days > 0) {
+        const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+        list = Object.values(await computeMemberStats(env, owner, from, null));
+        rangeNote = `（近 ${days} 天）`;
+      }
     }
     const m = list.find(x => x.display_name === q) || list.find(x => x.display_name.includes(q));
     if (!m) return reply(`找不到「${q}」，請確認名字是否正確。`);
@@ -1026,6 +1053,23 @@ export default {
           ).bind(user).all());
         }
         return json(results || []);
+      }
+
+      // 某成員名下所有實際上場場次（date|session|type），可帶 from/to 過濾
+      if (url.pathname === "/api/member/sessions" && request.method === "GET") {
+        requireAuth();
+        const memberId = url.searchParams.get("memberId");
+        if (!memberId) return json({ error: "缺少 memberId" }, 400);
+        const from = url.searchParams.get("from") || null;
+        const to = url.searchParams.get("to") || null;
+        const stats = await computeMemberStats(env, user, from, to);
+        const m = stats[memberId];
+        if (!m) return json({ error: "找不到此成員（可能已移除或非 active）", sessions: [] }, 404);
+        const sessions = (m.attendedSessions || []).map(sk => {
+          const [date, session, type] = sk.split('|');
+          return { date, session, type };
+        }).sort((a, b) => (a.date === b.date ? (a.session > b.session ? 1 : -1) : (a.date < b.date ? 1 : -1)));
+        return json({ display_name: m.display_name, job: m.job, count: sessions.length, totalSessions: m.totalSessions, sessions });
       }
 
       // 設定成員身份類別（主幫/副幫/俱樂部/自訂）
@@ -2115,7 +2159,8 @@ export default {
           { name: "查詢", description: "查詢某位成員的出席／請假／後備次數", options: [
             { name: "名字", description: "成員名字", type: 3, required: true },
             { name: "類型", description: "戰報類型（預設全部）", type: 3, required: false, choices: [{ name: "全部", value: "全部" }, { name: "幫戰", value: "幫戰" }, { name: "約戰", value: "約戰" }, { name: "領地戰", value: "領地戰" }] },
-            { name: "天數", description: "只算最近 N 天（選填，例 30）", type: 4, required: false }
+            { name: "天數", description: "只算最近 N 天（選填，例 30）", type: 4, required: false },
+            { name: "日期範圍", description: "例 20260701-0731 或 20260701-20260731（選填）", type: 3, required: false }
           ] },
           { name: "出勤榜", description: "顯示出勤前 10 名" },
           { name: "請假名單", description: "顯示目前開放場次的請假／後備名單", options: [{ name: "日期", description: "只看某天 YYYY-MM-DD（選填）", type: 3, required: false }] }

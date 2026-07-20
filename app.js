@@ -3580,6 +3580,7 @@ function renderRosterAll() {
     const row = (r, isRemoved) => `<div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);${isRemoved ? 'opacity:.75;' : ''}">
         <span style="flex:1;font-weight:600;">${r.display_name}${isRemoved ? ' <span class="status-pill status-closed">已移除</span>' : ''}</span>
         <code style="font-size:11px;color:var(--muted);cursor:pointer;" title="點擊複製 ID" onclick="navigator.clipboard&&navigator.clipboard.writeText('${r.member_id}')">${r.member_id}</code>
+        <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="viewMemberSessions('${r.member_id}','${(r.display_name || '').replace(/'/g, "\\'")}')">場次</button>
         <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="document.getElementById('ra-from').value='${r.member_id}'">來源</button>
         <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="document.getElementById('ra-to').value='${r.member_id}'">目標</button>
         ${isRemoved && r.updated_at ? `<span style="font-size:11px;color:var(--muted);">${fmtWhen(r.updated_at)}</span>` : ''}
@@ -3590,6 +3591,30 @@ function renderRosterAll() {
         <div style="font-weight:bold;color:var(--danger);margin:12px 0 2px;">已移除（${removed.length}）</div>
         ${removed.map(r => row(r, true)).join('') || '<div style="color:var(--muted);">無</div>'}
         <div style="font-size:11px;color:var(--muted);margin-top:8px;">點 ID 可複製。資料仍在資料庫，只是標記為已移除。</div>`;
+}
+async function viewMemberSessions(memberId, name) {
+    const typeLabel = { '幫戰': '幫戰', '約戰': '約戰', '其他': '領地戰' };
+    try {
+        const res = await fetch(WORKER_URL + "/api/member/sessions?memberId=" + encodeURIComponent(memberId) + "&t=" + Date.now(),
+            { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+        const d = await res.json().catch(() => ({}));
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;justify-content:center;align-items:center;z-index:2600;';
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+        let body;
+        if (!res.ok) {
+            body = `<div style="color:var(--muted);">${d.error || '查詢失敗'}<br><span style="font-size:12px;">（此查詢只涵蓋目前在冊(active)的成員；已移除的請先用 ID 合併到現存成員再查）</span></div>`;
+        } else {
+            const rows = (d.sessions || []).map(s => `<tr><td style="padding:4px 8px;">${s.date}</td><td style="padding:4px 8px;">${s.session}</td><td style="padding:4px 8px;">${typeLabel[s.type] || s.type}</td></tr>`).join('');
+            body = `<div style="margin-bottom:8px;">共上場 <b>${d.count}</b> 場（全隊 ${d.totalSessions} 場）　職業：${d.job || '未知'}</div>
+                ${d.count ? `<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="text-align:left;color:var(--muted);border-bottom:1px solid var(--border);"><th style="padding:4px 8px;">日期</th><th style="padding:4px 8px;">場次</th><th style="padding:4px 8px;">類型</th></tr></thead><tbody>${rows}</tbody></table>`
+                    : '<div style="color:var(--muted);">目前沒有上場紀錄。</div>'}`;
+        }
+        modal.innerHTML = `<div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:20px;border-radius:14px;width:460px;max-width:94vw;max-height:80vh;overflow:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><h3 style="margin:0;">📋 ${name || '成員'} 上場場次</h3>
+            <button class="btn btn-outline" onclick="this.closest('div[style*=fixed]').remove()">關閉</button></div>${body}</div>`;
+        document.body.appendChild(modal);
+    } catch (e) { alert('查詢失敗：' + e.message); }
 }
 async function doMergeById() {
     const fromId = (document.getElementById('ra-from')?.value || '').trim();
