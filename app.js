@@ -3581,6 +3581,7 @@ function renderRosterAll() {
         <span style="flex:1;font-weight:600;">${r.display_name}${isRemoved ? ' <span class="status-pill status-closed">已移除</span>' : ''}</span>
         <code style="font-size:11px;color:var(--muted);cursor:pointer;" title="點擊複製 ID" onclick="navigator.clipboard&&navigator.clipboard.writeText('${r.member_id}')">${r.member_id}</code>
         <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="viewMemberSessions('${r.member_id}','${(r.display_name || '').replace(/'/g, "\\'")}')">場次</button>
+        <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="openReassignAliases('${r.member_id}','${(r.display_name || '').replace(/'/g, "\\'")}')">改派</button>
         <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="document.getElementById('ra-from').value='${r.member_id}'">來源</button>
         <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="document.getElementById('ra-to').value='${r.member_id}'">目標</button>
         ${isRemoved && r.updated_at ? `<span style="font-size:11px;color:var(--muted);">${fmtWhen(r.updated_at)}</span>` : ''}
@@ -3615,6 +3616,62 @@ async function viewMemberSessions(memberId, name) {
             <button class="btn btn-outline" onclick="this.closest('div[style*=fixed]').remove()">關閉</button></div>${body}</div>`;
         document.body.appendChild(modal);
     } catch (e) { alert('查詢失敗：' + e.message); }
+}
+async function openReassignAliases(memberId, name) {
+    let aliases = [];
+    try {
+        const res = await fetch(WORKER_URL + "/api/member/aliases?memberId=" + encodeURIComponent(memberId) + "&t=" + Date.now(),
+            { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+        const d = await res.json().catch(() => ({}));
+        aliases = d.aliases || [];
+    } catch (e) { alert('讀取名字失敗：' + e.message); return; }
+    const modal = document.createElement('div');
+    modal.id = 'reassign-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;justify-content:center;align-items:center;z-index:2600;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    const chks = aliases.length
+        ? aliases.map(a => `<label style="display:block;padding:5px 2px;border-bottom:1px solid var(--border);cursor:pointer;"><input type="checkbox" class="rsa-chk" value="${a.replace(/"/g, '&quot;')}"> ${a}</label>`).join('')
+        : '<div style="color:var(--muted);">這個成員名下沒有任何遊戲名字。</div>';
+    modal.innerHTML = `<div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:20px;border-radius:14px;width:480px;max-width:94vw;max-height:84vh;overflow:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><h3 style="margin:0;">🔧 改派名字（從「${name}」）</h3>
+        <button class="btn btn-outline" onclick="document.getElementById('reassign-modal').remove()">關閉</button></div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">勾選<b>本來不屬於這個人</b>的遊戲名字，改派回正確的成員。出席會即時重算（戰報沒被改）。</div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:12px;">${chks}</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <label style="font-size:13px;"><input type="radio" name="rsa-mode" value="new" checked> 建成/併入一個成員，名字：
+                <input type="text" id="rsa-newname" class="search-input" style="width:150px;font-size:12px;" placeholder="留空＝用第一個勾選名"></label>
+            <label style="font-size:13px;"><input type="radio" name="rsa-mode" value="existing"> 併入現有成員 ID：
+                <input type="text" id="rsa-toid" class="search-input" style="width:220px;font-size:12px;" placeholder="貼上目標 member_id"></label>
+            <button class="btn btn-primary" onclick="doReassign('${memberId}')">改派</button>
+        </div>
+    </div>`;
+    document.body.appendChild(modal);
+}
+async function doReassign(fromMemberId) {
+    const aliasNames = Array.from(document.querySelectorAll('.rsa-chk:checked')).map(c => c.value);
+    if (!aliasNames.length) { alert('請至少勾選一個名字'); return; }
+    const mode = (document.querySelector('input[name="rsa-mode"]:checked') || {}).value || 'new';
+    const body = { aliasNames, mode };
+    if (mode === 'new') body.newName = (document.getElementById('rsa-newname')?.value || '').trim();
+    else {
+        body.toMemberId = (document.getElementById('rsa-toid')?.value || '').trim();
+        if (!body.toMemberId) { alert('請貼上目標成員 ID'); return; }
+        if (body.toMemberId === fromMemberId) { alert('目標與來源相同'); return; }
+    }
+    if (!confirm(`確定把 ${aliasNames.length} 個名字改派？出席會依戰報重算。`)) return;
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster/reassign-aliases", {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify(body)
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert('改派失敗：' + (d.error || res.status)); return; }
+        alert(`✅ 已改派 ${d.moved} 個名字。`);
+        document.getElementById('reassign-modal')?.remove();
+        document.getElementById('roster-all-modal')?.remove();
+        await loadRoster();
+        if (document.getElementById('page-db')?.style.display !== 'none') await loadDbData();
+    } catch (e) { alert('改派失敗：' + e.message); }
 }
 async function doMergeById() {
     const fromId = (document.getElementById('ra-from')?.value || '').trim();

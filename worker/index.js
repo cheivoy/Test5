@@ -1072,6 +1072,58 @@ export default {
         return json({ display_name: m.display_name, job: m.job, count: sessions.length, totalSessions: m.totalSessions, sessions });
       }
 
+      // 列出某成員名下所有遊戲名字（別名）——用來拆分合錯的人
+      if (url.pathname === "/api/member/aliases" && request.method === "GET") {
+        requireAuth();
+        const memberId = url.searchParams.get("memberId");
+        if (!memberId) return json({ error: "缺少 memberId" }, 400);
+        const { results } = await env.DB.prepare(
+          "SELECT alias_name FROM member_aliases WHERE owner = ? AND member_id = ? ORDER BY alias_name"
+        ).bind(user, memberId).all();
+        return json({ aliases: (results || []).map(r => r.alias_name) });
+      }
+
+      // 把選定的遊戲名字改派到另一個成員（拆分合錯的合併，出席會即時重算回來）
+      if (url.pathname === "/api/roster/reassign-aliases" && request.method === "POST") {
+        requireAuth();
+        const { aliasNames, mode, toMemberId, newName } = await request.json();
+        if (!Array.isArray(aliasNames) || aliasNames.length === 0) return json({ error: "請選擇要改派的名字" }, 400);
+        const now = Date.now();
+        let targetId = toMemberId;
+        if (mode === 'new') {
+          const name = String(newName || aliasNames[0] || '').trim();
+          if (!name) return json({ error: "缺少新成員名字" }, 400);
+          const exist = await env.DB.prepare(
+            "SELECT member_id FROM members_roster WHERE owner=? AND display_name=? AND status='active'"
+          ).bind(user, name).first();
+          if (exist) { targetId = exist.member_id; }
+          else {
+            targetId = crypto.randomUUID();
+            await env.DB.prepare(
+              "INSERT INTO members_roster (member_id, owner, display_name, status, version, created_at, updated_at) VALUES (?, ?, ?, 'active', 1, ?, ?)"
+            ).bind(targetId, user, name, now, now).run();
+          }
+        } else {
+          if (!targetId) return json({ error: "缺少目標成員 ID" }, 400);
+          const row = await env.DB.prepare(
+            "SELECT member_id, status FROM members_roster WHERE owner=? AND member_id=?"
+          ).bind(user, targetId).first();
+          if (!row) return json({ error: "找不到目標成員" }, 404);
+          if (row.status !== 'active') {
+            await env.DB.prepare(
+              "UPDATE members_roster SET status='active', updated_at=?, version=version+1 WHERE owner=? AND member_id=?"
+            ).bind(now, user, targetId).run();
+          }
+        }
+        let moved = 0;
+        for (const a of aliasNames) {
+          await env.DB.prepare("UPDATE member_aliases SET member_id=? WHERE owner=? AND alias_name=?").bind(targetId, user, a).run();
+          moved++;
+        }
+        await writeAudit(env, user, user, 'roster', targetId, 'reassign_aliases', { aliasNames, mode });
+        return json({ status: "OK", member_id: targetId, moved });
+      }
+
       // 設定成員身份類別（主幫/副幫/俱樂部/自訂）
       if (url.pathname === "/api/roster/category" && request.method === "POST") {
         requireAuth();
