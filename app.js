@@ -1237,14 +1237,15 @@ async function _loadDbDataImpl() {
     let noteMap = {};
     const jobSet = new Set();
     (Array.isArray(dbRaw) ? dbRaw : []).forEach(m => {
-        let noteStr = "", tagStr = "none", storedJob = m.last_job;
+        let noteStr = "", tagStr = "none", storedJob = m.last_job, jobAt = null;
         try {
             const p = JSON.parse(m.note);
             noteStr = p.text || "";
             tagStr = p.tag || "none";
             if (p.last_job) storedJob = p.last_job;
+            if (p.last_job_at) jobAt = p.last_job_at; // 手動改職業的時間戳
         } catch (e) { noteStr = m.note || ""; }
-        noteMap[m.id] = { note: noteStr, tag: tagStr, lastJob: storedJob, version: (typeof m.version === 'number' ? m.version : null) };
+        noteMap[m.id] = { note: noteStr, tag: tagStr, lastJob: storedJob, lastJobAt: jobAt, version: (typeof m.version === 'number' ? m.version : null) };
         if (m.last_job) jobSet.add(m.last_job);
     });
 
@@ -1343,8 +1344,19 @@ async function _loadDbDataImpl() {
     dbMembersMap = Object.values(map).map(m => {
         m.note = noteMap[m.id]?.note || "";
         m.tag = noteMap[m.id]?.tag || "none";
-        // last_job 以前端計算（最新一場）為主；無戰報則用名冊登記的職業
-        if (!m.last_job) m.last_job = noteMap[m.id]?.lastJob || (m.member_id ? memberIdToJob[m.member_id] : '') || "未知";
+        const manualJob = noteMap[m.id]?.lastJob;
+        const manualAt = noteMap[m.id]?.lastJobAt;
+        m.lastJobAt = manualAt || null;
+        // 職業判定：
+        //  1) 手動改過（有時間戳）→ 除非有「戰報日期 > 手動編輯日期」的更新戰報，否則維持手動職業
+        //  2) 沒手動改 → 以最新戰報為主；無戰報用名冊登記職業
+        if (manualJob && manualAt) {
+            const manualDate = ymd(new Date(manualAt));
+            if (!m.latestDate || manualDate >= m.latestDate) m.last_job = manualJob; // 手動較新或無更新戰報 → 用手動
+            // 否則保留戰報職業（m.last_job 已是最新戰報職業）
+        } else if (!m.last_job) {
+            m.last_job = manualJob || (m.member_id ? memberIdToJob[m.member_id] : '') || "未知";
+        }
         m.category = m.member_id ? (memberIdToCategory[m.member_id] || '') : '';
         m.rate = totalReportsInTimeframe > 0 ? (m.matches / totalReportsInTimeframe * 100) : 0;
         m.noteVersion = noteMap[m.id]?.version ?? null; // 成員檔案版本（防覆寫）
@@ -1911,11 +1923,14 @@ async function saveMemberProfile() {
     const newJob = document.getElementById('mm-job')?.value || focusPlayer.last_job;
     const catEl = document.getElementById('mm-category');
     const newCategory = (catEl && catEl.value !== '__new__') ? catEl.value : (focusPlayer.category || '');
+    // 手動改了職業才蓋時間戳（記今天）；沒改就沿用舊時間戳。之後只有「戰報日期 > 此時間戳」才會覆蓋
+    const jobChanged = (newJob !== focusPlayer.last_job);
+    const jobAt = jobChanged ? Date.now() : (focusPlayer.lastJobAt || null);
 
     if (storageMode === 'cloud' && currentUser) {
         const payload = {
             id: focusPlayer.id,
-            note: JSON.stringify({ text: newNote, tag: newTag, last_job: newJob }),
+            note: JSON.stringify({ text: newNote, tag: newTag, last_job: newJob, last_job_at: jobAt }),
             expected_version: (typeof focusPlayer.noteVersion === 'number' ? focusPlayer.noteVersion : undefined)
         };
         const res = await fetch(WORKER_URL + "/api/update-note", {
@@ -1952,14 +1967,16 @@ async function saveMemberProfile() {
         const target = dbMembersMap.find(x => x.id === focusPlayer.id);
         if (target) {
             target.last_job = newJob;
+            target.lastJobAt = jobAt;
             target.note = newNote;
             target.tag = newTag;
             target.category = newCategory;
         }
+        focusPlayer.lastJobAt = jobAt;
     } else {
         const membersMap = getLocalMembers();
         if (!membersMap[focusPlayer.id]) membersMap[focusPlayer.id] = { id: focusPlayer.id, last_job: newJob, matches: 0, total_dmg: 0, note: '' };
-        membersMap[focusPlayer.id].note = JSON.stringify({ text: newNote, tag: newTag, last_job: newJob });
+        membersMap[focusPlayer.id].note = JSON.stringify({ text: newNote, tag: newTag, last_job: newJob, last_job_at: jobAt });
         membersMap[focusPlayer.id].last_job = newJob;
         saveLocalMembers(membersMap);
     }
