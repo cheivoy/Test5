@@ -3552,6 +3552,14 @@ async function openRosterAllModal() {
         <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="margin:0;">👁 成員 ID／已移除紀錄</h3>
         <button class="btn btn-outline" onclick="document.getElementById('roster-all-modal').remove()">關閉</button></div>
         <input type="text" id="ra-search" class="search-input" placeholder="🔍 搜尋名字…" oninput="renderRosterAll()">
+        <div style="background:var(--band, #efede7);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;">
+            <b>🔀 用 ID 合併：</b>
+            <input type="text" id="ra-from" class="search-input" placeholder="來源ID" style="width:150px;font-size:11px;">
+            <span>→</span>
+            <input type="text" id="ra-to" class="search-input" placeholder="目標ID(留下)" style="width:150px;font-size:11px;">
+            <button class="btn btn-primary" style="font-size:12px;" onclick="doMergeById()">合併</button>
+            <span style="color:var(--muted);flex-basis:100%;">來源會被移除，所有名字/出席/請假/後備/缺席/代打/長期請假都轉到目標。下面每列可按「來源／目標」快速填。</span>
+        </div>
         <div id="ra-body" style="font-size:13px;">載入中…</div></div>`;
     document.body.appendChild(modal);
     try {
@@ -3569,9 +3577,11 @@ function renderRosterAll() {
     const active = all.filter(r => r.status === 'active');
     const removed = all.filter(r => r.status !== 'active');
     const fmtWhen = (ms) => ms ? new Date(ms).toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-    const row = (r, isRemoved) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);${isRemoved ? 'opacity:.75;' : ''}">
+    const row = (r, isRemoved) => `<div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);${isRemoved ? 'opacity:.75;' : ''}">
         <span style="flex:1;font-weight:600;">${r.display_name}${isRemoved ? ' <span class="status-pill status-closed">已移除</span>' : ''}</span>
         <code style="font-size:11px;color:var(--muted);cursor:pointer;" title="點擊複製 ID" onclick="navigator.clipboard&&navigator.clipboard.writeText('${r.member_id}')">${r.member_id}</code>
+        <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="document.getElementById('ra-from').value='${r.member_id}'">來源</button>
+        <button class="btn btn-outline" style="font-size:10px;padding:2px 6px;" onclick="document.getElementById('ra-to').value='${r.member_id}'">目標</button>
         ${isRemoved && r.updated_at ? `<span style="font-size:11px;color:var(--muted);">${fmtWhen(r.updated_at)}</span>` : ''}
     </div>`;
     box.innerHTML = `
@@ -3580,6 +3590,26 @@ function renderRosterAll() {
         <div style="font-weight:bold;color:var(--danger);margin:12px 0 2px;">已移除（${removed.length}）</div>
         ${removed.map(r => row(r, true)).join('') || '<div style="color:var(--muted);">無</div>'}
         <div style="font-size:11px;color:var(--muted);margin-top:8px;">點 ID 可複製。資料仍在資料庫，只是標記為已移除。</div>`;
+}
+async function doMergeById() {
+    const fromId = (document.getElementById('ra-from')?.value || '').trim();
+    const toId = (document.getElementById('ra-to')?.value || '').trim();
+    if (!fromId || !toId) { alert('請填來源與目標 ID'); return; }
+    if (fromId === toId) { alert('來源與目標不能相同'); return; }
+    const nameOf = (id) => { const r = (window._rosterAll || []).find(x => x.member_id === id); return r ? r.display_name : id.slice(0, 8); };
+    if (!confirm(`確定把「${nameOf(fromId)}」合併進「${nameOf(toId)}」？\n來源會被移除，其所有名字/出席/請假/後備/缺席/代打/長期請假都轉到目標，無法自動還原。`)) return;
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster/merge-by-id", {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ fromId, toId })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert('合併失敗：' + (d.error || res.status)); return; }
+        alert(`✅ 已合併：「${d.from || fromId}」→「${d.to || toId}」`);
+        document.getElementById('roster-all-modal')?.remove();
+        await loadRoster();
+        if (document.getElementById('page-db')?.style.display !== 'none') await loadDbData();
+    } catch (e) { alert('合併失敗：' + e.message); }
 }
 
 function renderRosterList() {

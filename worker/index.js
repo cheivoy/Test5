@@ -2324,6 +2324,31 @@ export default {
         return json({ status: "OK", updated: 0 });
       }
 
+      // 🔀 用 member_id 完整合併（別名＋請假/後備/缺席/臨時/補登＋代打＋長期請假 全部轉到目標）
+      if (url.pathname === "/api/roster/merge-by-id" && request.method === "POST") {
+        requireAuth();
+        const { fromId, toId } = await request.json(); // 兩者皆為 member_id
+        if (!fromId || !toId) return json({ error: "參數錯誤" }, 400);
+        if (fromId === toId) return json({ error: "來源與目標相同" }, 400);
+        const f = await env.DB.prepare("SELECT member_id, display_name FROM members_roster WHERE owner=? AND member_id=?").bind(user, fromId).first();
+        const t = await env.DB.prepare("SELECT member_id, display_name FROM members_roster WHERE owner=? AND member_id=?").bind(user, toId).first();
+        if (!f || !t) return json({ error: "找不到來源或目標成員（請確認 ID）" }, 404);
+        const now = Date.now();
+        const run = async (sql, ...b) => { try { await env.DB.prepare(sql).bind(...b).run(); } catch (e) { /* 個別衝突略過，不影響其餘搬移 */ } };
+        await run("UPDATE member_aliases SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
+        await run("UPDATE leave_actions SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
+        await run("UPDATE leave_substitutes SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
+        await run("UPDATE leave_substitutes SET substitute_member_id=? WHERE owner=? AND substitute_member_id=?", toId, user, fromId);
+        await run("UPDATE long_leaves SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
+        try {
+          const toOv = await env.DB.prepare("SELECT member_id FROM stat_overrides WHERE owner=? AND member_id=?").bind(user, toId).first();
+          if (!toOv) await run("UPDATE stat_overrides SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
+        } catch (e) { }
+        await run("UPDATE members_roster SET status='removed', updated_at=?, version=version+1 WHERE owner=? AND member_id=?", now, user, fromId);
+        await writeAudit(env, user, user, 'roster', fromId, 'merge_by_id', { from: fromId, to: toId, fromName: f.display_name, toName: t.display_name });
+        return json({ status: "OK", from: f.display_name, to: t.display_name });
+      }
+
       // =========================
       // ✏️ 更名（改為更新 roster + alias，不再重寫歷史戰報 raw_json）
       // =========================
