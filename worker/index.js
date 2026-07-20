@@ -75,18 +75,22 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   // fromDate/toDate（'YYYY-MM-DD'，可選）：只計算場次日期落在範圍內的請假/後備
   const winType = {};
   const winDate = {};
+  const winSession = {};
   try {
     const { results: wins } = await env.DB.prepare(
-      "SELECT window_id, match_type, event_date FROM leave_windows WHERE owner = ?"
+      "SELECT window_id, match_type, event_date, session FROM leave_windows WHERE owner = ?"
     ).bind(owner).all();
-    (wins || []).forEach(w => { winType[w.window_id] = w.match_type || '幫戰'; winDate[w.window_id] = w.event_date || ''; });
+    (wins || []).forEach(w => { winType[w.window_id] = w.match_type || '幫戰'; winDate[w.window_id] = w.event_date || ''; winSession[w.window_id] = w.session || '第一場'; });
   } catch (e) {
     // match_type 欄位尚未建立（migration 004 還沒跑）→ 全部視為幫戰
     const { results: wins } = await env.DB.prepare(
-      "SELECT window_id, event_date FROM leave_windows WHERE owner = ?"
+      "SELECT window_id, event_date, session FROM leave_windows WHERE owner = ?"
     ).bind(owner).all();
-    (wins || []).forEach(w => { winType[w.window_id] = '幫戰'; winDate[w.window_id] = w.event_date || ''; });
+    (wins || []).forEach(w => { winType[w.window_id] = '幫戰'; winDate[w.window_id] = w.event_date || ''; winSession[w.window_id] = w.session || '第一場'; });
   }
+  // 場次鍵（日期|場次|類型）→ window_id，供對照戰報
+  const winKey = {};
+  for (const wid in winDate) winKey[`${winDate[wid]}|${winSession[wid] || '第一場'}|${winType[wid] || '幫戰'}`] = wid;
   const inRange = (wid) => {
     const d = winDate[wid] || '';
     if (fromDate && (!d || d < fromDate)) return false;
@@ -101,6 +105,7 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   const reserveState = {};
   const lateState = {};    // 臨時請假
   const noshowState = {};  // No-show（說要來卻沒來，另計、不併入請假）
+  const attendState = {};  // 補登出席
   for (const a of results || []) {
     const key = a.window_id + "|" + a.member_id;
     if (a.action === 'leave_request') leaveState[key] = true;
@@ -111,7 +116,35 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
     else if (a.action === 'late_unset') lateState[key] = false;
     else if (a.action === 'noshow_set') noshowState[key] = true;
     else if (a.action === 'noshow_unset') noshowState[key] = false;
+    else if (a.action === 'attend_set') attendState[key] = true;
+    else if (a.action === 'attend_unset') attendState[key] = false;
   }
+  // 出席優先：某人某場在「戰報」出現（或補登出席）＝他上場了 → 該場算出席，
+  // 覆蓋掉他那場的請假/後備/缺席/臨時（避免同一場又出席又後備）。
+  const attendedSet = new Set(); // `${window}|${member}`
+  for (const key in attendState) if (attendState[key]) attendedSet.add(key);
+  try {
+    const { results: aliasRows } = await env.DB.prepare("SELECT alias_name, member_id FROM member_aliases WHERE owner = ?").bind(owner).all();
+    const aliasMap = {}; (aliasRows || []).forEach(a => { aliasMap[a.alias_name] = a.member_id; });
+    const subByWin = {};
+    try {
+      const { results: subs } = await env.DB.prepare("SELECT window_id, member_id, substitute_member_id FROM leave_substitutes WHERE owner = ?").bind(owner).all();
+      (subs || []).forEach(s => { (subByWin[s.window_id] = subByWin[s.window_id] || {})[s.member_id] = s.substitute_member_id; });
+    } catch (e) { /* 無代打表 */ }
+    const { results: reps } = await env.DB.prepare("SELECT date, raw_json FROM reports WHERE owner = ?").bind(owner).all();
+    for (const rep of reps || []) {
+      let d; try { d = JSON.parse(rep.raw_json); } catch { continue; }
+      const wid = winKey[`${rep.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`];
+      if (!wid) continue;
+      const subs = subByWin[wid] || {};
+      (d.gA || []).forEach(p => {
+        let mid = aliasMap[p.name];
+        if (!mid) return;
+        if (subs[mid]) mid = subs[mid]; // 代打 → 算代打者上場
+        attendedSet.add(wid + '|' + mid);
+      });
+    }
+  } catch (e) { /* 出席去重失敗就略過，不影響其餘統計 */ }
   const byMember = {};
   const byWindow = {};
   const ensureMember = (mid) => {
@@ -124,6 +157,7 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   };
   for (const key in leaveState) {
     if (!leaveState[key]) continue;
+    if (attendedSet.has(key)) continue; // 該場已上場（戰報）→ 不算請假
     const [wid, mid] = key.split("|");
     if (!inRange(wid)) continue;
     const t = winType[wid] || '幫戰';
@@ -147,6 +181,7 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
       if (!inRange(wid)) continue;
       const key = wid + "|" + ll.member_id;
       if (key in leaveState) continue; // 單場明確動作（請假或取消）優先
+      if (attendedSet.has(key)) continue; // 該場已上場（戰報）→ 不算長期請假
       const t = winType[wid] || '幫戰';
       const m = ensureMember(ll.member_id);
       m.leave++;
@@ -157,6 +192,7 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   }
   for (const key in reserveState) {
     if (!reserveState[key]) continue;
+    if (attendedSet.has(key)) continue; // 該場已上場（戰報）→ 不算後備（後備-1、出席+1）
     const [wid, mid] = key.split("|");
     if (!inRange(wid)) continue;
     const t = winType[wid] || '幫戰';
@@ -168,6 +204,7 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   // 臨時請假：併入請假次數（leaveByType），另外單獨累計 lateByType 以便醒目標示
   for (const key in lateState) {
     if (!lateState[key]) continue;
+    if (attendedSet.has(key)) continue; // 該場已上場（戰報）→ 不算臨時請假
     const [wid, mid] = key.split("|");
     if (!inRange(wid)) continue;
     // 同一場已經算過正式請假就不重複加（避免 leave_request + late 雙算）
@@ -183,6 +220,7 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   // No-show：單獨累計，不併入請假
   for (const key in noshowState) {
     if (!noshowState[key]) continue;
+    if (attendedSet.has(key)) continue; // 該場已上場（戰報）→ 不算缺席
     const [wid, mid] = key.split("|");
     if (!inRange(wid)) continue;
     const t = winType[wid] || '幫戰';

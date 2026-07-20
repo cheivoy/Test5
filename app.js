@@ -1445,11 +1445,13 @@ function getDbSelectedTypes() {
 function dbMemberView(m, selTypes) {
     const sum = (obj) => selTypes.reduce((s, t) => s + ((obj && obj[t]) || 0), 0);
     const att = sum(m.attByTypeEff);
+    const rs = sum(m.reserveByType);
     const denom = selTypes.reduce((s, t) => s + (dbSessionCountByType[t] || 0), 0);
     return {
-        att, matches: att, lv: sum(m.leaveByType), rs: sum(m.reserveByType),
+        att, matches: att, lv: sum(m.leaveByType), rs,
         ns: sum(m.noshowByType), late: sum(m.lateByType),
-        rate: denom > 0 ? att / denom * 100 : 0
+        // 出席率＝（出席＋後備）÷ 場次（後備也算參與）；上限 100%
+        rate: denom > 0 ? Math.min(100, (att + rs) / denom * 100) : 0
     };
 }
 

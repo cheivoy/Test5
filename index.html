@@ -3,7 +3,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=37">
+    <link rel="stylesheet" href="style.css?v=38">
 </head>
 
 <body>
@@ -232,7 +232,7 @@
                             <th onclick="sortDb('matches')">總場次 ↕</th>
                             <th>幫戰/約戰/領地戰</th>
                             <th title="出席 / 請假 / 後備 / 缺席（滑鼠移上去看各類型明細）">出席/請假/後備/缺席</th>
-                            <th onclick="sortDb('rate')">出席率 ↕</th>
+                            <th onclick="sortDb('rate')" title="（出席＋後備）÷ 場次；戰報有名字者以出席為準">出席率 ↕</th>
                             <th>管理員評語</th>
                             <th class="admin-only">操作</th>
                         </tr>
@@ -707,5 +707,5 @@
 
     <div id="loading-overlay"><div class="load-box"><div class="load-spin"></div><div class="load-text">努力加載中…</div></div></div>
 
-    <script src="app.js?v=37"></script>
+    <script src="app.js?v=38"></script>
 </body></html>
