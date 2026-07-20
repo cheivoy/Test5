@@ -1,2 +1,9 @@
 
 DC機器人設定.txt
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
