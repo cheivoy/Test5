@@ -3540,6 +3540,48 @@ async function loadRoster() {
     renderRosterList();
 }
 
+// 檢視全部成員（含已移除）＋ 成員 ID
+async function openRosterAllModal() {
+    const existing = document.getElementById('roster-all-modal');
+    if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'roster-all-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2400;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    modal.innerHTML = `<div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:20px;border-radius:14px;width:560px;max-width:94vw;max-height:86vh;overflow:auto;display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;"><h3 style="margin:0;">👁 成員 ID／已移除紀錄</h3>
+        <button class="btn btn-outline" onclick="document.getElementById('roster-all-modal').remove()">關閉</button></div>
+        <input type="text" id="ra-search" class="search-input" placeholder="🔍 搜尋名字…" oninput="renderRosterAll()">
+        <div id="ra-body" style="font-size:13px;">載入中…</div></div>`;
+    document.body.appendChild(modal);
+    try {
+        const res = await fetch(WORKER_URL + "/api/roster/all?t=" + Date.now(), { cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token } });
+        window._rosterAll = await res.json();
+        if (!Array.isArray(window._rosterAll)) window._rosterAll = [];
+    } catch (e) { window._rosterAll = []; }
+    renderRosterAll();
+}
+function renderRosterAll() {
+    const box = document.getElementById('ra-body');
+    if (!box) return;
+    const q = (document.getElementById('ra-search')?.value || '').toLowerCase().trim();
+    const all = (window._rosterAll || []).filter(r => !q || (r.display_name || '').toLowerCase().includes(q) || (r.member_id || '').includes(q));
+    const active = all.filter(r => r.status === 'active');
+    const removed = all.filter(r => r.status !== 'active');
+    const fmtWhen = (ms) => ms ? new Date(ms).toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+    const row = (r, isRemoved) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);${isRemoved ? 'opacity:.75;' : ''}">
+        <span style="flex:1;font-weight:600;">${r.display_name}${isRemoved ? ' <span class="status-pill status-closed">已移除</span>' : ''}</span>
+        <code style="font-size:11px;color:var(--muted);cursor:pointer;" title="點擊複製 ID" onclick="navigator.clipboard&&navigator.clipboard.writeText('${r.member_id}')">${r.member_id}</code>
+        ${isRemoved && r.updated_at ? `<span style="font-size:11px;color:var(--muted);">${fmtWhen(r.updated_at)}</span>` : ''}
+    </div>`;
+    box.innerHTML = `
+        <div style="font-weight:bold;color:#2e7d32;margin-bottom:2px;">現有成員（${active.length}）</div>
+        ${active.map(r => row(r, false)).join('') || '<div style="color:var(--muted);">無</div>'}
+        <div style="font-weight:bold;color:var(--danger);margin:12px 0 2px;">已移除（${removed.length}）</div>
+        ${removed.map(r => row(r, true)).join('') || '<div style="color:var(--muted);">無</div>'}
+        <div style="font-size:11px;color:var(--muted);margin-top:8px;">點 ID 可複製。資料仍在資料庫，只是標記為已移除。</div>`;
+}
+
 function renderRosterList() {
     const el = document.getElementById('roster-list');
     if (!el) return;

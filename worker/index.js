@@ -978,6 +978,22 @@ export default {
         return json(results || []);
       }
 
+      // 全部名冊（含已移除）：查成員 ID 對照與已刪除紀錄
+      if (url.pathname === "/api/roster/all" && request.method === "GET") {
+        requireAuth();
+        let results;
+        try {
+          ({ results } = await env.DB.prepare(
+            "SELECT member_id, display_name, status, job, updated_at FROM members_roster WHERE owner = ? ORDER BY status ASC, display_name ASC"
+          ).bind(user).all());
+        } catch (e) {
+          ({ results } = await env.DB.prepare(
+            "SELECT member_id, display_name, status FROM members_roster WHERE owner = ?"
+          ).bind(user).all());
+        }
+        return json(results || []);
+      }
+
       // 設定成員身份類別（主幫/副幫/俱樂部/自訂）
       if (url.pathname === "/api/roster/category" && request.method === "POST") {
         requireAuth();
