@@ -259,10 +259,22 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
       ).bind(owner).all());
     }
   }
+  // 手動職業備援：成員檔案室由管理員手動改的職業存在 members.note 的 last_job。
+  // 名冊沒填職業、又沒戰報時（例如只請假、從沒上場），用它補上，避免請假名單顯示「未知」。
+  const manualJobByName = {};
+  try {
+    const { results: noteRows } = await env.DB.prepare(
+      "SELECT id, note FROM members WHERE owner = ?"
+    ).bind(owner).all();
+    (noteRows || []).forEach(n => {
+      try { const p = JSON.parse(n.note); if (p && p.last_job) manualJobByName[n.id] = p.last_job; } catch (e) { /* 舊資料 note 是純文字，略過 */ }
+    });
+  } catch (e) { /* members 表/note 欄位異常時略過，不影響主要統計 */ }
+
   const members = {};
   (roster || []).forEach(r => {
-    // 職業預設用名冊自填值（自助建檔時填的），之後有戰報就以戰報實際職業為準
-    members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: r.job || '未知', category: r.category || '', attendance: 0, attendanceByType: {}, _latest: '' };
+    // 職業判定順序：名冊自填值（自助建檔時填的）→ 檔案室手動職業 → 都沒有才「未知」；之後有戰報就以戰報實際職業為準
+    members[r.member_id] = { member_id: r.member_id, display_name: r.display_name, job: r.job || manualJobByName[r.display_name] || '未知', category: r.category || '', attendance: 0, attendanceByType: {}, _latest: '' };
   });
 
   // 代替上號對照：key = `日期|場次|類型` → { 本人member_id: 代打者member_id }
@@ -1629,6 +1641,69 @@ export default {
         ).bind(crypto.randomUUID(), user, member_id, from_date, to_date, reason || '', Date.now(), user).run();
         await writeAudit(env, user, user, 'long_leave', member_id, 'create', { from_date, to_date });
         return json({ status: "OK" });
+      }
+
+      // 長期/預先請假：管理員調整範圍（僅管理員；縮短範圍若移出已生效場次，需帶 confirm 才會真的改）
+      if (url.pathname === "/api/leave/long/update" && request.method === "POST") {
+        requireAuth();
+        const { id, from_date, to_date, reason, confirm } = await request.json();
+        if (!id || !from_date || !to_date) return json({ error: "請填起訖日期" }, 400);
+        if (from_date > to_date) return json({ error: "起始日不能晚於結束日" }, 400);
+        const row = await env.DB.prepare(
+          "SELECT id, member_id, from_date, to_date, reason FROM long_leaves WHERE owner = ? AND id = ?"
+        ).bind(user, id).first();
+        if (!row) return json({ error: "找不到這筆長期請假" }, 404);
+        // 與同一成員的其他長期請假重疊檢查（排除自己）
+        const overlap = await env.DB.prepare(
+          "SELECT id FROM long_leaves WHERE owner = ? AND member_id = ? AND id != ? AND from_date <= ? AND to_date >= ?"
+        ).bind(user, row.member_id, id, to_date, from_date).first();
+        if (overlap) return json({ error: "這個成員在這段期間已有另一筆長期請假，會重疊" }, 400);
+
+        // 找出「被移出涵蓋」且原本因這筆長期請假而算請假的場次（＝新範圍外、原範圍內、且他這場沒有單場明確請假、也沒上場）
+        const stats = await computeLeaveStats(env, user);
+        let wins = [];
+        try {
+          ({ results: wins } = await env.DB.prepare(
+            "SELECT window_id, event_date, session, match_type FROM leave_windows WHERE owner = ?"
+          ).bind(user).all());
+        } catch (e) {
+          ({ results: wins } = await env.DB.prepare(
+            "SELECT window_id, event_date, session FROM leave_windows WHERE owner = ?"
+          ).bind(user).all());
+        }
+        // 該成員的單場明確請假狀態（有明確動作就不受長期範圍影響）
+        const explicitLeave = {};
+        try {
+          const { results: acts } = await env.DB.prepare(
+            "SELECT window_id, action FROM leave_actions WHERE owner = ? AND member_id = ? AND action IN ('leave_request','leave_cancel') ORDER BY created_at ASC"
+          ).bind(user, row.member_id).all();
+          (acts || []).forEach(a => { explicitLeave[a.window_id] = (a.action === 'leave_request'); });
+        } catch (e) { /* 無 leave_actions 表 */ }
+
+        const affected = [];
+        for (const w of wins || []) {
+          const d = w.event_date || '';
+          const inOld = d >= row.from_date && d <= row.to_date;
+          const inNew = d >= from_date && d <= to_date;
+          if (!(inOld && !inNew)) continue;                       // 只看被移出涵蓋的場次
+          const leaveList = stats.byWindow[w.window_id]?.leave || [];
+          if (!leaveList.includes(row.member_id)) continue;       // 這場本來就沒把他算成請假
+          if (explicitLeave[w.window_id] === true) continue;      // 這場他有單場明確請假 → 不因範圍改變
+          affected.push({ event_date: d, session: w.session || '第一場', match_type: w.match_type || '幫戰' });
+        }
+        affected.sort((a, b) => a.event_date === b.event_date ? (a.session < b.session ? -1 : 1) : (a.event_date < b.event_date ? -1 : 1));
+
+        // 有受影響場次又還沒確認 → 先回傳清單讓前端提醒，不改資料
+        if (affected.length && !confirm) return json({ needConfirm: true, affected });
+
+        const newReason = (typeof reason === 'string') ? reason : (row.reason || '');
+        await env.DB.prepare(
+          "UPDATE long_leaves SET from_date = ?, to_date = ?, reason = ? WHERE owner = ? AND id = ?"
+        ).bind(from_date, to_date, newReason, user, id).run();
+        await writeAudit(env, user, user, 'long_leave', row.member_id, 'update', {
+          from: { from_date: row.from_date, to_date: row.to_date }, to: { from_date, to_date }, affected: affected.length
+        });
+        return json({ status: "OK", affected: affected.length });
       }
 
       // 長期/預先請假：管理員刪除

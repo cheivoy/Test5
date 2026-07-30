@@ -2813,14 +2813,60 @@ async function _loadLongLeavesImpl() {
         const tag = effective
             ? `<span class="status-pill" style="background:#e8f5e9;color:#2e7d32;">生效中${future ? '（未來場次）' : ''}</span>`
             : '<span class="status-pill status-closed">已過期</span>';
+        const reasonAttr = (r.reason || '').replace(/"/g, '&quot;');
         return `<div class="lw-card" style="align-items:center; justify-content:space-between;">
-            <div>
+            <div style="flex:1; min-width:0;">
                 <div style="font-weight:bold;">${r.display_name} ${tag}</div>
                 <div style="font-size:12px; color:var(--muted); margin-top:2px;">${r.from_date} ~ ${r.to_date}${r.reason ? '　·　' + r.reason : ''}${r.created_by === 'public' ? '　·　本人申請' : ''}</div>
+                <div id="ll-edit-${r.id}" style="display:none; margin-top:8px; padding:8px; background:var(--surface-2, rgba(0,0,0,0.03)); border-radius:8px;">
+                    <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:13px;">
+                        <input type="date" id="ll-edit-from-${r.id}" value="${r.from_date}" style="padding:4px 6px;">
+                        <span>~</span>
+                        <input type="date" id="ll-edit-to-${r.id}" value="${r.to_date}" style="padding:4px 6px;">
+                        <input type="text" id="ll-edit-reason-${r.id}" value="${reasonAttr}" placeholder="原因（選填）" style="padding:4px 6px; flex:1; min-width:100px;">
+                    </div>
+                    <div style="margin-top:6px; display:flex; gap:6px;">
+                        <button class="btn btn-primary" style="font-size:12px;" onclick="submitLongEdit('${r.id}', '${r.member_id}')">儲存</button>
+                        <button class="btn btn-outline" style="font-size:12px;" onclick="toggleLongEdit('${r.id}', false)">取消</button>
+                    </div>
+                </div>
             </div>
-            <button class="btn btn-outline" style="font-size:12px; color:var(--danger);" onclick="deleteLongLeave('${r.id}')">刪除</button>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+                <button class="btn btn-outline" style="font-size:12px;" onclick="toggleLongEdit('${r.id}', true)">調整</button>
+                <button class="btn btn-outline" style="font-size:12px; color:var(--danger);" onclick="deleteLongLeave('${r.id}')">刪除</button>
+            </div>
         </div>`;
     }).join('');
+}
+
+function toggleLongEdit(id, show) {
+    const box = document.getElementById('ll-edit-' + id);
+    if (box) box.style.display = show ? 'block' : 'none';
+}
+
+// 送出長期請假範圍調整；縮短範圍若移出已生效場次，後端會回 needConfirm＋清單 → 提醒後帶 confirm 再送一次
+async function submitLongEdit(id, memberId, confirmed) {
+    const from_date = document.getElementById('ll-edit-from-' + id)?.value || '';
+    const to_date = document.getElementById('ll-edit-to-' + id)?.value || '';
+    const reason = document.getElementById('ll-edit-reason-' + id)?.value || '';
+    if (!from_date || !to_date) { alert('請選起訖日期'); return; }
+    if (from_date > to_date) { alert('起始日不能晚於結束日'); return; }
+    try {
+        const res = await fetch(WORKER_URL + "/api/leave/long/update", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+            body: JSON.stringify({ id, from_date, to_date, reason, confirm: !!confirmed })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert('修改失敗：' + (d.error || res.status)); return; }
+        if (d.needConfirm) {
+            const lines = (d.affected || []).map(a => `　${a.event_date} ${a.session} ${fmtType(a.match_type)}`).join('\n');
+            const ok = confirm(`受影響已生效場次：\n${lines}\n\n修改會影響以上請假記錄，確認修改嗎？`);
+            if (!ok) return;
+            return submitLongEdit(id, memberId, true);
+        }
+        await loadLongLeaves();
+    } catch (e) { alert('修改失敗：' + e.message); }
 }
 
 async function addLongLeave() {
