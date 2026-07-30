@@ -3,7 +3,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=40">
+    <link rel="stylesheet" href="style.css?v=41">
 </head>
 
 <body>
@@ -110,7 +110,10 @@
             </div>
 
             <div id="report-detail" style="display:none;">
-                <button class="btn btn-outline" onclick="showReportBrowse()" style="margin-bottom:14px;">← 返回歷史記錄</button>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+                    <button class="btn btn-outline" onclick="showReportBrowse()">← 返回歷史記錄</button>
+                    <button class="btn btn-outline admin-only" onclick="openEditReport(null, currentReportId)">✏️ 修正場次資訊</button>
+                </div>
 
                 <div id="report-view" style="display:none;">
                 <div id="job-filters" style="margin-bottom:12px;"></div>
@@ -452,6 +455,35 @@
         </div>
     </div>
 
+    <!-- ✏️ 修正場次資訊 Modal（已導入的戰報改日期／場次／類型／勝敗／標題） -->
+    <div id="edit-report-modal" onclick="closeModal('edit-report-modal')">
+        <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:440px;">
+            <h3 style="margin-top:0;">✏️ 修正場次資訊</h3>
+            <p style="font-size:12px; color:#97a0ad; margin-top:0;">只改這場的日期／場次／類型／勝敗／標題，選手數據不動。改完出席率與請假對照會自動重算。</p>
+            <label style="font-size:13px; font-weight:bold;">戰報標題</label>
+            <input type="text" id="edit-title" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="例如：風花雪月 VS 天涯客">
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                <input type="date" id="edit-date" class="select-input" style="flex:1; min-width:130px;">
+                <select id="edit-session" class="select-input" style="flex:1;">
+                    <option value="第一場">第一場</option>
+                    <option value="第二場">第二場</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <select id="edit-result" class="select-input" style="flex:1;">
+                    <option value="win">🏆 勝利</option>
+                    <option value="loss">💀 失敗</option>
+                </select>
+                <select id="edit-type" class="select-input" style="flex:1;">
+                    <option value="幫戰">⚔️ 幫戰</option>
+                    <option value="約戰">🤝 約戰</option>
+                    <option value="其他">🏰 領地戰</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="saveEditReport()" style="width:100%; margin-top:14px;">💾 儲存修正</button>
+        </div>
+    </div>
+
     <!-- 開放請假場次 Modal -->
     <div id="window-modal" onclick="closeModal('window-modal')">
         <div class="auth-modal-body" onclick="event.stopPropagation()" style="width:420px;">
@@ -708,5 +740,5 @@
 
     <div id="loading-overlay"><div class="load-box"><div class="load-spin"></div><div class="load-text">努力加載中…</div></div></div>
 
-    <script src="app.js?v=43"></script>
+    <script src="app.js?v=44"></script>
 </body></html>

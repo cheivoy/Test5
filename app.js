@@ -371,8 +371,10 @@ async function _fetchAllHistoriesImpl() {
 // =====================================================
 // ===  防呆：重複上傳檢查
 // =====================================================
-function isDuplicateReport(date, guildA, session) {
+// excludeId：修正既有戰報時要把自己排除，否則會被自己判為重複
+function isDuplicateReport(date, guildA, session, excludeId) {
     return allHistories.some(h => {
+        if (excludeId && h.id === excludeId) return false;
         let rawData = {};
         try { rawData = JSON.parse(h.raw_json || '{}'); } catch (e) { }
         return h.date === date && (h.guild_a || rawData.nameA || '') === guildA && (rawData.session || '第一場') === session;
@@ -695,6 +697,94 @@ async function deleteHist(e, id) {
 }
 
 // =====================================================
+// ===  ✏️ 修正已導入戰報的場次資訊（日期／場次／類型／勝敗／標題）
+// ===  選手數據（gA/gB）完全不動，只改場次鍵與標題
+// =====================================================
+function openEditReport(e, id) {
+    if (e) e.stopPropagation();
+    if (isViewMode || shareId) { alert('唯讀模式無法修正戰報'); return; }
+    if (!id) { alert('請先從歷史記錄開啟一場戰報'); return; }
+    const h = allHistories.find(x => x.id === id);
+    if (!h) { alert('找不到這筆戰報'); return; }
+    let d = {};
+    try { d = JSON.parse(h.raw_json || '{}'); } catch (err) { alert('這筆戰報資料損毀，無法修正'); return; }
+
+    window._editingReportId = id;
+    document.getElementById('edit-title').value = h.guild_a || d.nameA || '';
+    document.getElementById('edit-date').value = h.date || '';
+    document.getElementById('edit-session').value = d.session || '第一場';
+    document.getElementById('edit-result').value = d.result || 'win';
+    document.getElementById('edit-type').value = d.matchType || '幫戰';
+    document.getElementById('edit-report-modal').style.display = 'flex';
+}
+
+async function saveEditReport() {
+    const id = window._editingReportId;
+    if (!id) return;
+    const h = allHistories.find(x => x.id === id);
+    if (!h) { alert('找不到這筆戰報'); return; }
+    let d = {};
+    try { d = JSON.parse(h.raw_json || '{}'); } catch (err) { alert('這筆戰報資料損毀，無法修正'); return; }
+
+    const title = document.getElementById('edit-title').value.trim();
+    const date = document.getElementById('edit-date').value;
+    const session = document.getElementById('edit-session').value;
+    const result = document.getElementById('edit-result').value;
+    const matchType = document.getElementById('edit-type').value;
+    if (!date) { alert('請選擇日期'); return; }
+    if (!title) { alert('請填戰報標題'); return; }
+
+    if (isDuplicateReport(date, title, session, id)) {
+        alert(`⚠️ 防呆提醒：\n「${title}」在 ${date} 的【${session}】已存在另一筆戰報！\n請改成不同日期或場次。`);
+        return;
+    }
+
+    // 只覆蓋場次欄位，其餘（gA/gB、nameB…）沿用原本
+    const rawData = { ...d, nameA: title, session, result, matchType };
+    const payload = {
+        id, fullDateTime: date, nameA: title,
+        nameB: h.guild_b || d.nameB || '', rawData
+    };
+
+    const isCloudRecord = storageMode === 'cloud' && !!currentUser && h._source !== 'local';
+    if (isCloudRecord) {
+        try {
+            await withLoading(async () => {
+                const res = await fetch(WORKER_URL + "/api/save-history", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) throw new Error(await res.text());
+            }, '儲存中…');
+        } catch (err) { alert('修正失敗：' + err.message); return; }
+    } else {
+        const localHistories = getLocalHistories();
+        const idx = localHistories.findIndex(x => x.id === id);
+        if (idx < 0) { alert('找不到本地戰報'); return; }
+        localHistories[idx] = {
+            ...localHistories[idx],
+            date, guild_a: title, guild_b: payload.nameB,
+            raw_json: JSON.stringify(rawData)
+        };
+        saveLocalHistories(localHistories);
+    }
+
+    closeModal('edit-report-modal');
+    window._editingReportId = null;
+    await fetchAllHistories();
+    // 正在看這場 → 重新開一次讓場次鍵（代打標示等）跟著更新
+    if (currentReportId === id && document.getElementById('report-detail')?.style.display !== 'none') {
+        await viewHistory(id);
+    }
+    // 成員頁開著 → 出席率分母/類型變了要重算
+    if (document.getElementById('page-db').style.display !== 'none') {
+        await loadDbData();
+    }
+    alert('✅ 已更新場次資訊');
+}
+
+// =====================================================
 // ===  CSV 導入
 // =====================================================
 function handleCSV(file) {
@@ -809,6 +899,7 @@ function renderHistoryList() {
         if (h._source === 'local') sourceBadge = ' <span class="local-badge">本地</span>';
         else if (storageMode === 'cloud') sourceBadge = ' <span class="cloud-badge">雲端</span>';
         return `<div class="hist-card" onclick="viewHistory('${h.id}')">
+            ${!isViewMode ? `<button class="edit-btn" title="修正日期／場次／類型" onclick="openEditReport(event, '${h.id}')">✏️</button>` : ''}
             ${!isViewMode ? `<button class="del-btn" onclick="deleteHist(event, '${h.id}')">×</button>` : ''}
             <div><b>${h.date}</b> ${typeLabel}${sessionLabel}${sourceBadge}<br>${h.guild_a}</div>
             <div>${resTag}</div>
