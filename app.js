@@ -1206,9 +1206,12 @@ async function openModal(n) {
 async function ensureMemberDetailData() {
     if (_dbDetailReady) return;
     if (!dbMembersMap.length) return;
-    await ensureFullHistories();
-    if (!Object.keys(aliasToMemberId).length) { try { await fetchRosterAliasMap(); } catch (e) { } }
-    if (!Object.keys(subMapByWin).length) { try { await loadSubMap(); } catch (e) { } }
+    // 三者彼此獨立 → 並行。（別名／代打通常已由 db-bundle 帶回，這裡只是保險）
+    await Promise.all([
+        ensureFullHistories(),
+        Object.keys(aliasToMemberId).length ? null : fetchRosterAliasMap().catch(() => { }),
+        Object.keys(subMapByWin).length ? null : loadSubMap().catch(() => { })
+    ]);
 
     const byMid = {}, byName = {};
     dbMembersMap.forEach(m => {
@@ -1556,6 +1559,17 @@ async function loadDbComputed(fromDate, toDate) {
             memberIdToCategory[r.member_id] = r.category || '';
             if (r.job) memberIdToJob[r.member_id] = r.job;
         });
+        // 別名與代打對照表由 worker 一起帶回 → 點開成員明細時不用再多發兩個請求
+        if (Array.isArray(b.aliases)) {
+            aliasToMemberId = {};
+            b.aliases.forEach(([alias, mid]) => { aliasToMemberId[alias] = mid; });
+        }
+        if (Array.isArray(b.substitutes)) {
+            subMapByWin = {};
+            b.substitutes.forEach(([date, session, type, mid, sub]) => {
+                (subMapByWin[`${date}|${session}|${type}`] = subMapByWin[`${date}|${session}|${type}`] || {})[mid] = sub;
+            });
+        }
 
         const TYPES = TYPE_ORDER;
         const sumT = (o) => TYPES.reduce((s, t) => s + ((o && o[t]) || 0), 0);

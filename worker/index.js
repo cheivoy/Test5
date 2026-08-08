@@ -8,17 +8,151 @@ async function resolveMemberId(env, owner, name) {
   return row ? row.member_id : null;
 }
 
+// 只把「本隊名單(gA)」與場次欄位撈出來，不要連敵隊(gB)的完整數據一起傳。
+// 量測結果：把整包 raw_json 傳給 worker 再解析，比只傳 gA 多了約 40% 傳輸量；
+// 而用 json_each 在 SQL 裡展開成「每個玩家一列」雖然傳輸最小，SQLite CPU 卻是 3.6 倍
+// （json_extract 對每一列都要重新 parse 整包 blob），而且 gA 裡有非物件元素時會讓整句查詢失敗。
+// 折衷：SQL 只做「挑出 gA 字串」這件便宜事，逐筆解析仍交給 V8（JSON.parse 很快）。
+const REPORT_FACT_COLS =
+  "date, " +
+  // 一定要單獨帶回「這筆 JSON 合法嗎」：損壞的戰報 與「合法但沒填 session」
+  // 兩種情況的 session 都會是 NULL，沒有這個欄位就分不出來，
+  // 會把損壞的戰報也算進出席率分母（舊版是整筆略過）。
+  "CASE WHEN json_valid(raw_json) THEN 1 ELSE 0 END AS okj, " +
+  "CASE WHEN json_valid(raw_json) THEN json_extract(raw_json,'$.session') END AS session, " +
+  "CASE WHEN json_valid(raw_json) THEN json_extract(raw_json,'$.matchType') END AS mtype, " +
+  "CASE WHEN json_valid(raw_json) AND json_type(raw_json,'$.gA') = 'array' " +
+  "THEN json_extract(raw_json,'$.gA') ELSE NULL END AS ga";
+
+// ⚠️ json_extract 只要碰到一筆壞掉的 raw_json，就會讓「整句查詢」失敗（不是只有那一筆變空），
+//    而且 WHERE json_valid(...) 不會先生效 → 守衛一定要包在同一個運算式裡（上面的 CASE WHEN）。
+async function selectReportFactRows(env, owner, fromDate, toDate) {
+  const where = ["owner = ?"], args = [owner];
+  if (fromDate) { where.push("date >= ?"); args.push(fromDate); }
+  if (toDate) { where.push("date <= ?"); args.push(toDate); }
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT " + REPORT_FACT_COLS + " FROM reports WHERE " + where.join(" AND ") + " ORDER BY date ASC"
+    ).bind(...args).all();
+    return { rows: results || [], gaOnly: true };
+  } catch (e) {
+    // D1 沒有 JSON1（理論上不會）→ 退回傳整包 raw_json
+    const { results } = await env.DB.prepare(
+      "SELECT date, raw_json FROM reports WHERE " + where.join(" AND ") + " ORDER BY date ASC"
+    ).bind(...args).all();
+    return { rows: results || [], gaOnly: false };
+  }
+}
+
 async function getReportNamesSet(env, owner) {
-  const { results: reports } = await env.DB.prepare(
-    "SELECT raw_json FROM reports WHERE owner = ?"
-  ).bind(owner).all();
+  const { rows, gaOnly } = await selectReportFactRows(env, owner, null, null);
   const names = new Set();
-  for (const r of reports || []) {
-    let data;
-    try { data = JSON.parse(r.raw_json); } catch { continue; }
-    (data.gA || []).forEach(p => { if (p && p.name) names.add(p.name); });
+  for (const r of rows) {
+    for (const p of playersOf(r, gaOnly)) if (p && p.name) names.add(p.name);
   }
   return names;
+}
+
+// 一列 → 該場的本隊名單（同時容忍損壞 / 缺 gA / gA 非陣列 / 元素非物件）
+function playersOf(row, gaOnly) {
+  let arr;
+  if (gaOnly) {
+    if (!row.ga) return [];
+    try { arr = JSON.parse(row.ga); } catch { return []; }
+  } else {
+    let d; try { d = JSON.parse(row.raw_json); } catch { return []; }
+    if (!d || typeof d !== 'object') return [];
+    arr = d.gA;
+  }
+  return Array.isArray(arr) ? arr.filter(p => p && typeof p === 'object') : [];
+}
+// 回傳 null 代表「這筆戰報壞掉」→ 整筆略過（與舊版 JSON.parse 失敗就 continue 一致）
+function sessionOf(row, gaOnly) {
+  if (gaOnly) return row.okj ? (row.session || '第一場') : null;
+  let d; try { d = JSON.parse(row.raw_json); } catch { return null; }
+  return (d && typeof d === 'object') ? (d.session || '第一場') : null;
+}
+function mtypeOf(row, gaOnly) {
+  if (gaOnly) return row.okj ? (row.mtype || '幫戰') : null;
+  let d; try { d = JSON.parse(row.raw_json); } catch { return null; }
+  return (d && typeof d === 'object') ? (d.matchType || '幫戰') : null;
+}
+
+// =====================================================
+// ===  ⚡ 戰報「事實表」：每場有誰上場（已對照 member_id）+ 有哪些場次
+// ===  以前 computeLeaveStats 和 computeMemberStats 各自 SELECT raw_json 全表再 JSON.parse
+// ===  （/api/leave/board 同時呼叫兩者 → 整個 reports 表被讀進 worker 解析兩到三遍）。
+// ===  現在只載一次、給兩邊共用，而且不再傳敵隊數據。
+// =====================================================
+// =====================================================
+// ===  ⚡ 一次 batch 抓齊所有統計要用的資料
+// ===  D1 資料庫只在單一區域，每一次查詢都是一趟網路來回。實測顯示成員檔案室／
+// ===  請假看板的 2-3.5 秒幾乎全是這些「一個接一個」的查詢延遲堆出來的
+// ===  （資料量只有幾十 KB）。batch() 把十來句一次送出，只付一次來回。
+// ===  任何一句失敗（例如舊資料庫少欄位）就回 null，呼叫端自動退回逐一查詢。
+// =====================================================
+async function loadStatsInputs(env, owner, fromDate, toDate) {
+  if (!env.DB.batch) return null;
+  const where = ["owner = ?"], args = [owner];
+  if (fromDate) { where.push("date >= ?"); args.push(fromDate); }
+  if (toDate) { where.push("date <= ?"); args.push(toDate); }
+  const P = (sql, ...a) => env.DB.prepare(sql).bind(...a);
+  try {
+    const res = await env.DB.batch([
+      P("SELECT alias_name, member_id FROM member_aliases WHERE owner = ?", owner),
+      P("SELECT " + REPORT_FACT_COLS + " FROM reports WHERE " + where.join(" AND ") + " ORDER BY date ASC", ...args),
+      P("SELECT member_id, display_name, job, category FROM members_roster WHERE owner = ? AND status = 'active'", owner),
+      P("SELECT id, last_job, note, version FROM members WHERE owner = ?", owner),
+      P("SELECT ls.window_id AS window_id, ls.member_id AS member_id, ls.substitute_member_id AS substitute_member_id, " +
+        "w.event_date AS event_date, w.session AS session, w.match_type AS match_type " +
+        "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner WHERE ls.owner = ?", owner),
+      P("SELECT window_id, match_type, event_date, session FROM leave_windows WHERE owner = ?", owner),
+      P("SELECT window_id, member_id, action, created_at FROM leave_actions WHERE owner = ? ORDER BY created_at ASC", owner),
+      P("SELECT member_id, from_date, to_date FROM long_leaves WHERE owner = ?", owner),
+      P("SELECT member_id, attendance_override, leave_override, reserve_override, overrides_json, version FROM stat_overrides WHERE owner = ?", owner)
+    ]);
+    const rows = (i) => (res[i] && res[i].results) || [];
+    return {
+      aliases: rows(0), reportRows: rows(1), gaOnly: true, roster: rows(2), notes: rows(3),
+      subs: rows(4), windows: rows(5), actions: rows(6), longLeaves: rows(7), overrides: rows(8)
+    };
+  } catch (e) {
+    console.error("D1 batch 失敗（可能是舊資料庫少欄位），退回逐一查詢", e);
+    return null;
+  }
+}
+
+async function loadReportFacts(env, owner, fromDate, toDate, inputs) {
+  let aliasRows, sel;
+  if (inputs) {
+    aliasRows = inputs.aliases;
+    sel = { rows: inputs.reportRows, gaOnly: inputs.gaOnly };
+  } else {
+    const [r1, r2] = await Promise.all([
+      env.DB.prepare("SELECT alias_name, member_id FROM member_aliases WHERE owner = ?").bind(owner).all(),
+      selectReportFactRows(env, owner, fromDate || null, toDate || null)
+    ]);
+    aliasRows = r1.results; sel = r2;
+  }
+  const aliasMap = {}; (aliasRows || []).forEach(a => { aliasMap[a.alias_name] = a.member_id; });
+
+  const players = [], sessions = [], seen = new Set();
+  for (const row of sel.rows) {
+    const session = sessionOf(row, sel.gaOnly);
+    if (session === null) continue;              // 損壞的戰報：與舊行為一致，整筆略過
+    const mtype = mtypeOf(row, sel.gaOnly) || '幫戰';
+    const sk = `${row.date}|${session}|${mtype}`;
+    if (!seen.has(sk)) { seen.add(sk); sessions.push({ date: row.date, session, mtype }); }
+    for (const p of playersOf(row, sel.gaOnly)) {
+      const mid = aliasMap[p.name];
+      // 沒有對照到 member_id 的名字（＝還沒走過「陌生名字確認」）也保留，
+      // 成員檔案室要看得到它們；請假看板／機器人會用 member_id 過濾掉。
+      players.push({ date: row.date, session, mtype, member_id: mid || null, name: p.name, job: p.job || null });
+    }
+  }
+  // 順序：SQL 已 ORDER BY date，場內順序沿用 gA 原順序（等同舊版逐筆掃戰報的順序）。
+  // 這裡刻意不再做 JS 排序——對上萬筆做 localeCompare 比整個統計還貴。
+  return { players, sessions };
 }
 
 // 只在「名冊還完全是空的」時做一次性 backfill：把舊 `members` 表 + 歷史戰報出現過的名字
@@ -70,16 +204,16 @@ async function ensureMemberFor(env, owner, name) {
 
 // 從 leave_actions 算出每個成員目前的請假/後備狀態（最新一筆事件決定狀態）
 // 回傳 { byMember: {member_id: {leave, reserve, leaveByType, reserveByType}}, byWindow: {window_id: {leave:[], reserve:[]}} }
-async function computeLeaveStats(env, owner, fromDate, toDate) {
+async function computeLeaveStats(env, owner, fromDate, toDate, facts, inputs) {
   // 每個場次的類型（幫戰/約戰/其他=領地戰），供請假/後備依類型細分
   // fromDate/toDate（'YYYY-MM-DD'，可選）：只計算場次日期落在範圍內的請假/後備
   const winType = {};
   const winDate = {};
   const winSession = {};
   try {
-    const { results: wins } = await env.DB.prepare(
+    const wins = inputs ? inputs.windows : (await env.DB.prepare(
       "SELECT window_id, match_type, event_date, session FROM leave_windows WHERE owner = ?"
-    ).bind(owner).all();
+    ).bind(owner).all()).results;
     (wins || []).forEach(w => { winType[w.window_id] = w.match_type || '幫戰'; winDate[w.window_id] = w.event_date || ''; winSession[w.window_id] = w.session || '第一場'; });
   } catch (e) {
     // match_type 欄位尚未建立（migration 004 還沒跑）→ 全部視為幫戰
@@ -98,9 +232,9 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
     return true;
   };
 
-  const { results } = await env.DB.prepare(
+  const results = inputs ? inputs.actions : (await env.DB.prepare(
     "SELECT window_id, member_id, action, created_at FROM leave_actions WHERE owner = ? ORDER BY created_at ASC"
-  ).bind(owner).all();
+  ).bind(owner).all()).results;
   const leaveState = {};   // key `${window}|${member}` -> bool
   const reserveState = {};
   const lateState = {};    // 臨時請假
@@ -124,25 +258,21 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   const attendedSet = new Set(); // `${window}|${member}`
   for (const key in attendState) if (attendState[key]) attendedSet.add(key);
   try {
-    const { results: aliasRows } = await env.DB.prepare("SELECT alias_name, member_id FROM member_aliases WHERE owner = ?").bind(owner).all();
-    const aliasMap = {}; (aliasRows || []).forEach(a => { aliasMap[a.alias_name] = a.member_id; });
     const subByWin = {};
     try {
-      const { results: subs } = await env.DB.prepare("SELECT window_id, member_id, substitute_member_id FROM leave_substitutes WHERE owner = ?").bind(owner).all();
+      const subs = inputs ? inputs.subs : (await env.DB.prepare("SELECT window_id, member_id, substitute_member_id FROM leave_substitutes WHERE owner = ?").bind(owner).all()).results;
       (subs || []).forEach(s => { (subByWin[s.window_id] = subByWin[s.window_id] || {})[s.member_id] = s.substitute_member_id; });
     } catch (e) { /* 無代打表 */ }
-    const { results: reps } = await env.DB.prepare("SELECT date, raw_json FROM reports WHERE owner = ?").bind(owner).all();
-    for (const rep of reps || []) {
-      let d; try { d = JSON.parse(rep.raw_json); } catch { continue; }
-      const wid = winKey[`${rep.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`];
+    // ⚡ 改用共用的戰報事實表（SQL 已展開 gA 並對照好 member_id）
+    const f = facts || await loadReportFacts(env, owner, null, null, inputs);
+    for (const row of f.players) {
+      if (!row.member_id) continue;   // 還沒對照到名冊的名字不參與請假統計（與舊行為一致）
+      const wid = winKey[`${row.date}|${row.session}|${row.mtype}`];
       if (!wid) continue;
       const subs = subByWin[wid] || {};
-      (d.gA || []).forEach(p => {
-        let mid = aliasMap[p.name];
-        if (!mid) return;
-        if (subs[mid]) mid = subs[mid]; // 代打 → 算代打者上場
-        attendedSet.add(wid + '|' + mid);
-      });
+      let mid = row.member_id;
+      if (subs[mid]) mid = subs[mid]; // 代打 → 算代打者上場
+      attendedSet.add(wid + '|' + mid);
     }
   } catch (e) { /* 出席去重失敗就略過，不影響其餘統計 */ }
   const byMember = {};
@@ -169,10 +299,9 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
   // 長期/預先請假：範圍涵蓋的場次，若本人在該場沒有明確請假/取消動作，也算請假（動態判定）
   let longLeaves = [];
   try {
-    const { results } = await env.DB.prepare(
+    longLeaves = (inputs ? inputs.longLeaves : (await env.DB.prepare(
       "SELECT member_id, from_date, to_date FROM long_leaves WHERE owner = ?"
-    ).bind(owner).all();
-    longLeaves = results || [];
+    ).bind(owner).all()).results) || [];
   } catch (e) { longLeaves = []; }
   for (const ll of longLeaves) {
     for (const wid in winDate) {
@@ -234,16 +363,15 @@ async function computeLeaveStats(env, owner, fromDate, toDate) {
 
 // 彙整每個在職成員的：職業（依最新一場）、出席次數、請假次數、後備次數（含人工覆蓋）
 // 回傳 map: member_id -> { member_id, display_name, job, attendance, leave, reserve }
-async function computeMemberStats(env, owner, fromDate, toDate) {
+// includeUnrostered：把「戰報裡出現、但還沒對照到名冊」的名字也列出來（member_id 為 null）。
+// 成員檔案室需要（管理員要看得到待確認的名字）；請假看板／Discord 機器人不要，保持原行為。
+async function computeMemberStats(env, owner, fromDate, toDate, facts, includeUnrostered, inputs) {
   const inR = (d) => (!fromDate || (d && d >= fromDate)) && (!toDate || (d && d <= toDate));
-  const { results: aliases } = await env.DB.prepare(
-    "SELECT alias_name, member_id FROM member_aliases WHERE owner = ?"
-  ).bind(owner).all();
-  const aliasMap = {};
-  (aliases || []).forEach(a => { aliasMap[a.alias_name] = a.member_id; });
+  // （名字→member_id 的對照已經在 loadReportFacts 的 SQL 裡 join 完成，這裡不用再抓一次）
 
   let roster;
-  try {
+  if (inputs) roster = inputs.roster;
+  else try {
     ({ results: roster } = await env.DB.prepare(
       "SELECT member_id, display_name, job, category FROM members_roster WHERE owner = ? AND status = 'active'"
     ).bind(owner).all());
@@ -263,9 +391,9 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
   // 名冊沒填職業、又沒戰報時（例如只請假、從沒上場），用它補上，避免請假名單顯示「未知」。
   const manualJobByName = {};
   try {
-    const { results: noteRows } = await env.DB.prepare(
+    const noteRows = inputs ? inputs.notes : (await env.DB.prepare(
       "SELECT id, note FROM members WHERE owner = ?"
-    ).bind(owner).all();
+    ).bind(owner).all()).results;
     (noteRows || []).forEach(n => {
       try { const p = JSON.parse(n.note); if (p && p.last_job) manualJobByName[n.id] = p.last_job; } catch (e) { /* 舊資料 note 是純文字，略過 */ }
     });
@@ -280,11 +408,13 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
   // 代替上號對照：key = `日期|場次|類型` → { 本人member_id: 代打者member_id }
   const subMap = {};
   try {
-    const { results: subs } = await env.DB.prepare(
-      "SELECT ls.member_id AS a, ls.substitute_member_id AS b, w.event_date, w.session, w.match_type " +
-      "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner " +
-      "WHERE ls.owner = ?"
-    ).bind(owner).all();
+    const subs = inputs
+      ? inputs.subs.map(r => ({ a: r.member_id, b: r.substitute_member_id, event_date: r.event_date, session: r.session, match_type: r.match_type }))
+      : (await env.DB.prepare(
+        "SELECT ls.member_id AS a, ls.substitute_member_id AS b, w.event_date, w.session, w.match_type " +
+        "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner " +
+        "WHERE ls.owner = ?"
+      ).bind(owner).all()).results;
     (subs || []).forEach(s => {
       const key = `${s.event_date}|${s.session}|${s.match_type || '幫戰'}`;
       (subMap[key] = subMap[key] || {})[s.a] = s.b;
@@ -299,43 +429,52 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
     if (!m._att.has(sk)) { m._att.add(sk); m.attendanceByType[type] = (m.attendanceByType[type] || 0) + 1; }
   };
 
-  const { results: reports } = await env.DB.prepare(
-    "SELECT date, raw_json FROM reports WHERE owner = ?"
-  ).bind(owner).all();
+  // ⚡ 改用共用的戰報事實表（SQL 已展開 gA 並對照好 member_id），
+  //    不再把整個 reports 表的 raw_json 讀進 worker 逐筆 JSON.parse
+  const f = facts || await loadReportFacts(env, owner, fromDate, toDate, inputs);
   const sessionSet = new Set(); // 全隊不重複場次（出席率分母，與網頁一致）
-  for (const rep of reports || []) {
-    if (!inR(rep.date)) continue; // 時間範圍過濾
-    let d; try { d = JSON.parse(rep.raw_json); } catch { continue; }
-    const session = d.session || '第一場';
-    const type = d.matchType || '幫戰';
-    const sortKey = (rep.date || '') + '|' + (session === '第二場' ? '2' : '1');
-    const sk = `${rep.date}|${session}|${type}`;
-    sessionSet.add(sk);
-    const subForWin = subMap[`${rep.date}|${session}|${type}`];
-    (d.gA || []).forEach(p => {
-      const origId = aliasMap[p.name];
-      if (!origId) return;
-      // 代替上號：出席算給代打者（本人這場不算）
-      const subB = subForWin && subForWin[origId];
-      const target = subB || origId;
-      addAtt(target, sk, type);
-      // 職業只以本人的非代打場更新
-      if (!subB) {
-        const m = members[origId];
-        if (m && sortKey >= m._latest) { m._latest = sortKey; if (p.job) m.job = p.job; }
-      }
-    });
+  for (const s of f.sessions) {
+    if (!inR(s.date)) continue; // 時間範圍過濾
+    sessionSet.add(`${s.date}|${s.session}|${s.mtype}`);
+  }
+  for (const row of f.players) {
+    if (!inR(row.date)) continue; // 時間範圍過濾
+    const session = row.session, type = row.mtype;
+    const sortKey = (row.date || '') + '|' + (session === '第二場' ? '2' : '1');
+    const sk = `${row.date}|${session}|${type}`;
+    const subForWin = subMap[sk];
+    let origId = row.member_id;
+    if (!origId) {
+      if (!includeUnrostered || !row.name) continue;
+      // 待確認的名字：以名字本身當 key，member_id 留 null（與前端舊行為一致）
+      origId = '__name__' + row.name;
+      if (!members[origId]) members[origId] = {
+        member_id: null, display_name: row.name, job: row.job || '未知', category: '',
+        attendance: 0, attendanceByType: {}, _latest: ''
+      };
+    }
+    // 代替上號：出席算給代打者（本人這場不算）
+    const subB = subForWin && subForWin[origId];
+    const target = subB || origId;
+    addAtt(target, sk, type);
+    // 職業只以本人的非代打場更新
+    if (!subB) {
+      const m = members[origId];
+      if (m && sortKey >= m._latest) { m._latest = sortKey; if (row.job) m.job = row.job; }
+    }
   }
 
   // 手動補登出席（漏戰報時）：以場次(date|session|type)為單位併入，與戰報去重
   try {
-    const { results: winRows } = await env.DB.prepare(
+    const winRows = inputs ? inputs.windows : (await env.DB.prepare(
       "SELECT window_id, event_date, session, match_type FROM leave_windows WHERE owner = ?"
-    ).bind(owner).all();
+    ).bind(owner).all()).results;
     const winInfo = {}; (winRows || []).forEach(w => { winInfo[w.window_id] = w; });
-    const { results: attActs } = await env.DB.prepare(
-      "SELECT window_id, member_id, action FROM leave_actions WHERE owner = ? AND action IN ('attend_set','attend_unset') ORDER BY created_at ASC"
-    ).bind(owner).all();
+    const attActs = inputs
+      ? inputs.actions.filter(a => a.action === 'attend_set' || a.action === 'attend_unset')
+      : (await env.DB.prepare(
+        "SELECT window_id, member_id, action FROM leave_actions WHERE owner = ? AND action IN ('attend_set','attend_unset') ORDER BY created_at ASC"
+      ).bind(owner).all()).results;
     const attState = {};
     for (const a of attActs || []) attState[a.window_id + '|' + a.member_id] = (a.action === 'attend_set');
     for (const k in attState) {
@@ -358,11 +497,12 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
   sessionSet.forEach(k => { const t = k.split('|')[2] || '幫戰'; sessionByType[t] = (sessionByType[t] || 0) + 1; });
   Object.values(members).forEach(m => { m.attendance = m._att ? m._att.size : 0; m.totalSessions = totalSessions; m.sessionByType = sessionByType; });
 
-  const stats = await computeLeaveStats(env, owner, fromDate, toDate);
+  const stats = await computeLeaveStats(env, owner, fromDate, toDate, f, inputs); // 共用同一份事實表，不要再載一次
   let ovs;
-  try {
+  if (inputs) ovs = inputs.overrides;
+  else try {
     ({ results: ovs } = await env.DB.prepare(
-      "SELECT member_id, attendance_override, leave_override, reserve_override, overrides_json FROM stat_overrides WHERE owner = ?"
+      "SELECT member_id, attendance_override, leave_override, reserve_override, overrides_json, version FROM stat_overrides WHERE owner = ?"
     ).bind(owner).all());
   } catch (e) {
     ({ results: ovs } = await env.DB.prepare(
@@ -415,6 +555,14 @@ async function computeMemberStats(env, owner, fromDate, toDate) {
     m.noshowByType = sm?.noshowByType || {};
     m.noshow = TYPES.reduce((s, t) => s + (m.noshowByType[t] || 0), 0);
     m.hasOverride = hasOverride;
+    // 覆蓋「前」的原始值 + 臨時請假：成員檔案室要顯示自動值與人工值的對照
+    m.autoAttByType = { ...autoAttByType };
+    m.autoLeaveByType = { ...autoLeaveByType };
+    m.autoReserveByType = { ...autoReserveByType };
+    m.lateByType = sm?.lateByType || {};
+    m.late = TYPES.reduce((s, t) => s + (m.lateByType[t] || 0), 0);
+    m.overridesJson = perType;
+    m.overrideVersion = o ? (o.version ?? null) : null;
     m.attendedSessions = m._att ? [...m._att] : []; // 該員實際上場的場次 key（date|session|type）
     delete m._latest;
     delete m._att;
@@ -640,7 +788,9 @@ async function handleDiscordCommand(env, interaction) {
   const opts = interaction.data?.options || [];
   const getOpt = (n) => opts.find(o => o.name === n)?.value;
 
-  const members = Object.values(await computeMemberStats(env, owner));
+  // 事實表與時間範圍無關 → 一次載好，同一個指令內的多次統計共用
+  const facts = await loadReportFacts(env, owner);
+  const members = Object.values(await computeMemberStats(env, owner, null, null, facts));
   if (members.length === 0) return reply("名冊目前沒有成員資料。");
 
   if (cmd === '查詢') {
@@ -650,14 +800,14 @@ async function handleDiscordCommand(env, interaction) {
     // 日期範圍（選填）：20260701-0731 或 20260701-20260731 → 2026-07-01 ~ 2026-07-31
     const range = parseDateRange(getOpt('日期範圍'));
     if (range) {
-      list = Object.values(await computeMemberStats(env, owner, range.from, range.to));
+      list = Object.values(await computeMemberStats(env, owner, range.from, range.to, facts));
       rangeNote = `（${range.from} ~ ${range.to}）`;
     } else {
       // 天數：只算最近 N 天（選填，例：30＝近一個月）
       const days = parseInt(getOpt('天數'));
       if (Number.isFinite(days) && days > 0) {
         const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-        list = Object.values(await computeMemberStats(env, owner, from, null));
+        list = Object.values(await computeMemberStats(env, owner, from, null, facts));
         rangeNote = `（近 ${days} 天）`;
       }
     }
@@ -706,7 +856,7 @@ async function handleDiscordCommand(env, interaction) {
 
     const idToName = {};
     members.forEach(m => { idToName[m.member_id] = m.display_name; });
-    const stats = await computeLeaveStats(env, owner);
+    const stats = await computeLeaveStats(env, owner, null, null, facts);
     const blocks = wins.map(w => {
       const wb = stats.byWindow[w.window_id] || { leave: [], reserve: [] };
       const leaveNames = [...new Set(wb.leave)].map(id => idToName[id] || id.slice(0, 6));
@@ -733,13 +883,145 @@ async function writeAudit(env, owner, actor, entityType, entityId, action, detai
   } catch (e) { console.error("audit_log 寫入失敗", e); }
 }
 
+// =====================================================
+// ===  成員檔案室要用的幾份資料：抽成共用函式，供舊端點與 /api/db-bundle 共用
+// ===  （查詢語句與回傳格式與原本各端點完全一致，只是可以被打包成一次請求）
+// =====================================================
+async function loadAliasRosterFor(env, owner) {
+  const { results: aliases } = await env.DB.prepare(
+    "SELECT alias_name, member_id FROM member_aliases WHERE owner = ?"
+  ).bind(owner).all();
+  let roster;
+  try {
+    ({ results: roster } = await env.DB.prepare(
+      "SELECT member_id, display_name, job, category FROM members_roster WHERE owner = ? AND status = 'active'"
+    ).bind(owner).all());
+  } catch (e) {
+    ({ results: roster } = await env.DB.prepare(
+      "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
+    ).bind(owner).all());
+  }
+  return { aliases: aliases || [], roster: roster || [] };
+}
+
+async function loadMemberNotesFor(env, owner) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT id, last_job, note, version FROM members WHERE owner = ?"
+    ).bind(owner).all();
+    return results || [];
+  } catch (e) {
+    // version 欄位還沒建立（migration 008 未跑）
+    const { results } = await env.DB.prepare(
+      "SELECT id, last_job, note FROM members WHERE owner = ?"
+    ).bind(owner).all();
+    return results || [];
+  }
+}
+
+async function loadAttendanceFor(env, owner) {
+  const out = [];
+  try {
+    const { results: winRows } = await env.DB.prepare(
+      "SELECT window_id, event_date, session, match_type FROM leave_windows WHERE owner = ?"
+    ).bind(owner).all();
+    const winInfo = {}; (winRows || []).forEach(w => { winInfo[w.window_id] = w; });
+    const { results: acts } = await env.DB.prepare(
+      "SELECT window_id, member_id, action FROM leave_actions WHERE owner = ? AND action IN ('attend_set','attend_unset') ORDER BY created_at ASC"
+    ).bind(owner).all();
+    const state = {};
+    for (const a of acts || []) state[a.window_id + '|' + a.member_id] = (a.action === 'attend_set');
+    for (const k in state) {
+      if (!state[k]) continue;
+      const idx = k.lastIndexOf('|');
+      const w = winInfo[k.slice(0, idx)];
+      if (!w) continue;
+      out.push({ member_id: k.slice(idx + 1), date: w.event_date, session: w.session, type: w.match_type || '幫戰' });
+    }
+  } catch (e) { return []; }
+  return out;
+}
+
+async function loadSubstitutesFor(env, owner) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT ls.member_id, ls.substitute_member_id, w.event_date, w.session, w.match_type " +
+      "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner " +
+      "WHERE ls.owner = ?"
+    ).bind(owner).all();
+    return (results || []).map(r => ({
+      member_id: r.member_id, substitute_member_id: r.substitute_member_id,
+      date: r.event_date, session: r.session, type: r.match_type || '幫戰'
+    }));
+  } catch (e) { return []; }
+}
+
+async function loadOverridesFor(env, owner) {
+  let results;
+  try {
+    ({ results } = await env.DB.prepare(
+      "SELECT member_id, attendance_override, leave_override, reserve_override, note, version, overrides_json FROM stat_overrides WHERE owner = ?"
+    ).bind(owner).all());
+  } catch (e) {
+    ({ results } = await env.DB.prepare(
+      "SELECT member_id, attendance_override, leave_override, reserve_override, note, version FROM stat_overrides WHERE owner = ?"
+    ).bind(owner).all());
+  }
+  return results || [];
+}
+
+// =====================================================
+// ===  D1 用量儀表：算這個請求打了幾次 D1、總共等多久
+// ===  D1 資料庫只存在單一區域，每一次查詢都是一趟網路來回。
+// ===  真正的成本往往不是資料量，而是「一個接一個」的查詢次數。
+// =====================================================
+function makeCountedDB(realDB, stats) {
+  const timed = async (fn) => {
+    const t = Date.now();
+    try { return await fn(); } finally { stats.n++; stats.ms += Date.now() - t; }
+  };
+  const wrapStmt = (stmt) => ({
+    _inner: stmt,
+    bind: (...a) => wrapStmt(stmt.bind(...a)),
+    all: () => timed(() => stmt.all()),
+    first: (...a) => timed(() => stmt.first(...a)),
+    run: () => timed(() => stmt.run()),
+    raw: (...a) => timed(() => stmt.raw(...a))
+  });
+  const out = {
+    prepare: (sql) => wrapStmt(realDB.prepare(sql)),
+    exec: (...a) => timed(() => realDB.exec(...a))
+  };
+  // batch：多句一次送出，只付一次來回的延遲。底層沒有就不要假裝有，
+  // 否則呼叫端的「有沒有 batch」判斷會失效、白跑一次然後才拋錯。
+  if (typeof realDB.batch === 'function') {
+    out.batch = (list) => { stats.batches++; return timed(() => realDB.batch(list.map(s => s._inner || s))); };
+  }
+  if (typeof realDB.withSession === 'function') out.withSession = (...a) => realDB.withSession(...a);
+  return out;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const _reqT0 = Date.now();
+    const dbStats = { n: 0, ms: 0, batches: 0 };
+    if (env && env.DB) env = { ...env, DB: makeCountedDB(env.DB, dbStats) };
+    // 附在回應上的效能摘要：d1 = 等 D1 的總時間，d1n = 查詢次數（含 batch 次數）
+    const perfHeader = () => ({
+      "Server-Timing": `total;dur=${Date.now() - _reqT0}, d1;dur=${dbStats.ms}, ` +
+        `d1n;desc="${dbStats.n} calls / ${dbStats.batches} batches"`
+    });
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      // ⚡ 帶 Authorization 的請求瀏覽器一定會先發 preflight(OPTIONS)。
+      //    沒有 Max-Age 時瀏覽器只快取 5 秒 → 幾乎每個 API 都要多跑一趟來回。
+      //    快取一天後，每頁的請求數直接砍半（延遲感受最明顯的一項）。
+      "Access-Control-Max-Age": "86400",
+      // 跨網域時瀏覽器的 JS 預設讀不到自訂回應標頭 → 要明確開放，前端才看得到效能數字
+      "Access-Control-Expose-Headers": "Server-Timing",
       "Content-Type": "application/json",
       "Cache-Control": "no-store"
     };
@@ -748,8 +1030,15 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    const json = (data, status = 200) =>
-      new Response(JSON.stringify(data), { status, headers: corsHeaders });
+    // 每個回應都附上這個請求的 D1 用量，前端 console 直接看得到
+    const json = (data, status = 200, extraTiming = '') =>
+      new Response(JSON.stringify(data), {
+        status,
+        headers: {
+          ...corsHeaders,
+          "Server-Timing": perfHeader()["Server-Timing"] + (extraTiming ? ', ' + extraTiming : '')
+        }
+      });
 
     try {
       const authHeader = request.headers.get("Authorization");
@@ -940,46 +1229,69 @@ export default {
       // 📜 戰報列表
       // =========================
       if (url.pathname === "/api/histories") {
+        // ⚡ meta=1：只回傳列表要顯示的欄位，不回傳整包 raw_json。
+        //    戰報列表本來只用到 日期／幫會／勝敗／類型／場次，但舊做法會把每場所有
+        //    選手的完整數據一起下載（開站最大的傳輸量來源）。詳細數據改成點進去才抓。
+        const metaOnly = url.searchParams.get("meta") === "1";
+        const loadHistories = async (owr) => {
+          if (metaOnly) {
+            try {
+              // ⚠️ json_valid 一定要擋：只要有一筆 raw_json 壞掉，
+              //    直接呼叫 json_extract 會讓「整句查詢」失敗（不是只有那一筆變空）。
+              //    包 CASE 之後壞掉的那筆回 NULL，其他照常，前端會用預設值顯示。
+              const { results } = await env.DB.prepare(
+                "SELECT id, date, guild_a, guild_b, " +
+                "CASE WHEN json_valid(raw_json) THEN json_extract(raw_json, '$.result') END AS result, " +
+                "CASE WHEN json_valid(raw_json) THEN json_extract(raw_json, '$.matchType') END AS matchType, " +
+                "CASE WHEN json_valid(raw_json) THEN json_extract(raw_json, '$.session') END AS session " +
+                "FROM reports WHERE owner = ? ORDER BY date DESC"
+              ).bind(owr).all();
+              return results || [];
+            } catch (e) {
+              // 極舊的 SQLite 沒有 JSON1 → 退回完整回傳，功能不受影響
+            }
+          }
+          const { results } = await env.DB.prepare(
+            "SELECT * FROM reports WHERE owner = ? ORDER BY date DESC"
+          ).bind(owr).all();
+          return results || [];
+        };
         if (isShareMode) {
           const owner = await getShareOwner();
           if (!owner) return json([]);
-          const { results } = await env.DB.prepare(
-            "SELECT * FROM reports WHERE owner = ? ORDER BY date DESC"
-          ).bind(owner).all();
-          return json(results || []);
+          return json(await loadHistories(owner));
         }
         requireAuth();
-        const { results } = await env.DB.prepare(
-          "SELECT * FROM reports WHERE owner = ? ORDER BY date DESC"
-        ).bind(user).all();
-        return json(results || []);
+        return json(await loadHistories(user));
+      }
+
+      // =========================
+      // 📜 單筆戰報完整內容（配合 meta 列表：點開才抓 raw_json）
+      // =========================
+      if (url.pathname === "/api/history") {
+        const id = url.searchParams.get("id");
+        if (!id) return json({ error: "缺少 id" }, 400);
+        let owner = user;
+        if (isShareMode) owner = await getShareOwner();
+        if (!owner) return json({ error: "未授權" }, 401);
+        const row = await env.DB.prepare(
+          "SELECT * FROM reports WHERE id = ? AND owner = ?"
+        ).bind(id, owner).first();
+        if (!row) return json({ error: "找不到戰報" }, 404);
+        return json(row);
       }
 
       // =========================
       // 👥 成員（只回傳備註/標籤）
       // =========================
       if (url.pathname === "/api/members") {
-        const loadMembers = async (owr) => {
-          try {
-            const { results } = await env.DB.prepare(
-              "SELECT id, last_job, note, version FROM members WHERE owner = ?"
-            ).bind(owr).all();
-            return results || [];
-          } catch (e) {
-            // version 欄位還沒建立（migration 008 未跑）
-            const { results } = await env.DB.prepare(
-              "SELECT id, last_job, note FROM members WHERE owner = ?"
-            ).bind(owr).all();
-            return results || [];
-          }
-        };
         if (isShareMode) {
           const owner = await getShareOwner();
           if (!owner) return json([]);
-          return json(await loadMembers(owner));
+          return json(await loadMemberNotesFor(env, owner));
         }
         requireAuth();
-        return json(await loadMembers(user));
+        return json(await loadMemberNotesFor(env, user));
       }
 
       // =========================
@@ -1006,30 +1318,108 @@ export default {
       // 🪪 身分對照表（member_id / alias），供前端把歷史戰報名字歸戶到同一個穩定成員
       // =========================
       if (url.pathname === "/api/roster/aliases") {
-        const loadAliasRoster = async (owner) => {
-          const { results: aliases } = await env.DB.prepare(
-            "SELECT alias_name, member_id FROM member_aliases WHERE owner = ?"
-          ).bind(owner).all();
-          let roster;
-          try {
-            ({ results: roster } = await env.DB.prepare(
-              "SELECT member_id, display_name, job, category FROM members_roster WHERE owner = ? AND status = 'active'"
-            ).bind(owner).all());
-          } catch (e) {
-            ({ results: roster } = await env.DB.prepare(
-              "SELECT member_id, display_name FROM members_roster WHERE owner = ? AND status = 'active'"
-            ).bind(owner).all());
-          }
-          return { aliases: aliases || [], roster: roster || [] };
-        };
         if (isShareMode) {
           const owner = await getShareOwner();
           if (!owner) return json({ aliases: [], roster: [] });
-          return json(await loadAliasRoster(owner));
+          return json(await loadAliasRosterFor(env, owner));
         }
         requireAuth();
         await ensureRosterBackfilled(env, user);
-        return json(await loadAliasRoster(user));
+        return json(await loadAliasRosterFor(env, user));
+      }
+
+      // =========================
+      // ⚡ 成員檔案室一次載完：把原本 6 個請求（名冊對照／代打／補登出席／成員備註／
+      //    請假統計／人工覆蓋）併成一次來回。內容與各端點逐一抓完全相同。
+      // =========================
+      if (url.pathname === "/api/db-bundle") {
+        let owner = user;
+        if (isShareMode) owner = await getShareOwner();
+        if (!owner) return json({ aliases: [], roster: [], substitutes: [], members: [], attendance: [], leaveStats: {}, overrides: [] });
+        const fromDate = url.searchParams.get("from") || null;
+        const toDate = url.searchParams.get("to") || null;
+        const computedMode = url.searchParams.get("computed") === "1";
+        // computed 模式的 backfill 檢查併進 batch 裡判斷（名冊非空就代表早就 backfill 過），
+        // 少一趟 D1 來回。其他模式維持原本流程。
+        if (!isShareMode && !computedMode) await ensureRosterBackfilled(env, owner);
+
+        // ⚡ computed=1：成員檔案室的表格只需要「每人的彙總數字」，不需要每場每個人的完整數據。
+        //    以前前端要下載全部 raw_json 自己算（幾 MB，手機網路就是這裡卡住）；
+        //    現在改成 worker 算好、只回傳一列一個成員（幾十 KB）。
+        if (computedMode) {
+          const t0 = Date.now();
+          // ⚡ 一次 batch 把所有要用的表抓齊（十來句 → 一趟來回）
+          let inputs = await loadStatsInputs(env, owner, fromDate, toDate);
+          if (!isShareMode && (!inputs || inputs.roster.length === 0)) {
+            // 名冊是空的 → 可能還沒 backfill 過，補做一次再重抓
+            await ensureRosterBackfilled(env, owner);
+            inputs = await loadStatsInputs(env, owner, fromDate, toDate);
+          }
+          const facts = await loadReportFacts(env, owner, fromDate, toDate, inputs);
+          const tFacts = Date.now();
+          const [membersMap, notes] = await Promise.all([
+            computeMemberStats(env, owner, fromDate, toDate, facts, true, inputs), // 含待確認名字
+            inputs ? inputs.notes : loadMemberNotesFor(env, owner).catch(() => [])
+          ]);
+          const tStats = Date.now();
+          // 別名／代打對照表：batch 成功時已在 inputs 裡；退回逐一查詢時要自己補抓，
+          // 不然前端拿到空的對照表，成員明細會顯示不出每場快照。
+          const aliasPairs = inputs ? inputs.aliases
+            : ((await env.DB.prepare("SELECT alias_name, member_id FROM member_aliases WHERE owner = ?").bind(owner).all()).results || []);
+          const subPairs = inputs ? inputs.subs
+            : (await loadSubstitutesFor(env, owner).catch(() => []))
+              .map(s => ({ member_id: s.member_id, substitute_member_id: s.substitute_member_id, event_date: s.date, session: s.session, match_type: s.type }));
+          // note / tag / 手動職業：members 表以「顯示名稱」為 key
+          const noteByName = {};
+          for (const n of notes) {
+            let noteStr = "", tag = "none", lastJob = n.last_job, lastJobAt = null;
+            try {
+              const p = JSON.parse(n.note);
+              noteStr = p.text || ""; tag = p.tag || "none";
+              if (p.last_job) lastJob = p.last_job;
+              if (p.last_job_at) lastJobAt = p.last_job_at;
+            } catch (e) { noteStr = n.note || ""; }
+            noteByName[n.id] = { note: noteStr, tag, lastJob, lastJobAt, version: (typeof n.version === 'number' ? n.version : null) };
+          }
+          const rows = Object.values(membersMap).map(m => {
+            const nb = noteByName[m.display_name] || {};
+            return {
+              member_id: m.member_id, display_name: m.display_name,
+              job: m.job, category: m.category,
+              attByType: m.attendanceByType, leaveByType: m.leaveByType,
+              reserveByType: m.reserveByType, noshowByType: m.noshowByType, lateByType: m.lateByType,
+              autoAttByType: m.autoAttByType, autoLeaveByType: m.autoLeaveByType, autoReserveByType: m.autoReserveByType,
+              hasOverride: m.hasOverride, overridesJson: m.overridesJson, overrideVersion: m.overrideVersion,
+              note: nb.note || "", tag: nb.tag || "none",
+              noteVersion: nb.version ?? null, lastJobAt: nb.lastJobAt || null
+            };
+          });
+          const body = {
+            computed: true,
+            totalSessions: rows.length ? (Object.values(membersMap)[0].totalSessions || 0) : 0,
+            sessionByType: rows.length ? (Object.values(membersMap)[0].sessionByType || {}) : {},
+            members: rows,
+            // 順便帶上這兩份小對照表：成員明細（每場快照、代打標示）要用。
+            // 不帶的話前端在點開成員時得再多發兩個請求，那是兩趟白等的來回。
+            aliases: aliasPairs.map(a => [a.alias_name, a.member_id]),
+            substitutes: subPairs.map(s => [s.event_date, s.session, s.match_type || '幫戰', s.member_id, s.substitute_member_id])
+          };
+          return json(body, 200,
+            `facts;dur=${tFacts - t0}, stats;dur=${tStats - tFacts}, reports;desc="${facts.sessions.length} sessions ${facts.players.length} rows"`);
+        }
+        // 每一份各自 catch：某一份掛掉時只有那份是空的，其他照常（和以前各端點各自失敗的行為一致）
+        const [aliasRoster, substitutes, members, attendance, leaveStats, overrides] = await Promise.all([
+          loadAliasRosterFor(env, owner).catch(() => ({ aliases: [], roster: [] })),
+          loadSubstitutesFor(env, owner).catch(() => []),
+          loadMemberNotesFor(env, owner).catch(() => []),
+          loadAttendanceFor(env, owner).catch(() => []),
+          computeLeaveStats(env, owner, fromDate, toDate).then(s => s.byMember).catch(() => ({})),
+          loadOverridesFor(env, owner).catch(() => [])
+        ]);
+        return json({
+          aliases: aliasRoster.aliases, roster: aliasRoster.roster,
+          substitutes, members, attendance, leaveStats, overrides
+        });
       }
 
       // =========================
@@ -1369,17 +1759,7 @@ export default {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
         if (!owner) return json([]);
-        let results;
-        try {
-          ({ results } = await env.DB.prepare(
-            "SELECT member_id, attendance_override, leave_override, reserve_override, note, version, overrides_json FROM stat_overrides WHERE owner = ?"
-          ).bind(owner).all());
-        } catch (e) {
-          ({ results } = await env.DB.prepare(
-            "SELECT member_id, attendance_override, leave_override, reserve_override, note, version FROM stat_overrides WHERE owner = ?"
-          ).bind(owner).all());
-        }
-        return json(results || []);
+        return json(await loadOverridesFor(env, owner));
       }
 
       // =========================
@@ -1827,26 +2207,7 @@ export default {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
         if (!owner) return json([]);
-        let out = [];
-        try {
-          const { results: winRows } = await env.DB.prepare(
-            "SELECT window_id, event_date, session, match_type FROM leave_windows WHERE owner = ?"
-          ).bind(owner).all();
-          const winInfo = {}; (winRows || []).forEach(w => { winInfo[w.window_id] = w; });
-          const { results: acts } = await env.DB.prepare(
-            "SELECT window_id, member_id, action FROM leave_actions WHERE owner = ? AND action IN ('attend_set','attend_unset') ORDER BY created_at ASC"
-          ).bind(owner).all();
-          const state = {};
-          for (const a of acts || []) state[a.window_id + '|' + a.member_id] = (a.action === 'attend_set');
-          for (const k in state) {
-            if (!state[k]) continue;
-            const idx = k.lastIndexOf('|');
-            const w = winInfo[k.slice(0, idx)];
-            if (!w) continue;
-            out.push({ member_id: k.slice(idx + 1), date: w.event_date, session: w.session, type: w.match_type || '幫戰' });
-          }
-        } catch (e) { out = []; }
-        return json(out);
+        return json(await loadAttendanceFor(env, owner));
       }
 
       // 代替上號清單（含場次日期/場次/類型，供前端出席計算重導）
@@ -1854,19 +2215,7 @@ export default {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
         if (!owner) return json([]);
-        let out = [];
-        try {
-          const { results } = await env.DB.prepare(
-            "SELECT ls.member_id, ls.substitute_member_id, w.event_date, w.session, w.match_type " +
-            "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner " +
-            "WHERE ls.owner = ?"
-          ).bind(owner).all();
-          out = (results || []).map(r => ({
-            member_id: r.member_id, substitute_member_id: r.substitute_member_id,
-            date: r.event_date, session: r.session, type: r.match_type || '幫戰'
-          }));
-        } catch (e) { out = []; }
-        return json(out);
+        return json(await loadSubstitutesFor(env, owner));
       }
 
       // 某成員的 No-show / 臨時請假 紀錄（含日期，僅管理員；唯讀分享不提供）
@@ -1966,20 +2315,34 @@ export default {
         if (!owner) return json({ guild: "", windows: [], members: [], roster: [], leaveByWindow: {}, reserveByWindow: {} });
 
         const openClause = openOnly ? " AND status = 'open'" : "";
-        let windows;
-        try {
-          ({ results: windows } = await env.DB.prepare(
-            "SELECT window_id, event_date, session, title, status, match_type FROM leave_windows WHERE owner = ?" + openClause + " ORDER BY event_date DESC, session ASC"
-          ).bind(owner).all());
-        } catch (e) {
-          ({ results: windows } = await env.DB.prepare(
-            "SELECT window_id, event_date, session, title, status FROM leave_windows WHERE owner = ?" + openClause + " ORDER BY event_date DESC, session ASC"
-          ).bind(owner).all());
-        }
-        (windows || []).forEach(w => { if (!w.match_type) w.match_type = '幫戰'; });
+        const loadBoardWindows = async () => {
+          try {
+            return (await env.DB.prepare(
+              "SELECT window_id, event_date, session, title, status, match_type FROM leave_windows WHERE owner = ?" + openClause + " ORDER BY event_date DESC, session ASC"
+            ).bind(owner).all()).results;
+          } catch (e) {
+            return (await env.DB.prepare(
+              "SELECT window_id, event_date, session, title, status FROM leave_windows WHERE owner = ?" + openClause + " ORDER BY event_date DESC, session ASC"
+            ).bind(owner).all()).results;
+          }
+        };
 
-        const stats = await computeLeaveStats(env, owner);
-        const membersMap = await computeMemberStats(env, owner);
+        // ⚡ 請假看板同時要請假統計與成員統計 → 戰報事實表只載一次給兩邊共用
+        //    （以前這裡會把整個 reports 表讀進 worker 解析兩到三遍，這是請假頁最慢的原因）
+        const bT0 = Date.now();
+        // ⚡ 一次 batch 抓齊統計要用的表；看板自己的兩個查詢與它彼此獨立 → 並行，
+        //    整體等待時間是三者的最大值，不是加總。
+        const [bInputs, windows, u] = await Promise.all([
+          loadStatsInputs(env, owner, null, null),
+          loadBoardWindows(),
+          env.DB.prepare("SELECT guild FROM users WHERE username = ?").bind(owner).first()
+        ]);
+        (windows || []).forEach(w => { if (!w.match_type) w.match_type = '幫戰'; });
+        const boardFacts = await loadReportFacts(env, owner, null, null, bInputs);
+        const bT1 = Date.now();
+        const stats = await computeLeaveStats(env, owner, null, null, boardFacts, bInputs);
+        const membersMap = await computeMemberStats(env, owner, null, null, boardFacts, false, bInputs);
+        const bT2 = Date.now();
         const members = Object.values(membersMap).sort((a, b) => a.display_name.localeCompare(b.display_name));
 
         const leaveByWindow = {}, reserveByWindow = {};
@@ -1987,10 +2350,11 @@ export default {
           leaveByWindow[w.window_id] = stats.byWindow[w.window_id]?.leave || [];
           reserveByWindow[w.window_id] = stats.byWindow[w.window_id]?.reserve || [];
         });
-        const u = await env.DB.prepare("SELECT guild FROM users WHERE username = ?").bind(owner).first();
+        // （guild 已在上面與 batch 並行取好）
         // roster 欄位保留給舊版前端相容（只含 member_id + display_name）
         const roster = members.map(m => ({ member_id: m.member_id, display_name: m.display_name }));
-        return json({ guild: u?.guild || "", windows: windows || [], members, roster, leaveByWindow, reserveByWindow });
+        return json({ guild: u?.guild || "", windows: windows || [], members, roster, leaveByWindow, reserveByWindow }, 200,
+          `facts;dur=${bT1 - bT0}, stats;dur=${bT2 - bT1}, reports;desc="${boardFacts.sessions.length} sessions ${boardFacts.players.length} rows"`);
       }
 
       // =========================
