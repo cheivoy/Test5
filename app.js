@@ -365,6 +365,37 @@ function invalidateRep(h) { if (h) { delete h._d; delete h._bad; } }
 const _cloudReadable = () => !!(shareId || (storageMode === 'cloud' && currentUser));
 const _authHeaders = () => (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
 
+// =====================================================
+// ===  效能診斷：在 console 輸入 showPerf() 就會印出完整報告
+// ===  （每一段花多久、下載多少、伺服器端各階段多久）
+// =====================================================
+const _perfLog = [];
+function perfMark(label, ms, extra) {
+    const line = `${String(Math.round(ms)).padStart(6)}ms  ${label}${extra ? '  — ' + extra : ''}`;
+    _perfLog.push(line);
+    console.log('[效能] ' + line.trim());
+}
+function showPerf() {
+    const out = ['===== 載入效能報告 =====', ...(_perfLog.length ? _perfLog : ['（還沒有紀錄，切到某個分頁再看）'])];
+    console.log(out.join('\n'));
+    return out.join('\n');
+}
+window.showPerf = showPerf;
+const _kb = (n) => (n / 1024).toFixed(0) + ' KB';
+
+// 讀取回應並同時量出實際位元組數（res.json() 內部也是 text + parse，所以不算額外成本）
+async function fetchJsonTimed(url, init, label) {
+    const t0 = performance.now();
+    const res = await fetch(url, init);
+    const text = await res.text();
+    const ms = performance.now() - t0;
+    const st = res.headers.get('Server-Timing');
+    perfMark(label, ms, `下載 ${_kb(new Blob([text]).size)}${st ? ' | 伺服器 ' + st : ''}`);
+    let data = null;
+    try { data = JSON.parse(text); } catch (e) { }
+    return { res, data, ms, bytes: text.length };
+}
+
 // 成員檔案室已經算好的時間範圍（`from|to`）。切分頁回來時若範圍沒變、也沒有任何寫入，
 // 就直接沿用畫面上的結果，不再重抓＋重算一次（以前每次點「成員」都要等一輪）。
 let _dbLoadedKey = null;
@@ -391,8 +422,8 @@ async function ensureFullHistories() {
     if (!_cloudReadable()) { _fullHistoriesLoaded = true; return; } // 本地模式本來就是完整的
     try {
         let apiUrl = WORKER_URL + "/api/histories?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
-        const res = await fetch(apiUrl, { cache: "no-store", headers: _authHeaders() });
-        let data = await res.json();
+        const r = await fetchJsonTimed(apiUrl, { cache: "no-store", headers: _authHeaders() }, '⚠️ 下載完整戰報（含每場每個人的數據）');
+        let data = r.data;
         if (!Array.isArray(data)) return;
         const idsParam = urlParams.get('ids');
         if (shareId && idsParam) {
@@ -440,11 +471,11 @@ async function _fetchAllHistoriesImpl() {
             }
             allHistories = data;
         } else if (storageMode === 'cloud' && currentUser) {
-            const res = await fetch(apiUrl, {
+            const r = await fetchJsonTimed(apiUrl, {
                 cache: "no-store",
                 headers: { 'Authorization': 'Bearer ' + currentUser.token }
-            });
-            allHistories = await res.json();
+            }, '開站：戰報列表（輕量）');
+            allHistories = r.data;
         } else {
             allHistories = getLocalHistories();
             _fullHistoriesLoaded = true; // 本地資料本來就含 raw_json
@@ -1218,7 +1249,11 @@ async function openMemberDetail(id) {
     const m = dbMembersMap.find(x => x.id === id);
     if (!m) return;
     // 明細要用每場數據 → 這時候才補（表格本身不需要）
-    if (!_dbDetailReady) await withLoading(ensureMemberDetailData, '載入詳細數據…');
+    if (!_dbDetailReady) {
+        const t0 = performance.now();
+        await withLoading(ensureMemberDetailData, '載入詳細數據…');
+        perfMark('成員明細：補完整戰報（只有第一次）', performance.now() - t0);
+    }
     focusPlayer = m;
 
     document.getElementById('member-modal').style.display = 'flex';
@@ -1500,11 +1535,16 @@ async function loadDbComputed(fromDate, toDate) {
     try {
         const qs = "?computed=1&t=" + Date.now() + (shareId ? "&share=" + shareId : "")
             + (fromDate ? "&from=" + fromDate : "") + (toDate ? "&to=" + toDate : "");
-        const res = await fetch(WORKER_URL + "/api/db-bundle" + qs, { cache: "no-store", headers: _authHeaders() });
-        if (!res.ok) { _dbComputedSupported = false; return false; }
-        const b = await res.json();
-        if (!b || b.computed !== true || !Array.isArray(b.members)) { _dbComputedSupported = false; return false; }
-        logServerTiming(res, 'db-bundle?computed=1');
+        const r = await fetchJsonTimed(WORKER_URL + "/api/db-bundle" + qs, { cache: "no-store", headers: _authHeaders() }, '成員表格（伺服器算好）');
+        if (!r.res.ok) {
+            perfMark('⚠️ worker 沒有 computed 端點 → 退回舊流程', 0, 'HTTP ' + r.res.status + '（worker 需要重新部署）');
+            _dbComputedSupported = false; return false;
+        }
+        const b = r.data;
+        if (!b || b.computed !== true || !Array.isArray(b.members)) {
+            perfMark('⚠️ worker 版本較舊 → 退回舊流程', 0, 'worker 需要重新部署');
+            _dbComputedSupported = false; return false;
+        }
 
         totalReportsInTimeframe = b.totalSessions || 0;
         dbSessionCountByType = Object.assign({ '幫戰': 0, '約戰': 0, '其他': 0 }, b.sessionByType || {});
@@ -1561,18 +1601,14 @@ async function loadDbComputed(fromDate, toDate) {
     }
 }
 
-// 把 worker 回報的各階段耗時印到 console（DevTools 也看得到 Server-Timing）
-function logServerTiming(res, label) {
-    const st = res.headers.get('Server-Timing');
-    if (st) console.log(`[效能] ${label} → ${st}`);
-}
-
 async function loadDbData() { return withLoading(_loadDbDataImpl, '努力加載中…'); }
 async function _loadDbDataImpl() {
     const { fromDate, toDate } = getDbTimeRange();
 
     // 首選：伺服器算好，一個小請求就搞定（不下載任何 raw_json）
+    const _dbT0 = performance.now();
     if (await loadDbComputed(fromDate, toDate)) {
+        perfMark('成員檔案室總計（新流程）', performance.now() - _dbT0, dbMembersMap.length + ' 名成員 / ' + totalReportsInTimeframe + ' 場次');
         const syncEl = document.getElementById('db-last-sync');
         if (syncEl) syncEl.textContent = `最後計算：${new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`;
         _dbLoadedKey = `${fromDate || ''}|${toDate || ''}`;
@@ -1581,6 +1617,7 @@ async function _loadDbDataImpl() {
     }
 
     // ── 舊路徑：前端自己從完整戰報算（worker 還沒部署新版時）
+    const _legacyT0 = performance.now();
     const [, bundle] = await Promise.all([
         ensureFullHistories(),
         loadDbBundle(fromDate, toDate)
@@ -1752,6 +1789,7 @@ async function _loadDbDataImpl() {
 
     _dbLoadedKey = `${fromDate || ''}|${toDate || ''}`;
     _dbDetailReady = true;   // 舊路徑本來就把每場快照算好了
+    perfMark('⚠️ 成員表格（舊流程：前端自己算）', performance.now() - _legacyT0, allHistories.length + ' 場戰報');
     renderDbTable();
 }
 
@@ -3017,10 +3055,10 @@ let boardMemberById = {};
 
 async function loadLeaveBoard() {
     try {
-        const res = await fetch(WORKER_URL + "/api/leave/board?t=" + Date.now(), {
+        const r = await fetchJsonTimed(WORKER_URL + "/api/leave/board?t=" + Date.now(), {
             cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
-        });
-        leaveBoardCache = await res.json();
+        }, '請假看板');
+        leaveBoardCache = r.data;
     } catch (e) { leaveBoardCache = { members: [], windows: [], leaveByWindow: {}, reserveByWindow: {} }; }
     boardMemberById = {};
     (leaveBoardCache.members || []).forEach(m => { boardMemberById[m.member_id] = m; });
