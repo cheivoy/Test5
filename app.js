@@ -62,12 +62,14 @@ function getLocalHistories() {
 }
 function saveLocalHistories(arr) {
     localStorage.setItem(LOCALSTORAGE_HISTORIES_KEY, JSON.stringify(arr));
+    if (typeof markDbStale === 'function') markDbStale();
 }
 function getLocalMembers() {
     try { return JSON.parse(localStorage.getItem(LOCALSTORAGE_MEMBERS_KEY) || '{}'); } catch (e) { return {}; }
 }
 function saveLocalMembers(obj) {
     localStorage.setItem(LOCALSTORAGE_MEMBERS_KEY, JSON.stringify(obj));
+    if (typeof markDbStale === 'function') markDbStale();
 }
 
 function updateModeBanner() {
@@ -334,12 +336,90 @@ window.onload = async () => {
 };
 
 // =====================================================
+// ===  戰報資料存取：raw_json 只解析一次 + 詳細數據延後載入
+// =====================================================
+// 之前每次搜尋、篩選、重畫列表都會把每一場的 raw_json 重新 JSON.parse 一遍
+// （renderHistoryList 一次就解析兩遍），場數多的時候光解析就卡住畫面。
+// 這裡把解析結果掛在戰報物件上（不可列舉 → 不會被 JSON.stringify 存進 localStorage）。
+function repOf(h) {
+    if (!h) return {};
+    if (h._d) return h._d;
+    if (!h.raw_json) {
+        // 輕量列表：詳細數據還沒抓下來，先用列表欄位撐住顯示（不快取，等完整資料到再解析）
+        return { result: h.result || '', matchType: h.matchType || '幫戰', session: h.session || '第一場' };
+    }
+    let d = {};
+    try { d = JSON.parse(h.raw_json) || {}; } catch (e) { d = {}; }
+    Object.defineProperty(h, '_d', { value: d, enumerable: false, configurable: true, writable: true });
+    return d;
+}
+// raw_json 換了之後要丟掉舊的解析結果
+function invalidateRep(h) { if (h && h._d) delete h._d; }
+
+const _cloudReadable = () => !!(shareId || (storageMode === 'cloud' && currentUser));
+const _authHeaders = () => (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
+
+// 成員檔案室已經算好的時間範圍（`from|to`）。切分頁回來時若範圍沒變、也沒有任何寫入，
+// 就直接沿用畫面上的結果，不再重抓＋重算一次（以前每次點「成員」都要等一輪）。
+let _dbLoadedKey = null;
+function markDbStale() { _dbLoadedKey = null; }
+// 任何寫入（POST 到 worker）之後一律讓快取失效，避免顯示舊資料
+(function hookFetchForStaleness() {
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+        try {
+            const method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+            const u = typeof input === 'string' ? input : ((input && input.url) || '');
+            if (method !== 'GET' && u.indexOf(WORKER_URL) === 0) markDbStale();
+        } catch (e) { }
+        return _origFetch(input, init);
+    };
+})();
+
+// 開站時只抓輕量列表（沒有 raw_json）。任何需要選手數據的功能先呼叫這個補完整資料。
+let _fullHistoriesLoaded = false;
+async function ensureFullHistories() {
+    if (_fullHistoriesLoaded) return;
+    if (!_cloudReadable()) { _fullHistoriesLoaded = true; return; } // 本地模式本來就是完整的
+    try {
+        let apiUrl = WORKER_URL + "/api/histories?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
+        const res = await fetch(apiUrl, { cache: "no-store", headers: _authHeaders() });
+        let data = await res.json();
+        if (!Array.isArray(data)) return;
+        const idsParam = urlParams.get('ids');
+        if (shareId && idsParam) {
+            const allowed = new Set(idsParam.split(','));
+            data = data.filter(h => allowed.has(h.id));
+        }
+        allHistories = data;
+        _fullHistoriesLoaded = true;
+    } catch (e) { console.error("載入戰報詳細資料失敗", e); }
+}
+
+// 只補單一場的完整資料（點開某場戰報時用，不必為了一場拉全部）
+async function ensureReportFull(h) {
+    if (!h || h.raw_json) return h;
+    if (!_cloudReadable()) return h;
+    try {
+        const u = WORKER_URL + "/api/history?id=" + encodeURIComponent(h.id) + "&t=" + Date.now() + (shareId ? "&share=" + shareId : "");
+        const res = await fetch(u, { cache: "no-store", headers: _authHeaders() });
+        if (!res.ok) return h;
+        const row = await res.json();
+        if (row && row.raw_json) { h.raw_json = row.raw_json; invalidateRep(h); }
+    } catch (e) { console.error("載入戰報內容失敗", e); }
+    return h;
+}
+
+// =====================================================
 // ===  fetchAllHistories
 // =====================================================
 async function fetchAllHistories() { return withLoading(_fetchAllHistoriesImpl, '努力加載中…'); }
 async function _fetchAllHistoriesImpl() {
     try {
-        let apiUrl = WORKER_URL + "/api/histories?t=" + Date.now();
+        // ⚡ meta=1：只拿列表要顯示的欄位，開站不再下載所有場次的完整選手數據
+        let apiUrl = WORKER_URL + "/api/histories?meta=1&t=" + Date.now();
+        _fullHistoriesLoaded = false;
+        markDbStale(); // 戰報變了 → 出席率分母也會變，成員頁要重算
 
         if (shareId) {
             apiUrl += "&share=" + shareId;
@@ -359,11 +439,15 @@ async function _fetchAllHistoriesImpl() {
             allHistories = await res.json();
         } else {
             allHistories = getLocalHistories();
+            _fullHistoriesLoaded = true; // 本地資料本來就含 raw_json
         }
+        // 舊版 worker（沒有 meta 支援）會照樣回傳 raw_json → 就當作已經是完整資料
+        if (Array.isArray(allHistories) && allHistories.length && allHistories[0].raw_json) _fullHistoriesLoaded = true;
         renderHistoryList();
     } catch (e) {
         console.error("獲取戰報失敗", e);
         allHistories = getLocalHistories();
+        _fullHistoriesLoaded = true;
         renderHistoryList();
     }
 }
@@ -375,8 +459,7 @@ async function _fetchAllHistoriesImpl() {
 function isDuplicateReport(date, guildA, session, excludeId) {
     return allHistories.some(h => {
         if (excludeId && h.id === excludeId) return false;
-        let rawData = {};
-        try { rawData = JSON.parse(h.raw_json || '{}'); } catch (e) { }
+        const rawData = repOf(h);
         return h.date === date && (h.guild_a || rawData.nameA || '') === guildA && (rawData.session || '第一場') === session;
     });
 }
@@ -700,14 +783,16 @@ async function deleteHist(e, id) {
 // ===  ✏️ 修正已導入戰報的場次資訊（日期／場次／類型／勝敗／標題）
 // ===  選手數據（gA/gB）完全不動，只改場次鍵與標題
 // =====================================================
-function openEditReport(e, id) {
+async function openEditReport(e, id) {
     if (e) e.stopPropagation();
     if (isViewMode || shareId) { alert('唯讀模式無法修正戰報'); return; }
     if (!id) { alert('請先從歷史記錄開啟一場戰報'); return; }
     const h = allHistories.find(x => x.id === id);
     if (!h) { alert('找不到這筆戰報'); return; }
-    let d = {};
-    try { d = JSON.parse(h.raw_json || '{}'); } catch (err) { alert('這筆戰報資料損毀，無法修正'); return; }
+    // 要保留 gA/gB 原樣寫回，所以這裡需要完整資料
+    if (!h.raw_json) await withLoading(() => ensureReportFull(h), '努力加載中…');
+    const d = repOf(h);
+    if (!h.raw_json) { alert('這筆戰報資料損毀，無法修正'); return; }
 
     window._editingReportId = id;
     document.getElementById('edit-title').value = h.guild_a || d.nameA || '';
@@ -723,8 +808,9 @@ async function saveEditReport() {
     if (!id) return;
     const h = allHistories.find(x => x.id === id);
     if (!h) { alert('找不到這筆戰報'); return; }
-    let d = {};
-    try { d = JSON.parse(h.raw_json || '{}'); } catch (err) { alert('這筆戰報資料損毀，無法修正'); return; }
+    if (!h.raw_json) await withLoading(() => ensureReportFull(h), '努力加載中…');
+    const d = repOf(h);
+    if (!h.raw_json) { alert('這筆戰報資料損毀，無法修正'); return; }
 
     const title = document.getElementById('edit-title').value.trim();
     const date = document.getElementById('edit-date').value;
@@ -871,8 +957,7 @@ function renderHistoryList() {
     const typeFilter = document.getElementById('hist-type').value;
 
     const filtered = allHistories.filter(h => {
-        let matchData = {};
-        try { matchData = JSON.parse(h.raw_json); } catch (e) { }
+        const matchData = repOf(h);
         const matchSearch = h.guild_a.toLowerCase().includes(search) || (h.guild_b && h.guild_b.toLowerCase().includes(search));
         const matchTime = isWithinFilter(h.date, timeFilter, fromDate, toDate);
         const matchWL = (winLoss === 'all' || matchData.result === winLoss);
@@ -889,13 +974,11 @@ function renderHistoryList() {
 
     document.getElementById('hist-items').innerHTML = filtered.map(h => {
         let resTag = '', typeLabel = '', sessionLabel = '', sourceBadge = '';
-        try {
-            const d = JSON.parse(h.raw_json);
-            if (d.result === 'win') resTag = '<span class="result-tag win">勝</span>';
-            if (d.result === 'loss') resTag = '<span class="result-tag loss">敗</span>';
-            typeLabel = `<span style="font-size:10px; color:#999;">[${fmtType(d.matchType)}]</span>`;
-            sessionLabel = d.session ? `<span style="font-size:10px; color:#666; margin-left:3px;">${d.session}</span>` : '';
-        } catch (e) { }
+        const d = repOf(h);
+        if (d.result === 'win') resTag = '<span class="result-tag win">勝</span>';
+        if (d.result === 'loss') resTag = '<span class="result-tag loss">敗</span>';
+        typeLabel = `<span style="font-size:10px; color:#999;">[${fmtType(d.matchType)}]</span>`;
+        sessionLabel = d.session ? `<span style="font-size:10px; color:#666; margin-left:3px;">${d.session}</span>` : '';
         if (h._source === 'local') sourceBadge = ' <span class="local-badge">本地</span>';
         else if (storageMode === 'cloud') sourceBadge = ' <span class="cloud-badge">雲端</span>';
         return `<div class="hist-card" onclick="viewHistory('${h.id}')">
@@ -914,8 +997,10 @@ async function viewHistory(id) {
     currentReportId = id;
     const h = allHistories.find(x => x.id === id);
     if (h) {
-        let d;
-        try { d = JSON.parse(h.raw_json); } catch (e) { alert('這筆戰報資料損毀，無法開啟'); return; }
+        // 列表是輕量載入的 → 點開這場才抓它的完整選手數據
+        if (!h.raw_json) await withLoading(() => ensureReportFull(h), '努力加載中…');
+        if (!h.raw_json) { alert('讀取這筆戰報失敗，請稍後再試'); return; }
+        const d = repOf(h);
         gA = Array.isArray(d.gA) ? d.gA : [];
         gB = Array.isArray(d.gB) ? d.gB : [];
         full = [...gA, ...gB];
@@ -1272,17 +1357,51 @@ function onDbTimeChange() {
     loadDbData();
 }
 
-async function loadDbData() { return withLoading(_loadDbDataImpl, '努力加載中…'); }
-async function _loadDbDataImpl() {
-    const { fromDate, toDate } = getDbTimeRange();
-    const filteredHistories = allHistories.filter(h => {
-        if (fromDate && h.date < fromDate) return false;
-        if (toDate && h.date > toDate) return false;
-        return true;
-    });
+// ⚡ 成員檔案室的資料一次抓完（/api/db-bundle）。
+//    舊做法是 6 個請求分兩波（名冊對照／代打／補登出席／成員備註 → 請假統計／人工覆蓋），
+//    每個都還要各自跑一次 CORS preflight。這裡併成一次來回；worker 沒這個端點時自動退回舊做法。
+let _dbBundleSupported = true;
+async function loadDbBundle(fromDate, toDate) {
+    const applyAliasRoster = (data) => {
+        aliasToMemberId = {}; memberIdToDisplayName = {}; memberIdToCategory = {}; memberIdToJob = {};
+        (data.roster || []).forEach(r => {
+            memberIdToDisplayName[r.member_id] = r.display_name;
+            memberIdToCategory[r.member_id] = r.category || '';
+            if (r.job) memberIdToJob[r.member_id] = r.job;
+        });
+        (data.aliases || []).forEach(a => { aliasToMemberId[a.alias_name] = a.member_id; });
+    };
+    const applySubs = (subs) => {
+        subMapByWin = {};
+        (Array.isArray(subs) ? subs : []).forEach(s => {
+            const k = `${s.date}|${s.session}|${s.type}`;
+            (subMapByWin[k] = subMapByWin[k] || {})[s.member_id] = s.substitute_member_id;
+        });
+    };
 
-    // ⚡ 並行抓取所有彼此獨立的資料（名冊/代打/補登出席/成員備註），加速載入。
-    //    只改「同時發請求」，API、回傳格式、後續計算完全不變。
+    if (_dbBundleSupported && _cloudReadable()) {
+        try {
+            const qs = "?t=" + Date.now() + (shareId ? "&share=" + shareId : "")
+                + (fromDate ? "&from=" + fromDate : "") + (toDate ? "&to=" + toDate : "");
+            const res = await fetch(WORKER_URL + "/api/db-bundle" + qs, { cache: "no-store", headers: _authHeaders() });
+            if (res.ok) {
+                const b = await res.json();
+                if (b && (b.roster || b.aliases)) {
+                    applyAliasRoster(b);
+                    applySubs(b.substitutes);
+                    return {
+                        members: Array.isArray(b.members) ? b.members : [],
+                        attendance: Array.isArray(b.attendance) ? b.attendance : [],
+                        leaveStats: b.leaveStats || {},
+                        overrides: Array.isArray(b.overrides) ? b.overrides : []
+                    };
+                }
+            }
+            _dbBundleSupported = false; // 舊版 worker → 之後都走舊路徑，不再多試
+        } catch (e) { _dbBundleSupported = false; }
+    }
+
+    // ── 舊路徑（本地模式、或 worker 尚未部署 db-bundle）
     const membersPromise = (async () => {
         try {
             if (shareId) {
@@ -1297,13 +1416,10 @@ async function _loadDbDataImpl() {
     })();
     const manualPromise = (async () => {
         try {
+            if (!_cloudReadable()) return [];
             const aUrl = WORKER_URL + "/api/leave/attendance?t=" + Date.now() + (shareId ? "&share=" + shareId : "");
-            const aHeaders = (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
-            if (shareId || (storageMode === 'cloud' && currentUser)) {
-                const r = await fetch(aUrl, { cache: "no-store", headers: aHeaders }).then(r => r.json()).catch(() => []);
-                return Array.isArray(r) ? r : [];
-            }
-            return [];
+            const r = await fetch(aUrl, { cache: "no-store", headers: _authHeaders() }).then(r => r.json()).catch(() => []);
+            return Array.isArray(r) ? r : [];
         } catch (e) { return []; }
     })();
 
@@ -1313,12 +1429,41 @@ async function _loadDbDataImpl() {
         membersPromise,
         manualPromise
     ]);
+    return {
+        members: Array.isArray(dbRaw) ? dbRaw : [],
+        attendance: Array.isArray(manualAll) ? manualAll : [],
+        leaveStats: null,   // null = 還沒拿到，交給 mergeLeaveAndOverrides 自己抓
+        overrides: null
+    };
+}
 
-    const manualAttendance = (Array.isArray(manualAll) ? manualAll : []).filter(a => (!fromDate || a.date >= fromDate) && (!toDate || a.date <= toDate));
+async function loadDbData() { return withLoading(_loadDbDataImpl, '努力加載中…'); }
+async function _loadDbDataImpl() {
+    const { fromDate, toDate } = getDbTimeRange();
+
+    // 成員統計要用每場的選手數據 → 這時候才把完整 raw_json 補齊（與 bundle 同時進行）
+    const [, bundle] = await Promise.all([
+        ensureFullHistories(),
+        loadDbBundle(fromDate, toDate)
+    ]);
+    // 詳細資料沒抓到就不要硬算：否則整張表的出席數會全部變 0，比報錯更難察覺
+    if (_cloudReadable() && allHistories.length && !_fullHistoriesLoaded) {
+        alert('戰報詳細資料載入失敗，成員統計暫時無法更新。請檢查網路後重試。');
+        return;
+    }
+    const dbRaw = bundle.members;
+
+    const filteredHistories = allHistories.filter(h => {
+        if (fromDate && h.date < fromDate) return false;
+        if (toDate && h.date > toDate) return false;
+        return true;
+    });
+
+    const manualAttendance = bundle.attendance.filter(a => (!fromDate || a.date >= fromDate) && (!toDate || a.date <= toDate));
 
     // 出席以「場次(date|session|type)」為單位；分母＝戰報場 ∪ 補登場
     const sessionSet = new Set();
-    filteredHistories.forEach(h => { try { const d = JSON.parse(h.raw_json); sessionSet.add(`${h.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`); } catch (e) { } });
+    filteredHistories.forEach(h => { const d = repOf(h); sessionSet.add(`${h.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`); });
     manualAttendance.forEach(a => sessionSet.add(`${a.date}|${a.session}|${a.type}`));
     totalReportsInTimeframe = sessionSet.size;
     // 各類型的場次數（供「戰報類型」篩選時算出席率分母）
@@ -1360,7 +1505,7 @@ async function _loadDbDataImpl() {
 
     filteredHistories.forEach(h => {
         try {
-            const d = JSON.parse(h.raw_json);
+            const d = repOf(h);
             const aName = d.nameA || h.guild_a;
             const type = d.matchType || "幫戰";
             const session = d.session || "第一場";
@@ -1455,20 +1600,26 @@ async function _loadDbDataImpl() {
     });
 
     // ✅ 合併請假/後備次數（來自請假系統，依時間範圍）與人工覆蓋
-    await mergeLeaveAndOverrides(fromDate, toDate);
+    //    bundle 已經一起帶回來的話就直接用，不用再多發兩個請求
+    await mergeLeaveAndOverrides(fromDate, toDate, bundle.leaveStats, bundle.overrides);
 
     const syncEl = document.getElementById('db-last-sync');
     if (syncEl) syncEl.textContent = `最後計算：${new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`;
 
+    _dbLoadedKey = `${fromDate || ''}|${toDate || ''}`;
     renderDbTable();
 }
 
 // =====================================================
 // ===  合併請假/後備次數 + 人工覆蓋
 // =====================================================
-async function mergeLeaveAndOverrides(fromDate, toDate) {
+async function mergeLeaveAndOverrides(fromDate, toDate, presetStats, presetOverrides) {
     let leaveStats = {}, overrides = [];
-    try {
+    if (presetStats != null || presetOverrides != null) {
+        // /api/db-bundle 已經一起帶回來了
+        leaveStats = presetStats || {};
+        overrides = Array.isArray(presetOverrides) ? presetOverrides : [];
+    } else try {
         const base = shareId
             ? `?share=${shareId}&t=${Date.now()}`
             : `?t=${Date.now()}`;
@@ -1845,13 +1996,12 @@ async function syncMemberData() {
     await new Promise(r => setTimeout(r, 100));
 
     try {
-        if (storageMode === 'cloud' && currentUser) {
-            const res = await fetch(WORKER_URL + "/api/histories?t=" + Date.now(), {
-                cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
-            });
-            allHistories = await res.json();
+        if (_cloudReadable()) {
+            _fullHistoriesLoaded = false;      // 手動同步 → 強制重抓一次完整資料
+            await ensureFullHistories();
         } else {
             allHistories = getLocalHistories();
+            _fullHistoriesLoaded = true;
         }
     } catch (e) { }
 
@@ -2326,15 +2476,13 @@ function buildShareListHTML() {
     const sorted = [...allHistories].sort((a, b) => new Date(b.date) - new Date(a.date));
     return sorted.map(h => {
         let resTag = '', matchType = '', rawResult = '', rawType = '';
-        try {
-            const d = JSON.parse(h.raw_json);
-            rawResult = d.result || '';
-            rawType = d.matchType || '幫戰';
-            resTag = rawResult === 'win'
-                ? '<span style="background:#4caf50;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold;">勝</span>'
-                : '<span style="background:#e57373;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold;">敗</span>';
-            matchType = `[${fmtType(rawType)}]${d.session ? '【' + d.session + '】' : ''}`;
-        } catch (e) { }
+        const d = repOf(h);
+        rawResult = d.result || '';
+        rawType = d.matchType || '幫戰';
+        resTag = rawResult === 'win'
+            ? '<span style="background:#4caf50;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold;">勝</span>'
+            : '<span style="background:#e57373;color:white;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:bold;">敗</span>';
+        matchType = `[${fmtType(rawType)}]${d.session ? '【' + d.session + '】' : ''}`;
         return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f5f5f5;cursor:pointer;" onmouseover="this.style.background='#f8f9fa'" onmouseout="this.style.background=''" class="share-item-row" data-date="${h.date}" data-type="${rawType}" data-result="${rawResult}" data-guild="${h.guild_a.toLowerCase()}">
             <input type="checkbox" class="share-check" value="${h.id}" checked style="width:16px;height:16px;cursor:pointer;" onchange="updateShareCount()">
             <div style="flex:1;font-size:13px;">
@@ -2492,15 +2640,13 @@ function buildTransferListHTML() {
     const sorted = [...allHistories].sort((a, b) => new Date(b.date) - new Date(a.date));
     return sorted.map(h => {
         let resTag = '', matchType = '', rawResult = '', rawType = '';
-        try {
-            const d = JSON.parse(h.raw_json);
-            rawResult = d.result || '';
-            rawType = d.matchType || '幫戰';
-            resTag = rawResult === 'win'
-                ? '<span style="background:#4caf50;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">勝</span>'
-                : '<span style="background:#e57373;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">敗</span>';
-            matchType = `[${fmtType(rawType)}]${d.session ? '【' + d.session + '】' : ''}`;
-        } catch (e) { }
+        const d = repOf(h);
+        rawResult = d.result || '';
+        rawType = d.matchType || '幫戰';
+        resTag = rawResult === 'win'
+            ? '<span style="background:#4caf50;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">勝</span>'
+            : '<span style="background:#e57373;color:white;border-radius:4px;padding:1px 5px;font-size:11px;">敗</span>';
+        matchType = `[${fmtType(rawType)}]${d.session ? '【' + d.session + '】' : ''}`;
         return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f5f5f5;cursor:pointer;" class="transfer-item-row" data-date="${h.date}" data-type="${rawType}" data-result="${rawResult}" data-guild="${h.guild_a.toLowerCase()}">
             <input type="checkbox" class="transfer-check" value="${h.id}" style="width:16px;height:16px;cursor:pointer;" onchange="updateTransferCount()">
             <div style="flex:1;font-size:13px;">
@@ -4113,7 +4259,11 @@ function switchPage(p) {
     updateTopbarContext(p);
     updateFab(p);
     window.scrollTo(0, 0);
-    if (p === 'db') loadDbData();
+    if (p === 'db') {
+        // 範圍沒變又沒有任何寫入 → 沿用已算好的結果，切分頁不用再等一輪
+        const r = getDbTimeRange();
+        if (_dbLoadedKey !== `${r.fromDate || ''}|${r.toDate || ''}`) loadDbData();
+    }
     if (p === 'leave') loadLeavePage();
 }
 

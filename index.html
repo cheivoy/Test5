@@ -2,7 +2,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>NSH 戰績系統 Pro v8.0</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- ⚡ 先把 API 的連線（DNS/TLS）暖好，第一個請求不用等握手 -->
+    <link rel="preconnect" href="https://d1-template.cherrycywong0907.workers.dev" crossorigin>
+    <!-- ⚡ Chart.js 改成 defer：原本是 head 裡的阻擋式載入，205KB 沒下載完畫面不會出來。
+         圖表都是在 window.onload 之後才用到，defer 一定來得及。版本也釘住方便瀏覽器快取。 -->
+    <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <link rel="stylesheet" href="style.css?v=41">
 </head>
 
@@ -740,5 +744,5 @@
 
     <div id="loading-overlay"><div class="load-box"><div class="load-spin"></div><div class="load-text">努力加載中…</div></div></div>
 
-    <script src="app.js?v=44"></script>
+    <script src="app.js?v=45"></script>
 </body></html>
