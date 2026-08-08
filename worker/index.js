@@ -345,6 +345,9 @@ async function computeLeaveStats(env, owner, fromDate, toDate, facts, inputs) {
     m.leave++;
     m.leaveByType[t] = (m.leaveByType[t] || 0) + 1;
     ensureWin(wid).late.push(mid);
+    // 次數已經併入請假（上面 m.leave++），該場的「請假名單」也要一起併入，
+    // 否則會出現「數字說有請假、名單卻找不到人」——臨時請假等於沒登記到。
+    ensureWin(wid).leave.push(mid);
   }
   // No-show：單獨累計，不併入請假
   for (const key in noshowState) {
@@ -357,6 +360,14 @@ async function computeLeaveStats(env, owner, fromDate, toDate, facts, inputs) {
     m.noshow++;
     m.noshowByType[t] = (m.noshowByType[t] || 0) + 1;
     ensureWin(wid).noshow.push(mid);
+  }
+  // 名單去重（同一人多筆動作時不要重複出現）
+  for (const wid in byWindow) {
+    const w = byWindow[wid];
+    w.leave = [...new Set(w.leave)];
+    w.reserve = [...new Set(w.reserve)];
+    w.late = [...new Set(w.late)];
+    w.noshow = [...new Set(w.noshow)];
   }
   return { byMember, byWindow };
 }
@@ -2345,15 +2356,17 @@ export default {
         const bT2 = Date.now();
         const members = Object.values(membersMap).sort((a, b) => a.display_name.localeCompare(b.display_name));
 
-        const leaveByWindow = {}, reserveByWindow = {};
+        const leaveByWindow = {}, reserveByWindow = {}, lateByWindow = {};
         (windows || []).forEach(w => {
           leaveByWindow[w.window_id] = stats.byWindow[w.window_id]?.leave || [];
           reserveByWindow[w.window_id] = stats.byWindow[w.window_id]?.reserve || [];
+          // 臨時請假的人已含在 leaveByWindow 裡，這裡另外標出來供畫面標示「臨時」
+          lateByWindow[w.window_id] = stats.byWindow[w.window_id]?.late || [];
         });
         // （guild 已在上面與 batch 並行取好）
         // roster 欄位保留給舊版前端相容（只含 member_id + display_name）
         const roster = members.map(m => ({ member_id: m.member_id, display_name: m.display_name }));
-        return json({ guild: u?.guild || "", windows: windows || [], members, roster, leaveByWindow, reserveByWindow }, 200,
+        return json({ guild: u?.guild || "", windows: windows || [], members, roster, leaveByWindow, reserveByWindow, lateByWindow }, 200,
           `facts;dur=${bT1 - bT0}, stats;dur=${bT2 - bT1}, reports;desc="${boardFacts.sessions.length} sessions ${boardFacts.players.length} rows"`);
       }
 

@@ -3079,7 +3079,9 @@ async function loadLeaveBoard() {
     renderLeaveBoardList();
 }
 
-function adminGroupByJob(memberIds, withStats) {
+// lateIds：這一場屬於「臨時請假」的 member_id（已含在請假名單內，額外標示出來）
+function adminGroupByJob(memberIds, withStats, lateIds) {
+    const lateSet = new Set(lateIds || []);
     const groups = {};
     (memberIds || []).forEach(mid => {
         const m = boardMemberById[mid];
@@ -3096,7 +3098,7 @@ function adminGroupByJob(memberIds, withStats) {
             </div>
             ${groups[job].map(m => `
                 <div class="lb-row">
-                    <span class="lb-name">${m.display_name}</span>
+                    <span class="lb-name">${m.display_name}${lateSet.has(m.member_id) ? ' <span class="late-tag" title="臨時請假（已計入請假次數）">臨時</span>' : ''}</span>
                     <span class="lb-rec">出席 <b>${m.attendance}</b>　請假 <b>${m.leave}</b>　後備 <b>${m.reserve}</b></span>
                 </div>`).join('')}
         </div>`).join('');
@@ -3114,10 +3116,12 @@ function renderLeaveBoardList() {
     el.innerHTML = openWins.map(w => {
         const leaveIds = leaveBoardCache.leaveByWindow[w.window_id] || [];
         const reserveIds = leaveBoardCache.reserveByWindow[w.window_id] || [];
+        const lateIds = (leaveBoardCache.lateByWindow || {})[w.window_id] || [];
+        const lateNote = lateIds.length ? `<span style="font-weight:normal; color:var(--muted);">（含臨時 ${lateIds.length}）</span>` : '';
         return `<div class="lw-card" style="flex-direction:column; align-items:stretch;">
             <div style="font-weight:bold;">${w.event_date}　${w.session}　<span class="hash-tag">${fmtType(w.match_type)}</span>${w.title ? ' · ' + w.title : ''}</div>
-            <div style="font-size:12px; color:#e57373; font-weight:bold; margin-top:6px;">🙋 已請假（${leaveIds.length}）</div>
-            ${adminGroupByJob(leaveIds, false)}
+            <div style="font-size:12px; color:#e57373; font-weight:bold; margin-top:6px;">🙋 已請假（${leaveIds.length}）${lateNote}</div>
+            ${adminGroupByJob(leaveIds, false, lateIds)}
             <div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:6px;">🔶 後備（${reserveIds.length}）</div>
             ${adminGroupByJob(reserveIds, false)}
         </div>`;
