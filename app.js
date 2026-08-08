@@ -348,13 +348,19 @@ function repOf(h) {
         // 輕量列表：詳細數據還沒抓下來，先用列表欄位撐住顯示（不快取，等完整資料到再解析）
         return { result: h.result || '', matchType: h.matchType || '幫戰', session: h.session || '第一場' };
     }
-    let d = {};
-    try { d = JSON.parse(h.raw_json) || {}; } catch (e) { d = {}; }
+    let d = {}, bad = false;
+    try {
+        d = JSON.parse(h.raw_json);
+        if (!d || typeof d !== 'object') { d = {}; bad = true; }
+    } catch (e) { d = {}; bad = true; }
     Object.defineProperty(h, '_d', { value: d, enumerable: false, configurable: true, writable: true });
+    Object.defineProperty(h, '_bad', { value: bad, enumerable: false, configurable: true, writable: true });
     return d;
 }
+// 這筆戰報的 raw_json 是不是壞掉的（壞掉的不能算進出席率分母）
+function repBad(h) { repOf(h); return !!(h && h._bad); }
 // raw_json 換了之後要丟掉舊的解析結果
-function invalidateRep(h) { if (h && h._d) delete h._d; }
+function invalidateRep(h) { if (h) { delete h._d; delete h._bad; } }
 
 const _cloudReadable = () => !!(shareId || (storageMode === 'cloud' && currentUser));
 const _authHeaders = () => (!shareId && currentUser) ? { 'Authorization': 'Bearer ' + currentUser.token } : {};
@@ -362,7 +368,9 @@ const _authHeaders = () => (!shareId && currentUser) ? { 'Authorization': 'Beare
 // 成員檔案室已經算好的時間範圍（`from|to`）。切分頁回來時若範圍沒變、也沒有任何寫入，
 // 就直接沿用畫面上的結果，不再重抓＋重算一次（以前每次點「成員」都要等一輪）。
 let _dbLoadedKey = null;
-function markDbStale() { _dbLoadedKey = null; }
+// 成員明細（每場數據快照）是否已備妥；表格不需要它，點開成員才補
+let _dbDetailReady = false;
+function markDbStale() { _dbLoadedKey = null; _dbDetailReady = false; }
 // 任何寫入（POST 到 worker）之後一律讓快取失效，避免顯示舊資料
 (function hookFetchForStaleness() {
     const _origFetch = window.fetch.bind(window);
@@ -1162,9 +1170,55 @@ async function openModal(n) {
 // =====================================================
 // ===  成員檔案室詳細 Modal
 // =====================================================
+// 成員明細（每場數據快照 + 雷達圖）才需要完整戰報。
+// 表格是伺服器算好的，所以這份資料延後到真的點開某個成員時才抓，抓過就留著。
+async function ensureMemberDetailData() {
+    if (_dbDetailReady) return;
+    if (!dbMembersMap.length) return;
+    await ensureFullHistories();
+    if (!Object.keys(aliasToMemberId).length) { try { await fetchRosterAliasMap(); } catch (e) { } }
+    if (!Object.keys(subMapByWin).length) { try { await loadSubMap(); } catch (e) { } }
+
+    const byMid = {}, byName = {};
+    dbMembersMap.forEach(m => {
+        m.histories = []; m.aggr = {};
+        if (m.member_id) byMid[m.member_id] = m;
+        byName[m.id] = m;
+    });
+
+    const { fromDate, toDate } = getDbTimeRange();
+    for (const h of allHistories) {
+        if (fromDate && h.date < fromDate) continue;
+        if (toDate && h.date > toDate) continue;
+        const d = repOf(h);
+        if (!Array.isArray(d.gA)) continue;
+        const type = d.matchType || '幫戰';
+        const session = d.session || '第一場';
+        const title = d.nameA || h.guild_a;
+        const subForWin = subMapByWin[`${h.date}|${session}|${type}`];
+        for (const p of d.gA) {
+            if (!p || typeof p !== 'object') continue;
+            const origId = aliasToMemberId[p.name];
+            const target = origId ? byMid[origId] : byName[p.name];
+            if (!target) continue;                       // 已移除的成員不顯示（與表格一致）
+            const subB = (subForWin && origId && subForWin[origId]) ? subForWin[origId] : null;
+            if (subB) {
+                // 被代打：保留這場快照並標示，但不計入平均（與舊行為一致）
+                target.histories.push({ date: h.date, title, stats: p, type, session, subBy: memberIdToDisplayName[subB] || subB });
+                continue;
+            }
+            target.histories.push({ date: h.date, title, stats: p, type, session });
+            cols.slice(2).forEach(c => { target.aggr[c.k] = (target.aggr[c.k] || 0) + (p[c.k] || 0); });
+        }
+    }
+    _dbDetailReady = true;
+}
+
 async function openMemberDetail(id) {
     const m = dbMembersMap.find(x => x.id === id);
     if (!m) return;
+    // 明細要用每場數據 → 這時候才補（表格本身不需要）
+    if (!_dbDetailReady) await withLoading(ensureMemberDetailData, '載入詳細數據…');
     focusPlayer = m;
 
     document.getElementById('member-modal').style.display = 'flex';
@@ -1437,11 +1491,96 @@ async function loadDbBundle(fromDate, toDate) {
     };
 }
 
+// ⚡ 成員檔案室（伺服器算好版）：表格只需要每人的彙總數字，不需要每場每個人的完整數據。
+//    以前前端要下載全部 raw_json 自己算（幾 MB，手機網路就是卡在這裡）。
+//    回傳 false 代表 worker 不支援 → 呼叫端退回舊的前端計算流程。
+let _dbComputedSupported = true;
+async function loadDbComputed(fromDate, toDate) {
+    if (!_dbComputedSupported || !_cloudReadable()) return false;
+    try {
+        const qs = "?computed=1&t=" + Date.now() + (shareId ? "&share=" + shareId : "")
+            + (fromDate ? "&from=" + fromDate : "") + (toDate ? "&to=" + toDate : "");
+        const res = await fetch(WORKER_URL + "/api/db-bundle" + qs, { cache: "no-store", headers: _authHeaders() });
+        if (!res.ok) { _dbComputedSupported = false; return false; }
+        const b = await res.json();
+        if (!b || b.computed !== true || !Array.isArray(b.members)) { _dbComputedSupported = false; return false; }
+        logServerTiming(res, 'db-bundle?computed=1');
+
+        totalReportsInTimeframe = b.totalSessions || 0;
+        dbSessionCountByType = Object.assign({ '幫戰': 0, '約戰': 0, '其他': 0 }, b.sessionByType || {});
+
+        // 名冊對照表（改名/合併後的顯示名稱）也順便建起來，其他功能會用到
+        memberIdToDisplayName = {}; memberIdToCategory = {}; memberIdToJob = {};
+        b.members.forEach(r => {
+            memberIdToDisplayName[r.member_id] = r.display_name;
+            memberIdToCategory[r.member_id] = r.category || '';
+            if (r.job) memberIdToJob[r.member_id] = r.job;
+        });
+
+        const TYPES = TYPE_ORDER;
+        const sumT = (o) => TYPES.reduce((s, t) => s + ((o && o[t]) || 0), 0);
+        _dbDetailReady = false;   // 表格重建 → 明細快取要重算
+        dbMembersMap = b.members.map(r => ({
+            id: r.display_name, member_id: r.member_id,
+            last_job: r.job || '未知', category: r.category || '',
+            note: r.note || '', tag: r.tag || 'none',
+            noteVersion: r.noteVersion ?? null, lastJobAt: r.lastJobAt || null,
+            counts: r.autoAttByType || {},          // 自動出席（戰報＋補登），供覆蓋視窗顯示原始值
+            attByTypeEff: r.attByType || {},        // 套用人工覆蓋後的出席
+            leaveByType: r.leaveByType || {},
+            reserveByType: r.reserveByType || {},
+            noshowByType: r.noshowByType || {},
+            lateByType: r.lateByType || {},
+            noshowCount: sumT(r.noshowByType), lateCount: sumT(r.lateByType),
+            leaveCount: sumT(r.leaveByType), reserveCount: sumT(r.reserveByType),
+            attendance: sumT(r.attByType), matches: sumT(r.attByType),
+            hasOverride: !!r.hasOverride,
+            overridesJson: r.overridesJson || null, overrideVersion: r.overrideVersion ?? null,
+            autoByType: {
+                attendance: r.autoAttByType || {},
+                leave: r.autoLeaveByType || {},
+                reserve: r.autoReserveByType || {}
+            },
+            rate: 0,          // renderDbTable 會用 dbMemberView 依所選類型重算
+            histories: [], aggr: {}   // 明細用，點開成員時才補
+        }));
+
+        // 職業下拉
+        const jobSelect = document.getElementById('db-job');
+        if (jobSelect) {
+            const currJob = jobSelect.value;
+            const jobSet = new Set(b.members.map(r => r.job).filter(Boolean));
+            jobSelect.innerHTML = '<option value="all">全部職業</option>' + [...jobSet].map(j => `<option value="${j}">${j}</option>`).join('');
+            jobSelect.value = currJob || 'all';
+        }
+        return true;
+    } catch (e) {
+        console.error('伺服器端成員統計失敗，退回前端計算', e);
+        _dbComputedSupported = false;
+        return false;
+    }
+}
+
+// 把 worker 回報的各階段耗時印到 console（DevTools 也看得到 Server-Timing）
+function logServerTiming(res, label) {
+    const st = res.headers.get('Server-Timing');
+    if (st) console.log(`[效能] ${label} → ${st}`);
+}
+
 async function loadDbData() { return withLoading(_loadDbDataImpl, '努力加載中…'); }
 async function _loadDbDataImpl() {
     const { fromDate, toDate } = getDbTimeRange();
 
-    // 成員統計要用每場的選手數據 → 這時候才把完整 raw_json 補齊（與 bundle 同時進行）
+    // 首選：伺服器算好，一個小請求就搞定（不下載任何 raw_json）
+    if (await loadDbComputed(fromDate, toDate)) {
+        const syncEl = document.getElementById('db-last-sync');
+        if (syncEl) syncEl.textContent = `最後計算：${new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`;
+        _dbLoadedKey = `${fromDate || ''}|${toDate || ''}`;
+        renderDbTable();
+        return;
+    }
+
+    // ── 舊路徑：前端自己從完整戰報算（worker 還沒部署新版時）
     const [, bundle] = await Promise.all([
         ensureFullHistories(),
         loadDbBundle(fromDate, toDate)
@@ -1463,7 +1602,12 @@ async function _loadDbDataImpl() {
 
     // 出席以「場次(date|session|type)」為單位；分母＝戰報場 ∪ 補登場
     const sessionSet = new Set();
-    filteredHistories.forEach(h => { const d = repOf(h); sessionSet.add(`${h.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`); });
+    // 損壞的戰報整筆略過——不能讓它佔一個場次名額，否則所有人的出席率分母會被墊高
+    filteredHistories.forEach(h => {
+        if (repBad(h)) return;
+        const d = repOf(h);
+        sessionSet.add(`${h.date}|${d.session || '第一場'}|${d.matchType || '幫戰'}`);
+    });
     manualAttendance.forEach(a => sessionSet.add(`${a.date}|${a.session}|${a.type}`));
     totalReportsInTimeframe = sessionSet.size;
     // 各類型的場次數（供「戰報類型」篩選時算出席率分母）
@@ -1607,6 +1751,7 @@ async function _loadDbDataImpl() {
     if (syncEl) syncEl.textContent = `最後計算：${new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}`;
 
     _dbLoadedKey = `${fromDate || ''}|${toDate || ''}`;
+    _dbDetailReady = true;   // 舊路徑本來就把每場快照算好了
     renderDbTable();
 }
 
