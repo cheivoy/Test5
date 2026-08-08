@@ -2508,7 +2508,14 @@ async function mergeP(fromId) {
 
     if (!toMember) { alert(`找不到目標成員「${toId}」，請確認 ID 是否正確。`); return; }
 
-    if (!confirm(`確認將「${fromId}」（${fromMember?.matches || 0}場）合併到「${toId}」（${toMember?.matches || 0}場）？\n合併後「${fromId}」將被刪除，無法還原！`)) return;
+    if (!confirm(
+        `確認將「${fromId}」（${fromMember?.matches || 0}場）合併到「${toId}」（${toMember?.matches || 0}場）？\n\n` +
+        `會一併轉移到「${toId}」：\n` +
+        `　• 歷史戰報（含曾用過的舊名字）\n` +
+        `　• 請假／後備／缺席／臨時請假／補登出席\n` +
+        `　• 代打紀錄、長期請假、人工覆蓋次數\n` +
+        `　• 備註（若「${toId}」還沒有備註）\n\n` +
+        `合併後「${fromId}」會從名冊移除，無法還原。`)) return;
 
     try {
         if (storageMode === 'cloud' && currentUser) {

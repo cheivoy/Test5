@@ -202,6 +202,49 @@ async function ensureMemberFor(env, owner, name) {
   return finalId;
 }
 
+// =====================================================
+// ===  合併兩位成員：把來源名下所有東西全部轉到目標，再把來源標成已移除
+// ===  成員檔案室的「合併」與請假管理的「使用 ID 合併」共用這一份，
+// ===  避免兩邊行為不一致（舊版檔案室只轉別名，請假/代打/長期請假/人工覆蓋
+// ===  全都變成掛在已移除成員底下的孤兒資料，看起來就像被刪掉了）。
+// =====================================================
+async function mergeMemberIds(env, owner, fromMemberId, toMemberId, fromName, toName) {
+  const now = Date.now();
+  const run = async (sql, ...b) => {
+    try { await env.DB.prepare(sql).bind(...b).run(); }
+    catch (e) { /* 個別衝突略過，不影響其餘搬移 */ }
+  };
+  await run("UPDATE member_aliases SET member_id=? WHERE owner=? AND member_id=?", toMemberId, owner, fromMemberId);
+  // 請假／後備／缺席／臨時請假／補登出席
+  await run("UPDATE leave_actions SET member_id=? WHERE owner=? AND member_id=?", toMemberId, owner, fromMemberId);
+  // 代打：本人與代打者兩個方向都要轉
+  await run("UPDATE leave_substitutes SET member_id=? WHERE owner=? AND member_id=?", toMemberId, owner, fromMemberId);
+  await run("UPDATE leave_substitutes SET substitute_member_id=? WHERE owner=? AND substitute_member_id=?", toMemberId, owner, fromMemberId);
+  await run("UPDATE long_leaves SET member_id=? WHERE owner=? AND member_id=?", toMemberId, owner, fromMemberId);
+  // 人工覆蓋：目標已經有自己的設定就保留目標的，來源那筆刪掉（否則主鍵會撞）
+  try {
+    const toOv = await env.DB.prepare("SELECT member_id FROM stat_overrides WHERE owner=? AND member_id=?").bind(owner, toMemberId).first();
+    if (toOv) await run("DELETE FROM stat_overrides WHERE owner=? AND member_id=?", owner, fromMemberId);
+    else await run("UPDATE stat_overrides SET member_id=? WHERE owner=? AND member_id=?", toMemberId, owner, fromMemberId);
+  } catch (e) { /* stat_overrides 尚未建立 */ }
+  // 備註／標籤（members 表是以顯示名稱為 key）：目標沒有就沿用來源的，
+  // 然後把來源那筆刪掉——否則日後有同名新成員會莫名繼承到舊備註。
+  if (fromName && toName && fromName !== toName) {
+    try {
+      const fromNote = await env.DB.prepare("SELECT note FROM members WHERE id=? AND owner=?").bind(fromName, owner).first();
+      const toNote = await env.DB.prepare("SELECT note FROM members WHERE id=? AND owner=?").bind(toName, owner).first();
+      if (fromNote?.note && !toNote?.note) {
+        await run(
+          "INSERT INTO members (id, last_job, matches, total_dmg, note, owner) VALUES (?, '', 0, 0, ?, ?) " +
+          "ON CONFLICT(id, owner) DO UPDATE SET note = excluded.note",
+          toName, fromNote.note, owner);
+      }
+      await run("DELETE FROM members WHERE id=? AND owner=?", fromName, owner);
+    } catch (e) { /* members 表異常時不影響主要搬移 */ }
+  }
+  await run("UPDATE members_roster SET status='removed', updated_at=?, version=version+1 WHERE owner=? AND member_id=?", now, owner, fromMemberId);
+}
+
 // 從 leave_actions 算出每個成員目前的請假/後備狀態（最新一筆事件決定狀態）
 // 回傳 { byMember: {member_id: {leave, reserve, leaveByType, reserveByType}}, byWindow: {window_id: {leave:[], reserve:[]}} }
 async function computeLeaveStats(env, owner, fromDate, toDate, facts, inputs) {
@@ -2846,26 +2889,10 @@ export default {
         const toMemberId = await ensureMemberFor(env, user, toId);
         if (fromMemberId === toMemberId) return json({ error: "來源與目標是同一位成員" }, 400);
 
-        const now = Date.now();
-        // 把來源成員底下所有名字（含歷史用過的）全部轉指到目標成員
-        await env.DB.prepare(
-          "UPDATE member_aliases SET member_id = ? WHERE owner = ? AND member_id = ?"
-        ).bind(toMemberId, user, fromMemberId).run();
-        await env.DB.prepare(
-          "UPDATE members_roster SET status='removed', updated_at=?, version=version+1 WHERE member_id=? AND owner=?"
-        ).bind(now, fromMemberId, user).run();
-
-        // 合併備註／標籤（若目標沒有備註，沿用來源的備註）
-        const fromNote = await env.DB.prepare("SELECT note FROM members WHERE id=? AND owner=?").bind(fromId, user).first();
-        const toNote = await env.DB.prepare("SELECT note FROM members WHERE id=? AND owner=?").bind(toId, user).first();
-        if (fromNote?.note && !toNote?.note) {
-          await env.DB.prepare(`
-            INSERT INTO members (id, last_job, matches, total_dmg, note, owner)
-            VALUES (?, '', 0, 0, ?, ?)
-            ON CONFLICT(id, owner) DO UPDATE SET note = excluded.note
-          `).bind(toId, fromNote.note, user).run();
-        }
-        await env.DB.prepare("DELETE FROM members WHERE id = ? AND owner = ?").bind(fromId, user).run();
+        // ✅ 與請假管理的「使用 ID 合併」共用同一份邏輯：
+        //    別名＋請假/後備/缺席/臨時/補登＋代打＋長期請假＋人工覆蓋＋備註 全部轉到目標。
+        //    （舊版這裡只轉別名，其餘全變成掛在已移除成員底下的孤兒資料）
+        await mergeMemberIds(env, user, fromMemberId, toMemberId, fromId, toId);
 
         await writeAudit(env, user, user, 'roster', fromMemberId, 'merge', { from: fromId, to: toId, into: toMemberId });
 
@@ -2882,18 +2909,8 @@ export default {
         const f = await env.DB.prepare("SELECT member_id, display_name FROM members_roster WHERE owner=? AND member_id=?").bind(user, fromId).first();
         const t = await env.DB.prepare("SELECT member_id, display_name FROM members_roster WHERE owner=? AND member_id=?").bind(user, toId).first();
         if (!f || !t) return json({ error: "找不到來源或目標成員（請確認 ID）" }, 404);
-        const now = Date.now();
-        const run = async (sql, ...b) => { try { await env.DB.prepare(sql).bind(...b).run(); } catch (e) { /* 個別衝突略過，不影響其餘搬移 */ } };
-        await run("UPDATE member_aliases SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
-        await run("UPDATE leave_actions SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
-        await run("UPDATE leave_substitutes SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
-        await run("UPDATE leave_substitutes SET substitute_member_id=? WHERE owner=? AND substitute_member_id=?", toId, user, fromId);
-        await run("UPDATE long_leaves SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
-        try {
-          const toOv = await env.DB.prepare("SELECT member_id FROM stat_overrides WHERE owner=? AND member_id=?").bind(user, toId).first();
-          if (!toOv) await run("UPDATE stat_overrides SET member_id=? WHERE owner=? AND member_id=?", toId, user, fromId);
-        } catch (e) { }
-        await run("UPDATE members_roster SET status='removed', updated_at=?, version=version+1 WHERE owner=? AND member_id=?", now, user, fromId);
+        // 與成員檔案室的「合併」共用同一份邏輯
+        await mergeMemberIds(env, user, fromId, toId, f.display_name, t.display_name);
         await writeAudit(env, user, user, 'roster', fromId, 'merge_by_id', { from: fromId, to: toId, fromName: f.display_name, toName: t.display_name });
         return json({ status: "OK", from: f.display_name, to: t.display_name });
       }
