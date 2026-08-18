@@ -24,17 +24,33 @@ let dbSessionCountByType = { '幫戰': 0, '約戰': 0, '其他': 0 }; // 各類�
 let aliasToMemberId = {}, memberIdToDisplayName = {}, memberIdToJob = {};
 let subMapByWin = {}; // 代替上號：`日期|場次|類型` -> { 本人member_id: 代打者member_id }
 
-// 載入中轉圈圈（計數式，支援同時多個載入）
-let _loadingCount = 0;
+// 載入指示（計數式，支援同時多個載入）。
+// 大多數 API 200ms 內就回來了，馬上蓋一層遮罩只會讓畫面閃一下 →
+// 先等 160ms，真的比較久才顯示頂部進度條與底部提示膠囊。
+let _loadingCount = 0, _loadTimer = null, _loadShown = false;
+function _setLoadVisible(on) {
+    _loadShown = on;
+    document.getElementById('load-bar')?.classList.toggle('show', on);
+    document.getElementById('loading-overlay')?.classList.toggle('show', on);
+}
 function showLoading(text) {
     _loadingCount++;
-    const el = document.getElementById('loading-overlay');
-    if (el) { if (text) { const t = el.querySelector('.load-text'); if (t) t.textContent = text; } el.classList.add('show'); }
+    if (text) { const t = document.querySelector('#loading-overlay .load-text'); if (t) t.textContent = text; }
+    if (_loadShown || _loadTimer) return;
+    _loadTimer = setTimeout(() => {
+        _loadTimer = null;
+        if (_loadingCount > 0) _setLoadVisible(true);
+    }, 160);
 }
 function hideLoading() {
     _loadingCount = Math.max(0, _loadingCount - 1);
-    if (_loadingCount === 0) { const el = document.getElementById('loading-overlay'); if (el) el.classList.remove('show'); }
+    if (_loadingCount > 0) return;
+    if (_loadTimer) { clearTimeout(_loadTimer); _loadTimer = null; }
+    if (_loadShown) _setLoadVisible(false);
 }
+
+// 線性圖標：統一從 index.html 的 sprite 取用（取代 emoji）
+function ic(name, cls) { return `<svg class="ic${cls ? ' ' + cls : ''}"><use href="#i-${name}"/></svg>`; }
 async function withLoading(fn, text) {
     showLoading(text || '努力加載中…');
     try { return await fn(); } finally { hideLoading(); }
@@ -86,7 +102,7 @@ function updateModeBanner() {
     const shareNote = document.getElementById('share-local-note');
 
     if (storageMode === 'cloud' && currentUser) {
-        if (banner) { banner.className = 'cloud'; banner.textContent = `☁️ 雲端模式 — ${currentUser.username}（${currentUser.guild || ''}）`; }
+        if (banner) { banner.className = 'cloud'; banner.innerHTML = `${ic('cloud')}雲端模式 — ${currentUser.username}${currentUser.guild ? '（' + currentUser.guild + '）' : ''}`; }
         if (authBtn) authBtn.style.display = 'none';
         if (logoutBtn) logoutBtn.style.display = '';
         if (syncBtn && !isViewMode) syncBtn.style.display = '';
@@ -96,7 +112,7 @@ function updateModeBanner() {
         if (sessionsBtn && !isViewMode) sessionsBtn.style.display = '';
         if (shareNote) shareNote.style.display = 'none';
     } else {
-        if (banner) { banner.className = 'local'; banner.textContent = '💾 本地模式（未登入）'; }
+        if (banner) { banner.className = 'local'; banner.innerHTML = `${ic('device')}本地模式（未登入）`; }
         if (authBtn) authBtn.style.display = '';
         if (logoutBtn) logoutBtn.style.display = 'none';
         if (syncBtn) syncBtn.style.display = 'none';
@@ -174,7 +190,7 @@ function renderHome() {
     if (!el) return;
     const card = (inner, extra) => `<div class="home-card" ${extra || ''}>${inner}</div>`;
     const jump = (icon, label, page) =>
-        `<button class="home-jump" onclick="switchPage('${page}')"><span>${icon}</span>${label}</button>`;
+        `<button class="home-jump" onclick="switchPage('${page}')">${ic(icon, 'ic-lg')}<span class="hj-t">${label}</span>${ic('chevron', 'hj-arr')}</button>`;
 
     let html = `<div class="home-hero">
         <div class="home-logo">NSH</div>
@@ -184,19 +200,19 @@ function renderHome() {
 
     if (authExpired) {
         html += card(`<div class="home-alert">
-            <b>⚠️ 登入已失效</b>
+            <b>${ic('key')}登入已失效</b>
             <span>可能是在其他裝置登出、或密碼改過了。請重新登入才能讀寫雲端資料。</span>
-            <button class="btn btn-primary" onclick="openAuthModal()">🔑 重新登入</button>
+            <button class="btn btn-primary" onclick="openAuthModal()">${ic('key')}重新登入</button>
         </div>`);
     }
 
     // ── 唯讀分享訪客：不需要登入，也不該看到模式選擇 ──
     if (shareId || isViewMode) {
         const n = Array.isArray(allHistories) ? allHistories.length : 0;
-        html += card(`<div class="home-status"><span class="home-pill view">👁️ 唯讀查看模式</span>
+        html += card(`<div class="home-status"><span class="home-pill view">唯讀查看模式</span>
             <small>透過分享連結進入，可以看戰報與統計，不能修改。</small></div>
             <div class="home-stat"><b>${n}</b><small>可查看的戰報</small></div>`);
-        html += `<div class="home-jumps">${jump('📊', '戰報解析', 'report')}${jump('👥', '成員檔案室', 'db')}</div>`;
+        html += `<div class="home-jumps">${jump('chart', '戰報解析', 'report')}${jump('users', '成員檔案室', 'db')}</div>`;
         el.innerHTML = html;
         return;
     }
@@ -205,16 +221,16 @@ function renderHome() {
     if (!currentUser && !guestAck) {
         html += `<div class="home-choose">
             <button class="home-opt" onclick="openAuthModal()">
-                <span class="home-opt-ic">🔑</span>
+                <span class="home-opt-ic">${ic('key', 'ic-xl')}</span>
                 <b>登入 / 註冊</b>
                 <small>資料存在雲端，換裝置也看得到。可用請假管理、Discord 通知、分享連結。</small>
-                <span class="home-opt-go">開始 →</span>
+                <span class="home-opt-go">開始使用${ic('chevron')}</span>
             </button>
             <button class="home-opt" onclick="enterGuestMode()">
-                <span class="home-opt-ic">💾</span>
+                <span class="home-opt-ic">${ic('device', 'ic-xl')}</span>
                 <b>本地模式（訪客）</b>
                 <small>資料只存在這台裝置的瀏覽器，不用註冊就能先試用。之後登入可以整批同步上雲。</small>
-                <span class="home-opt-go">直接使用 →</span>
+                <span class="home-opt-go">直接使用${ic('chevron')}</span>
             </button>
         </div>
         <p class="home-foot">清瀏覽器資料會讓本地模式的戰報消失；要長期保存請登入雲端。</p>`;
@@ -227,24 +243,24 @@ function renderHome() {
     const n = homeDataCount();
     html += card(`<div class="home-status">
         ${cloud
-            ? `<span class="home-pill cloud">☁️ 雲端模式</span><small>${currentUser.username}${currentUser.guild ? '　·　' + currentUser.guild : ''}</small>`
-            : `<span class="home-pill local">💾 本地模式（訪客）</span><small>資料只存在這台裝置</small>`}
+            ? `<span class="home-pill cloud">雲端模式</span><small>${currentUser.username}${currentUser.guild ? '　·　' + currentUser.guild : ''}</small>`
+            : `<span class="home-pill local">本地模式（訪客）</span><small>資料只存在這台裝置</small>`}
         <div class="home-status-act">
             ${cloud
-            ? `<button class="btn btn-outline" onclick="switchPage('me')">👤 我的</button>`
-            : `<button class="btn btn-primary" onclick="openAuthModal()">🔑 登入 / 註冊</button>`}
+            ? `<button class="btn btn-outline" onclick="switchPage('me')">${ic('user')}我的</button>`
+            : `<button class="btn btn-primary" onclick="openAuthModal()">${ic('key')}登入 / 註冊</button>`}
         </div>
     </div>`);
 
     if (n === 0) {
         // 這是「登入後沒有任何資料」要看到的畫面
         html += card(`<div class="home-empty">
-            <div class="home-empty-ic">📭</div>
+            <div class="home-empty-ic">${ic('inbox')}</div>
             <b>尚未導入任何資料</b>
             <span>${cloud
                 ? '這個帳號的雲端還沒有任何戰報。導入 CSV 之後，戰報解析、成員檔案室與出席統計才會有內容。'
                 : '這台裝置還沒有任何戰報。導入 CSV 之後就能開始分析。'}</span>
-            ${isViewMode ? '' : `<button class="btn btn-primary" onclick="openImportModal()">📁 立即導入戰報</button>`}
+            ${isViewMode ? '' : `<button class="btn btn-primary" onclick="openImportModal()">${ic('upload')}立即導入戰報</button>`}
         </div>`);
     } else {
         const latest = [...allHistories].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
@@ -256,10 +272,10 @@ function renderHome() {
     }
 
     html += `<div class="home-jumps">
-        ${jump('📊', '戰報解析', 'report')}
-        ${jump('👥', '成員檔案室', 'db')}
-        ${cloud && !isViewMode ? jump('🗓️', '請假管理', 'leave') : ''}
-        ${jump('👤', '我的', 'me')}
+        ${jump('chart', '戰報解析', 'report')}
+        ${jump('users', '成員檔案室', 'db')}
+        ${cloud && !isViewMode ? jump('calendar', '請假管理', 'leave') : ''}
+        ${jump('user', '我的', 'me')}
     </div>`;
     if (!cloud) html += `<p class="home-foot">本地模式沒有請假管理與 Discord 通知；登入後這些才會出現。</p>`;
     el.innerHTML = html;
@@ -2782,12 +2798,12 @@ function openShareMenu() {
     modal.innerHTML = `
         <div class="share-menu-card">
             <div class="share-menu-head">
-                <h3 style="margin:0;">🔗 分享戰報</h3>
+                <h3 style="margin:0;">分享戰報</h3>
                 <button class="share-menu-x" onclick="document.getElementById('share-menu-modal').remove()" aria-label="關閉">✕</button>
             </div>
-            ${opt('📋', '複製幫眾版', '唯讀鏈結，可自選要分享哪幾場', "copyShareLink('view')")}
-            ${admin ? opt('📋', '複製管理版', '可編輯鏈結，僅供管理員使用', "copyShareLink('admin')") : ''}
-            ${admin ? opt('🔀', '共享給其他帳號', '把戰報分享到另一個登入帳號', 'openShareTransfer()') : ''}
+            ${opt(ic('clipboard', 'ic-lg'), '複製幫眾版', '唯讀鏈結，可自選要分享哪幾場', "copyShareLink('view')")}
+            ${admin ? opt(ic('key', 'ic-lg'), '複製管理版', '可編輯鏈結，僅供管理員使用', "copyShareLink('admin')") : ''}
+            ${admin ? opt(ic('share', 'ic-lg'), '共享給其他帳號', '把戰報分享到另一個登入帳號', 'openShareTransfer()') : ''}
         </div>`;
     document.body.appendChild(modal);
 }
@@ -4800,15 +4816,15 @@ function updateTopbarContext(p) {
     const el = document.getElementById('topbar-context');
     if (!el) return;
     const admin = !isViewMode && storageMode === 'cloud' && currentUser;
-    const b = (icon, text, fn) => `<button class="btn btn-outline ctx-btn" onclick="${fn}"><span class="ci">${icon}</span><span class="ct">${text}</span></button>`;
+    const b = (icon, text, fn) => `<button class="btn btn-outline ctx-btn" onclick="${fn}" title="${text}">${ic(icon)}<span class="ct">${text}</span></button>`;
     let html = '';
     if (p === 'report' && !isViewMode) {
-        html = b('📁', '導入', 'openImportModal()') + b('🔗', '分享', 'openShareMenu()');
+        html = b('upload', '導入', 'openImportModal()') + b('share', '分享', 'openShareMenu()');
     } else if (p === 'db' && admin) {
-        html = b('➕', '新增', 'openAddMemberModal()') + b('🔄', '同步', 'syncMemberData()')
-            + b('🆕', '待確認', 'checkUnresolvedRoster()') + b('📤', '匯出', 'exportMembersCSV()');
+        html = b('plus', '新增', 'openAddMemberModal()') + b('refresh', '同步', 'syncMemberData()')
+            + b('new', '待確認', 'checkUnresolvedRoster()') + b('download', '匯出', 'exportMembersCSV()');
     } else if (p === 'leave' && admin) {
-        html = b('➕', '場次', 'openWindowModal()');
+        html = b('plus', '場次', 'openWindowModal()');
     }
     el.innerHTML = html;
 }

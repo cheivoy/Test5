@@ -28,9 +28,24 @@ function toast(msg) {
     setTimeout(() => el.classList.remove('show'), 1800);
 }
 
-let _lc = 0;
-function showLoading(t) { _lc++; const el = document.getElementById('load-overlay'); if (el) { if (t) { const x = el.querySelector('.load-text'); if (x) x.textContent = t; } el.classList.add('show'); } }
-function hideLoading() { _lc = Math.max(0, _lc - 1); if (_lc === 0) { const el = document.getElementById('load-overlay'); if (el) el.classList.remove('show'); } }
+// 載入指示：大多數請求 200ms 內就回來，馬上顯示只會閃一下 → 等 160ms 才顯示
+let _lc = 0, _lcTimer = null, _lcShown = false;
+function _lcSet(on) {
+    _lcShown = on;
+    document.getElementById('load-overlay')?.classList.toggle('show', on);
+}
+function showLoading(t) {
+    _lc++;
+    if (t) { const x = document.querySelector('#load-overlay .load-text'); if (x) x.textContent = t; }
+    if (_lcShown || _lcTimer) return;
+    _lcTimer = setTimeout(() => { _lcTimer = null; if (_lc > 0) _lcSet(true); }, 160);
+}
+function hideLoading() {
+    _lc = Math.max(0, _lc - 1);
+    if (_lc > 0) return;
+    if (_lcTimer) { clearTimeout(_lcTimer); _lcTimer = null; }
+    if (_lcShown) _lcSet(false);
+}
 
 async function loadBoard() {
     if (!shareId) {
@@ -170,8 +185,8 @@ function renderNames() {
             listEl.innerHTML = `<div class="muted">請在上方輸入你的名字搜尋。第一次用之後，這裡會記住你的名字。</div>`;
             return;
         }
-        listEl.innerHTML = `<div style="font-size:12px; color:#97a0ad; margin-bottom:6px;">你常用的名字：</div>` +
-            recents.map(m => `<span class="name-btn ${m.member_id === selectedMemberId ? 'active' : ''}" onclick="selectMember('${m.member_id}')">${m.display_name} <span onclick="event.stopPropagation(); removeRecentName('${m.member_id}')" style="color:#c9ced6; margin-left:4px;">✕</span></span>`).join('');
+        listEl.innerHTML = `<div class="list-hint">你常用的名字：</div>` +
+            recents.map(m => `<span class="name-btn ${m.member_id === selectedMemberId ? 'active' : ''}" onclick="selectMember('${m.member_id}')">${m.display_name} <span class="chip-x" onclick="event.stopPropagation(); removeRecentName('${m.member_id}')">✕</span></span>`).join('');
         return;
     }
 
@@ -269,8 +284,8 @@ function renderWindows() {
         const onReserve = (board.reserveByWindow[w.window_id] || []).includes(selectedMemberId);
         return `<div class="win-row">
             <div class="win-info">
-                <b>${w.event_date}　${w.session}</b> <span class="job-chip" style="background:#e3ecf7;">${fmtType(w.match_type)}</span>${onReserve ? '<span class="badge-reserve">後備</span>' : ''}
-                <div class="meta">${w.title || ''}${onLeave ? ' · 你已請假' : ''}</div>
+                <b>${w.event_date}　${w.session}</b> <span class="job-chip">${fmtType(w.match_type)}</span>${onReserve ? '<span class="badge-reserve">後備</span>' : ''}${onLeave ? '<span class="tag-on-leave">已請假</span>' : ''}
+                ${w.title ? `<div class="meta">${w.title}</div>` : ''}
             </div>
             <button class="toggle-btn ${onLeave ? 'toggle-cancel' : 'toggle-leave'}"
                 onclick="submitLeave('${w.window_id}', '${onLeave ? 'leave_cancel' : 'leave_request'}')">
@@ -290,10 +305,10 @@ function renderBoard() {
         const leaveIds = board.leaveByWindow[w.window_id] || [];
         const reserveIds = board.reserveByWindow[w.window_id] || [];
         return `<div class="win-block">
-            <div class="win-block-title">${w.event_date}　${w.session}　<span class="job-chip" style="background:#e3ecf7;">${fmtType(w.match_type)}</span>${w.title ? ' · ' + w.title : ''}</div>
-            <div style="font-size:12px; color:#e57373; font-weight:bold; margin-top:4px;">🙋 已請假（${leaveIds.length}）</div>
+            <div class="win-block-title">${w.event_date}　${w.session}　<span class="job-chip">${fmtType(w.match_type)}</span>${w.title ? ' · ' + w.title : ''}</div>
+            <div class="group-label leave">已請假（${leaveIds.length}）</div>
             ${renderJobGroups(leaveIds, false)}
-            ${reserveIds.length ? `<div style="font-size:12px; color:#e65100; font-weight:bold; margin-top:6px;">🔶 後備（${reserveIds.length}）</div>${renderJobGroups(reserveIds, false)}` : ''}
+            ${reserveIds.length ? `<div class="group-label reserve">後備（${reserveIds.length}）</div>${renderJobGroups(reserveIds, false)}` : ''}
         </div>`;
     }).join('');
 }
@@ -304,16 +319,16 @@ function renderOverview() {
     if (!members.length) return;
     document.getElementById('roster-overview-card').style.display = 'block';
     document.getElementById('roster-overview').innerHTML =
-        `<div style="font-size:11px; color:#97a0ad; margin-bottom:6px;">數字＝出席 / 請假 / 後備</div>` +
+        `<div class="list-hint">數字＝出席 / 請假 / 後備</div>` +
         renderJobGroups(members.map(m => m.member_id), true);
 }
 
 function toggleOverview() {
     const el = document.getElementById('roster-overview');
-    const caret = document.getElementById('overview-caret');
     const open = el.style.display !== 'none';
     el.style.display = open ? 'none' : 'block';
-    caret.textContent = open ? '▸' : '▾';
+    // 箭頭改成 SVG 圖標 → 用 class 轉 90 度，不再塞 ▸/▾ 字元
+    document.getElementById('overview-head')?.classList.toggle('open', !open);
 }
 
 async function submitLeave(windowId, action) {

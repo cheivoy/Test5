@@ -3,112 +3,336 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>請假登記</title>
     <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; background: #f5f6f8; color: #5a6473; padding: 16px; max-width: 640px; margin: 0 auto; }
-        h1 { font-size: 20px; margin: 8px 0 4px; }
-        .sub { font-size: 13px; color: #97a0ad; margin-bottom: 16px; }
-        .card { background: #fff; border: 1px solid #edf0f2; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
-        .search-input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
-        .name-btn { display: inline-block; margin: 4px; padding: 8px 14px; border: 1px solid #d1d9e6; border-radius: 20px; background: #fff; cursor: pointer; font-size: 14px; }
-        .name-btn:hover { background: #eef2f7; }
-        .name-btn.active { background: #8e9aaf; color: #fff; border-color: #8e9aaf; }
-        .win-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 4px; border-bottom: 1px solid #f0f0f0; gap: 10px; }
-        .win-row:last-child { border-bottom: none; }
-        .win-info b { font-size: 15px; }
-        .win-info .meta { font-size: 12px; color: #97a0ad; margin-top: 2px; }
-        .toggle-btn { padding: 10px 16px; border-radius: 8px; border: none; font-size: 14px; cursor: pointer; white-space: nowrap; min-width: 96px; }
-        .toggle-leave { background: #e57373; color: #fff; }
-        .toggle-cancel { background: #fff; color: #e57373; border: 1px solid #e57373; }
-        .badge-reserve { font-size: 11px; background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
-        .job-group { margin: 8px 0; }
-        .job-head { font-size: 12px; font-weight: bold; color: #6b7684; margin-bottom: 4px; }
-        .job-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 3px 8px; border-radius: 12px; background: #eef2f7; font-size: 13px; }
-        .stat-num { font-size: 11px; color: #97a0ad; }
-        .lb-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 4px; border-bottom: 1px solid #f0f0f0; flex-wrap: wrap; }
-        .lb-row:last-child { border-bottom: none; }
-        .lb-name { font-weight: 600; font-size: 14px; }
-        .lb-rec { font-size: 12px; color: #97a0ad; }
-        .win-block { border: 1px solid #f0f0f0; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
-        .win-block-title { font-weight: bold; font-size: 14px; margin-bottom: 6px; }
-        @media (max-width: 640px) {
-            .name-btn { padding: 11px 16px; font-size: 15px; margin: 5px 5px 0 0; }
-            .toggle-btn { min-height: 48px; font-size: 15px; }
-            .win-row { padding: 16px 4px; }
-            .card { border-radius: 16px; box-shadow: 0 2px 12px rgba(20,30,50,0.05); }
+        /* =====================================================
+           ===  極簡 2.0：與後台同一套設計語言（token + 線性圖標 + 克制的動態）
+           ===  公開頁沒有主題切換鈕 → 深色跟隨系統設定
+           ===================================================== */
+        :root {
+            --bg: #eef1f5; --surface: #ffffff; --surface-2: #f4f6fa;
+            --text: #333b48; --ink: #1f2733; --muted: #78859a;
+            --accent: #6b78b5; --accent-strong: #5766ab; --accent-soft: #e9ecf7; --on-accent: #ffffff;
+            --border: #e6eaf1; --danger: #e5544b;
+            --ok: #2e7d32; --ok-soft: #e8f5e9;
+            --warn: #e65100; --warn-soft: #fff3e0; --warn-line: #ffcc80;
+            --shadow-sm: 0 1px 2px rgba(24,33,52,.05);
+            --shadow: 0 1px 2px rgba(24,33,52,.05), 0 6px 20px rgba(24,33,52,.06);
+            --radius: 16px;
+            --ease: cubic-bezier(.2,.8,.2,1); --ease-out: cubic-bezier(.16,1,.3,1);
+            --t1: .13s; --t2: .2s; --t3: .32s;
+            --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
         }
-        .muted { color: #97a0ad; font-size: 13px; text-align: center; padding: 20px; }
-        .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #323a45; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
-        .toast.show { opacity: 1; }
-        #load-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.18); display: none; align-items: center; justify-content: center; z-index: 60; }
-        #load-overlay.show { display: flex; }
-        .load-box { display: flex; flex-direction: column; align-items: center; gap: 10px; background: #fff; border-radius: 14px; padding: 20px 28px; box-shadow: 0 6px 24px rgba(0,0,0,.15); }
-        .load-spin { width: 34px; height: 34px; border: 4px solid #e5e8ec; border-top-color: #8e9aaf; border-radius: 50%; animation: lsp .8s linear infinite; }
-        .load-text { font-size: 14px; font-weight: 600; color: #5a6473; }
-        @keyframes lsp { to { transform: rotate(360deg); } }
-        @media (prefers-reduced-motion: reduce) { .load-spin { animation: none; } }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0c1017; --surface: #151c26; --surface-2: #1b2430;
+                --text: #c9d2de; --ink: #eef2f7; --muted: #8a97a9;
+                --accent: #8592d8; --accent-strong: #9aa5e6; --accent-soft: #222b3d; --on-accent: #0b0f16;
+                --border: #263140; --danger: #f2695f;
+                --ok: #6ddc92; --ok-soft: #16301f;
+                --warn: #ffb163; --warn-soft: #2e2113; --warn-line: #5b3d1c;
+                --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+                --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+                --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 38%, transparent);
+            }
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0 auto; max-width: 640px; padding: 20px 16px 40px;
+            font-family: "PingFang TC", "Microsoft JhengHei", system-ui, -apple-system, sans-serif;
+            background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+        }
+        ::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+
+        /* 線性圖標（跟後台同規格：24 格、stroke 1.75、圓端點） */
+        .ic {
+            width: 1.15em; height: 1.15em; flex-shrink: 0; fill: none; stroke: currentColor;
+            stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; vertical-align: -.18em;
+        }
+        .ic-lg { width: 1.45em; height: 1.45em; }
+
+        /* ---- 頁首 ---- */
+        .page-head { display: flex; align-items: center; gap: 12px; margin: 4px 0 18px; }
+        .page-mark {
+            width: 42px; height: 42px; border-radius: 13px; flex-shrink: 0;
+            background: var(--accent); color: var(--on-accent);
+            display: grid; place-items: center; box-shadow: var(--shadow);
+        }
+        .page-mark .ic { width: 22px; height: 22px; }
+        h1 { font-size: 20px; margin: 0; color: var(--ink); line-height: 1.3; }
+        .sub { font-size: 13px; color: var(--muted); margin-top: 3px; }
+
+        /* ---- 卡片 ---- */
+        .card {
+            background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+            padding: 18px; margin-bottom: 14px; box-shadow: var(--shadow-sm);
+            animation: rise-in var(--t3) var(--ease-out) both;
+        }
+        .card:nth-of-type(2) { animation-delay: .05s; }
+        .card:nth-of-type(3) { animation-delay: .1s; }
+        .card:nth-of-type(4) { animation-delay: .14s; }
+        @keyframes rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        .card-title {
+            display: flex; align-items: center; gap: 8px;
+            font-weight: 700; font-size: 15px; color: var(--ink); margin-bottom: 4px;
+        }
+        .card-title .ic { color: var(--accent-strong); }
+        .card-note { font-size: 12.5px; color: var(--muted); line-height: 1.7; margin-bottom: 12px; }
+        .divider { border-top: 1px solid var(--border); margin: 14px 0 12px; }
+
+        /* ---- 輸入 ---- */
+        .search-input {
+            width: 100%; padding: 12px 14px; font-size: 16px; color: var(--ink);
+            background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+            transition: border-color var(--t2) var(--ease), box-shadow var(--t2) var(--ease), background var(--t2) var(--ease);
+        }
+        .search-input:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: var(--ring); }
+        .search-wrap { position: relative; }
+        .search-wrap .ic-search {
+            position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+            width: 18px; height: 18px; color: var(--muted); pointer-events: none;
+        }
+        .search-wrap .search-input { padding-left: 40px; }
+
+        /* ---- 名字晶片 ---- */
+        .name-btn {
+            display: inline-flex; align-items: center; gap: 6px; margin: 4px 6px 0 0;
+            padding: 9px 15px; min-height: 40px;
+            border: 1px solid var(--border); border-radius: 999px;
+            background: var(--surface); color: var(--ink); cursor: pointer;
+            font-size: 14px; font-family: inherit;
+            transition: background var(--t2) var(--ease), border-color var(--t2) var(--ease),
+                        color var(--t2) var(--ease), transform var(--t1) var(--ease);
+        }
+        .name-btn:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
+        .name-btn:active { transform: scale(.97); }
+        .name-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+        .name-btn.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+
+        /* ---- 按鈕 ---- */
+        .toggle-btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            padding: 11px 18px; min-height: 44px; min-width: 104px;
+            border-radius: 12px; border: 1px solid transparent; cursor: pointer;
+            font-size: 14px; font-weight: 600; font-family: inherit; white-space: nowrap;
+            transition: transform var(--t1) var(--ease), box-shadow var(--t2) var(--ease),
+                        background var(--t2) var(--ease), border-color var(--t2) var(--ease), color var(--t2) var(--ease);
+        }
+        .toggle-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+        .toggle-btn:active { transform: scale(.97); }
+        /* 我要請假＝這一列的主要動作 */
+        .toggle-leave { background: var(--accent); color: var(--on-accent); box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 40%, transparent); }
+        .toggle-leave:hover { box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent); transform: translateY(-1px); }
+        /* 已請假 → 只剩「取消」這個次要動作 */
+        .toggle-cancel { background: var(--surface); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+        .toggle-cancel:hover { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); border-color: var(--danger); }
+        .btn-wide { width: 100%; }
+
+        /* ---- 場次列 ---- */
+        .win-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 14px 2px; border-bottom: 1px solid var(--border);
+        }
+        .win-row:last-child { border-bottom: none; }
+        .win-info { min-width: 0; }
+        .win-info b { font-size: 15px; color: var(--ink); }
+        .win-info .meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+        /* ---- 標籤 ---- */
+        .job-chip {
+            display: inline-block; margin: 2px 4px 2px 0; padding: 3px 9px; border-radius: 8px;
+            background: var(--surface-2); border: 1px solid var(--border); color: var(--ink); font-size: 12.5px;
+        }
+        .badge-reserve {
+            display: inline-block; font-size: 11px; font-weight: 700; margin-left: 6px; padding: 2px 7px;
+            border-radius: 7px; background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-line);
+        }
+        .tag-on-leave {
+            display: inline-block; font-size: 11px; font-weight: 700; margin-left: 6px; padding: 2px 7px;
+            border-radius: 7px; background: var(--ok-soft); color: var(--ok);
+        }
+        .job-group { margin: 10px 0; }
+        .job-head { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 5px; letter-spacing: .02em; }
+        .stat-num { font-size: 11px; color: var(--muted); }
+
+        /* ---- 名單 ---- */
+        .lb-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            padding: 10px 2px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+            transition: background var(--t2) var(--ease);
+        }
+        .lb-row:last-child { border-bottom: none; }
+        .lb-name { font-weight: 600; font-size: 14px; color: var(--ink); }
+        .lb-rec { font-size: 12px; color: var(--muted); }
+        .lb-rec b { color: var(--ink); }
+        .win-block { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface-2); }
+        .win-block-title { font-weight: 700; font-size: 14px; color: var(--ink); margin-bottom: 6px; }
+
+        .muted { color: var(--muted); font-size: 13px; text-align: center; padding: 22px 10px; line-height: 1.7; }
+        .list-hint { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+        .chip-x { color: var(--muted); margin-left: 4px; font-size: 12px; }
+        .chip-x:hover { color: var(--danger); }
+        /* 名單分組標題（已請假 / 後備），用左側色條取代 emoji */
+        .group-label {
+            display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700;
+            margin-top: 10px; margin-bottom: 2px; color: var(--ink);
+        }
+        .group-label::before { content: ""; width: 3px; height: 13px; border-radius: 2px; background: currentColor; }
+        .group-label.leave { color: var(--danger); }
+        .group-label.reserve { color: var(--warn); }
+        .selected-bar {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            padding: 10px 12px; margin-bottom: 10px;
+            background: var(--accent-soft); border-radius: 12px;
+        }
+        .selected-bar .who { font-weight: 700; font-size: 15px; color: var(--accent-strong); flex: 1; min-width: 0; }
+        .collapse-head {
+            display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
+            font-weight: 700; font-size: 15px; color: var(--ink);
+        }
+        .collapse-head .caret { margin-left: auto; color: var(--muted); transition: transform var(--t2) var(--ease); }
+        .collapse-head.open .caret { transform: rotate(90deg); }
+
+        /* ---- Toast ---- */
+        .toast {
+            position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 10px);
+            background: color-mix(in srgb, var(--ink) 90%, transparent); color: var(--surface);
+            padding: 11px 20px; border-radius: 999px; font-size: 14px; font-weight: 600;
+            opacity: 0; transition: opacity var(--t2) var(--ease), transform var(--t2) var(--ease-out);
+            pointer-events: none; z-index: 50; box-shadow: 0 6px 22px rgba(24,33,52,.24);
+        }
+        .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+        /* ---- 載入：頂部細進度條 + 底部小膠囊（不再蓋一整片） ---- */
+        #load-overlay { position: fixed; inset: 0; display: none; z-index: 60; pointer-events: none; }
+        #load-overlay.show { display: block; }
+        .load-bar {
+            position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: color-mix(in srgb, var(--accent) 18%, transparent);
+        }
+        .load-bar > span {
+            display: block; height: 100%; width: 38%; border-radius: 0 2px 2px 0;
+            background: linear-gradient(90deg, transparent, var(--accent), var(--accent-strong));
+            animation: load-slide 1.15s var(--ease) infinite;
+        }
+        @keyframes load-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(363%); } }
+        .load-box {
+            position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+            display: flex; align-items: center; gap: 9px; padding: 9px 16px; border-radius: 999px;
+            background: color-mix(in srgb, var(--ink) 88%, transparent); color: var(--surface);
+            box-shadow: 0 6px 20px rgba(24,33,52,.22);
+            animation: pill-in var(--t2) var(--ease-out) both;
+        }
+        @keyframes pill-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        .load-text { font-size: 13px; font-weight: 600; }
+        .load-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: dot-pulse 1s var(--ease) infinite; }
+        @keyframes dot-pulse { 0%,100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+
+        @media (max-width: 640px) {
+            body { padding: 16px 12px 32px; }
+            .card { padding: 16px 14px; }
+            .win-row { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 0; }
+            .win-row .toggle-btn { width: 100%; min-height: 46px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+            .load-bar > span { animation: none; width: 100%; }
+        }
     </style>
 </head>
 <body>
-    <h1 id="guild-title">請假登記</h1>
-    <div class="sub" id="sub-line">無需登入，找到自己的名字即可登記請假</div>
+
+    <svg style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true" focusable="false"><defs>
+        <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2"/><path d="M8.4 3.4v3.4M15.6 3.4v3.4"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m20.4 20.4-4.6-4.6"/></symbol>
+        <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M5.4 20a6.6 6.6 0 0 1 13.2 0"/></symbol>
+        <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.4 19.6h3.2L19 8.2a2.3 2.3 0 0 0-3.2-3.2L4.4 16.4z"/><path d="m14.6 6.2 3.2 3.2"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.2v13.6M5.2 12h13.6"/></symbol>
+        <symbol id="i-range" viewBox="0 0 24 24"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2"/><path d="M8.4 3.4v3.4M15.6 3.4v3.4"/><path d="M8 14.4h8"/></symbol>
+        <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5.2" y="4.4" width="13.6" height="16.2" rx="2.4"/><path d="M9.2 4.4V3.4h5.6v1"/><path d="M9.2 10.4h5.6M9.2 14h5.6M9.2 17.4h3"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M6.5 20v-6"/><path d="M11.5 20V8"/><path d="M16.5 20v-9"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9.4 5.6 6.4 6.4-6.4 6.4"/></symbol>
+    </defs></svg>
+
+    <div class="page-head">
+        <div class="page-mark"><svg class="ic"><use href="#i-calendar"/></svg></div>
+        <div style="min-width:0;">
+            <h1 id="guild-title">請假登記</h1>
+            <div class="sub" id="sub-line">無需登入，找到自己的名字即可登記請假</div>
+        </div>
+    </div>
 
     <div class="card">
-        <input type="text" id="name-search" class="search-input" placeholder="🔍 輸入你的名字搜尋…" oninput="renderNames()">
+        <div class="card-title"><svg class="ic"><use href="#i-user"/></svg>找到你的名字</div>
+        <div class="card-note">先搜尋並點選自己，下面才會出現可以請假的場次。</div>
+        <div class="search-wrap">
+            <svg class="ic ic-search"><use href="#i-search"/></svg>
+            <input type="text" id="name-search" class="search-input" placeholder="輸入你的名字搜尋…" oninput="renderNames()">
+        </div>
         <div id="name-list" style="margin-top:12px;"></div>
-        <div style="margin-top:10px; border-top:1px dashed #e5e8ec; padding-top:10px;">
-            <div style="font-size:12px; color:#97a0ad;">遊戲裡改名了？先搜尋並點你<b>原本的名字</b>，再按「✏️ 改名」改成新名字（不要建檔，會變兩個人）。找不到舊名字才用建檔。</div>
-            <button class="name-btn" style="margin-top:6px; border-color:#8e9aaf;" onclick="renameSelf()">✏️ 改名</button>
-            <button class="name-btn" style="margin-top:6px;" onclick="toggleJoinForm()">➕ 自助建檔</button>
-            <div id="join-form" style="display:none; margin-top:10px;">
-                <input type="text" id="join-name" class="search-input" style="margin-bottom:8px;" placeholder="你的遊戲名字">
-                <select id="join-job" class="search-input" style="margin-bottom:8px;">
-                    <option value="">選擇職業（選填）</option>
-                </select>
-                <button class="toggle-btn toggle-leave" style="width:100%;" onclick="submitJoin()">建立並找到我</button>
-                <div style="font-size:11px; color:#97a0ad; margin-top:6px;">送出後即可登記請假。若你其實是改名，管理員之後會幫你把舊紀錄合併過來。</div>
-            </div>
+        <div class="divider"></div>
+        <div class="card-note" style="margin-bottom:8px;">
+            遊戲裡改名了？先搜尋並點你<b>原本的名字</b>，再按「改名」改成新名字（不要建檔，會變成兩個人）。找不到舊名字才用建檔。
+        </div>
+        <button class="name-btn" onclick="renameSelf()"><svg class="ic"><use href="#i-edit"/></svg>改名</button>
+        <button class="name-btn" onclick="toggleJoinForm()"><svg class="ic"><use href="#i-plus"/></svg>自助建檔</button>
+        <div id="join-form" style="display:none; margin-top:12px;">
+            <input type="text" id="join-name" class="search-input" style="margin-bottom:8px;" placeholder="你的遊戲名字">
+            <select id="join-job" class="search-input" style="margin-bottom:8px;">
+                <option value="">選擇職業（選填）</option>
+            </select>
+            <button class="toggle-btn toggle-leave btn-wide" onclick="submitJoin()">建立並找到我</button>
+            <div class="card-note" style="margin: 8px 0 0;">送出後即可登記請假。若你其實是改名，管理員之後會幫你把舊紀錄合併過來。</div>
         </div>
     </div>
 
     <div class="card" id="window-card" style="display:none;">
-        <div style="font-weight:bold; margin-bottom:2px;">👤 <span id="selected-name"></span>
-            <button class="name-btn" style="font-size:12px; padding:4px 10px; margin-left:6px;" onclick="renameSelf()">✏️ 改名</button>
+        <div class="selected-bar">
+            <svg class="ic ic-lg" style="color:var(--accent-strong);"><use href="#i-user"/></svg>
+            <span class="who" id="selected-name"></span>
+            <button class="name-btn" style="margin:0;" onclick="renameSelf()"><svg class="ic"><use href="#i-edit"/></svg>改名</button>
         </div>
-        <div id="selected-stats" style="font-size:12px; color:#8e9aaf; margin-bottom:8px;"></div>
-        <div style="font-size:12px; color:#97a0ad; margin-bottom:10px;">點右側按鈕即可請假或取消。後備由管理員安排。</div>
+        <div id="selected-stats" class="card-note" style="margin-bottom:8px;"></div>
+        <div class="card-title"><svg class="ic"><use href="#i-calendar"/></svg>開放中的場次</div>
+        <div class="card-note">點右側按鈕即可請假或取消。後備由管理員安排。</div>
         <div id="window-list"></div>
     </div>
 
     <span id="long"></span>
     <div class="card" id="long-card">
-        <div style="font-weight:bold; margin-bottom:6px;">📅 長期／預先請假</div>
-        <div style="font-size:12px; color:#97a0ad; margin-bottom:10px;">選一段日期，這段期間內開放的所有場次（幫戰/約戰/領地戰）都會自動幫你請假，包含之後才開放的。適合出遠門、長期無法參加時先預請。</div>
-        <div id="long-need-select" class="muted" style="padding:8px;">請先在最上面找到並點選你的名字，才能預先請假。找不到就用上方「➕ 自助建檔」，選到名字後也能「✏️ 改名」。</div>
+        <div class="card-title"><svg class="ic"><use href="#i-range"/></svg>長期／預先請假</div>
+        <div class="card-note">選一段日期，這段期間內開放的所有場次（幫戰／約戰／領地戰）都會自動幫你請假，包含之後才開放的。適合出遠門、長期無法參加時先預請。</div>
+        <div id="long-need-select" class="muted">請先在最上面找到並點選你的名字，才能預先請假。<br>找不到就用上方「自助建檔」；選到名字後也能「改名」。</div>
         <div id="long-form" style="display:none;">
             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
-                <input type="date" id="long-from" class="search-input" style="flex:1; min-width:130px;">
-                <span style="color:#97a0ad;">至</span>
-                <input type="date" id="long-to" class="search-input" style="flex:1; min-width:130px;">
+                <input type="date" id="long-from" class="search-input" style="flex:1; min-width:135px;">
+                <span style="color:var(--muted); font-size:13px;">至</span>
+                <input type="date" id="long-to" class="search-input" style="flex:1; min-width:135px;">
             </div>
-            <input type="text" id="long-reason" class="search-input" placeholder="原因（選填）" style="margin-bottom:8px;">
-            <button class="toggle-btn toggle-leave" style="width:100%;" onclick="submitLongLeave()">送出長期／預先請假</button>
+            <input type="text" id="long-reason" class="search-input" placeholder="原因（選填）" style="margin-bottom:10px;">
+            <button class="toggle-btn toggle-leave btn-wide" onclick="submitLongLeave()">送出長期／預先請假</button>
         </div>
     </div>
 
     <div class="card" id="board-card" style="display:none;">
-        <div style="font-weight:bold; margin-bottom:8px;">📋 各場次請假名單（依職業）</div>
-        <div id="board-list"></div>
+        <div class="card-title"><svg class="ic"><use href="#i-clipboard"/></svg>各場次請假名單（依職業）</div>
+        <div id="board-list" style="margin-top:10px;"></div>
     </div>
 
     <div class="card" id="roster-overview-card" style="display:none;">
-        <div style="font-weight:bold; cursor:pointer;" onclick="toggleOverview()">📊 全體出席/請假/後備記錄　<span id="overview-caret">▸</span></div>
-        <div id="roster-overview" style="display:none; margin-top:10px;"></div>
+        <div class="collapse-head" id="overview-head" onclick="toggleOverview()">
+            <svg class="ic"><use href="#i-chart"/></svg>全體出席／請假／後備記錄
+            <svg class="ic caret" id="overview-caret"><use href="#i-chevron"/></svg>
+        </div>
+        <div id="roster-overview" style="display:none; margin-top:12px;"></div>
     </div>
 
     <div id="empty-state" class="muted" style="display:none;">目前沒有開放中的請假場次。</div>
 
     <div class="toast" id="toast"></div>
-    <div id="load-overlay"><div class="load-box"><div class="load-spin"></div><div class="load-text">努力加載中…</div></div></div>
+    <div id="load-overlay">
+        <div class="load-bar"><span></span></div>
+        <div class="load-box"><span class="load-dot"></span><span class="load-text">努力加載中…</span></div>
+    </div>
 
-    <script src="leave.js?v=6"></script>
+    <script src="leave.js?v=7"></script>
 </body></html>

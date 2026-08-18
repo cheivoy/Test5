@@ -7,10 +7,39 @@
     <!-- ⚡ Chart.js 改成 defer：原本是 head 裡的阻擋式載入，205KB 沒下載完畫面不會出來。
          圖表都是在 window.onload 之後才用到，defer 一定來得及。版本也釘住方便瀏覽器快取。 -->
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="style.css?v=42">
+    <link rel="stylesheet" href="style.css?v=43">
 </head>
 
 <body>
+
+    <!-- 線性圖標集（單一 sprite，全站用 <use> 取用；一律 24 格、stroke 1.75、圓端點） -->
+    <svg style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true" focusable="false"><defs>
+        <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.6 12 3.4l9 7.2"/><path d="M5.6 9.6V20h12.8V9.6"/><path d="M9.8 20v-5.6h4.4V20"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M6.5 20v-6"/><path d="M11.5 20V8"/><path d="M16.5 20v-9"/></symbol>
+        <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.4 20a5.6 5.6 0 0 1 11.2 0"/><path d="M16.2 7.6a3.2 3.2 0 0 1 0 6.4"/><path d="M18.4 20a5.2 5.2 0 0 0-2.6-4.5"/></symbol>
+        <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2"/><path d="M8.4 3.4v3.4M15.6 3.4v3.4"/></symbol>
+        <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M5.4 20a6.6 6.6 0 0 1 13.2 0"/></symbol>
+        <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.8" cy="8.8" r="3.4"/><path d="m11.4 11.4 8.2 8.2"/><path d="m17 17 2-2M14.2 14.2l2-2"/></symbol>
+        <symbol id="i-device" viewBox="0 0 24 24"><rect x="3.4" y="4.4" width="17.2" height="6.4" rx="2.2"/><rect x="3.4" y="13.2" width="17.2" height="6.4" rx="2.2"/><path d="M7 7.6h.02M7 16.4h.02"/></symbol>
+        <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M5.2 12.2 7.4 4.8h9.2l2.2 7.4v5.6a2.2 2.2 0 0 1-2.2 2.2H7.4a2.2 2.2 0 0 1-2.2-2.2z"/><path d="M5.2 12.2h4l1.2 2.2h3.2l1.2-2.2h4"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15.4V3.8"/><path d="m8.2 7.6 3.8-3.8 3.8 3.8"/><path d="M4.4 15v3.2a2.2 2.2 0 0 0 2.2 2.2h10.8a2.2 2.2 0 0 0 2.2-2.2V15"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.8v11.6"/><path d="m8.2 11.6 3.8 3.8 3.8-3.8"/><path d="M4.4 15v3.2a2.2 2.2 0 0 0 2.2 2.2h10.8a2.2 2.2 0 0 0 2.2-2.2V15"/></symbol>
+        <symbol id="i-share" viewBox="0 0 24 24"><circle cx="6.2" cy="12" r="2.6"/><circle cx="17.4" cy="6.2" r="2.6"/><circle cx="17.4" cy="17.8" r="2.6"/><path d="m8.5 10.8 6.6-3.4M8.5 13.2l6.6 3.4"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.2v13.6M5.2 12h13.6"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m20.4 20.4-4.6-4.6"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.6 13.2A8.8 8.8 0 1 1 10.9 3.4a6.9 6.9 0 0 0 9.7 9.8z"/></symbol>
+        <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9.4 5.6 6.4 6.4-6.4 6.4"/></symbol>
+        <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="5.2" y="4.4" width="13.6" height="16.2" rx="2.4"/><path d="M9.2 4.4V3.4h5.6v1"/><path d="M9.2 10.4h5.6M9.2 14h5.6M9.2 17.4h3"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.8 12a7.8 7.8 0 1 1-2.3-5.5"/><path d="M19.8 3.8v4.4h-4.4"/></symbol>
+        <symbol id="i-new" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 8.2v7.6M8.2 12h7.6"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24"><path d="M13.4 4.4H7.2A2.2 2.2 0 0 0 5 6.6v10.8a2.2 2.2 0 0 0 2.2 2.2h6.2"/><path d="M18.6 12H10"/><path d="m15.6 8.8 3.2 3.2-3.2 3.2"/></symbol>
+        <symbol id="i-cloud-up" viewBox="0 0 24 24"><path d="M7.6 18.4a3.9 3.9 0 0 1-.3-7.8 5.3 5.3 0 0 1 10.2-1.1 3.5 3.5 0 0 1-.5 8.9"/><path d="M12 20.4v-7.2"/><path d="m9.4 15.6 2.6-2.6 2.6 2.6"/></symbol>
+        <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7.6 18.4a3.9 3.9 0 0 1-.3-7.8 5.3 5.3 0 0 1 10.2-1.1 3.5 3.5 0 0 1-.5 8.9z"/></symbol>
+        <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4.4 6.6h15.2"/><path d="M7.4 12h9.2"/><path d="M10.4 17.4h3.2"/></symbol>
+    </defs></svg>
+
+    <!-- 載入指示：頂部細進度條（取代原本會把整頁蓋黑的大轉圈） -->
+    <div id="load-bar" aria-hidden="true"><span></span></div>
 
     <button id="menu-toggle" class="admin-only-false" onclick="toggleMobileMenu()" style="display:none;">☰</button>
 
@@ -27,10 +56,10 @@
         <div class="topbar-context" id="topbar-context"></div>
         <div class="topbar-actions">
             <button class="iconbtn" id="topbar-search-btn" onclick="focusPageSearch()" aria-label="搜尋">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+                <svg class="ic"><use href="#i-search"/></svg>
             </button>
             <button class="iconbtn" id="theme-btn" onclick="toggleTheme()" aria-label="切換深/淺色">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+                <svg class="ic"><use href="#i-moon"/></svg>
             </button>
         </div>
     </header>
@@ -41,13 +70,13 @@
             系統會延遲，有問題先刷新，再重登<br>實在不行找🍒 櫻桃白蘭地 &nbsp;·&nbsp; DC：cherrycywong
         </div>
 
-        <div id="mode-banner" class="local">💾 本地模式（未登入）</div>
+        <div id="mode-banner" class="local"><svg class="ic"><use href="#i-device"/></svg>本地模式（未登入）</div>
 
         <div id="account-block" style="margin-bottom:10px; display:flex; gap:6px; flex-wrap:wrap;">
-            <button class="btn btn-outline" id="auth-btn" onclick="openAuthModal()" style="flex:1; font-size:12px;">🔑 登入 / 註冊</button>
-            <button class="btn btn-outline admin-only" id="sessions-btn" onclick="openSessionsModal()" style="flex:1; font-size:12px; display:none;">💻 裝置</button>
-            <button class="btn btn-outline" id="logout-btn" onclick="logoutUser()" style="flex:1; font-size:12px; display:none;">🚪 登出</button>
-            <button class="btn btn-outline admin-only" id="sync-btn" onclick="syncLocalToCloud()" style="flex:1; font-size:12px; display:none; background:#e8f5e9; border-color:#a5d6a7; color:#2e7d32;">☁️ 同步到雲端</button>
+            <button class="btn btn-outline" id="auth-btn" onclick="openAuthModal()" style="flex:1; font-size:12px;"><svg class="ic"><use href="#i-key"/></svg>登入 / 註冊</button>
+            <button class="btn btn-outline admin-only" id="sessions-btn" onclick="openSessionsModal()" style="flex:1; font-size:12px; display:none;"><svg class="ic"><use href="#i-device"/></svg>裝置</button>
+            <button class="btn btn-outline" id="logout-btn" onclick="logoutUser()" style="flex:1; font-size:12px; display:none;"><svg class="ic"><use href="#i-logout"/></svg>登出</button>
+            <button class="btn btn-outline admin-only btn-ok" id="sync-btn" onclick="syncLocalToCloud()" style="flex:1; font-size:12px; display:none;"><svg class="ic"><use href="#i-cloud-up"/></svg>同步到雲端</button>
         </div>
 
         <div class="nav-item active" id="nav-home" onclick="switchPage('home')">🏠 首頁</div>
@@ -60,8 +89,8 @@
             <!-- 歷史記錄搜索區域 -->
             <div class="filter-bar">
                 <input type="text" id="hist-search" class="search-input" placeholder="搜索幫會..." onkeyup="renderHistoryList()">
-                <button class="btn btn-primary admin-only" onclick="openImportModal()" style="flex-shrink:0;">📁 導入</button>
-                <button class="btn btn-outline filter-toggle" onclick="toggleFilter('hist-filter-extra', this)">⚙ 篩選</button>
+                <button class="btn btn-primary admin-only" onclick="openImportModal()" style="flex-shrink:0;"><svg class="ic"><use href="#i-upload"/></svg>導入</button>
+                <button class="btn btn-outline filter-toggle" onclick="toggleFilter('hist-filter-extra', this)"><svg class="ic"><use href="#i-filter"/></svg>篩選</button>
             </div>
             <div class="filter-extra" id="hist-filter-extra">
             <div class="controls-row">
@@ -425,29 +454,24 @@
     <!-- 手機底部分頁列 -->
     <nav id="mobile-tabbar">
         <button class="mtab active" data-page="home" onclick="switchPage('home')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5M9.5 20v-6h5v6"/></svg>
-            <span>首頁</span>
+            <svg class="ic"><use href="#i-home"/></svg><span>首頁</span>
         </button>
         <button class="mtab" data-page="report" onclick="switchPage('report')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
-            <span>戰報</span>
+            <svg class="ic"><use href="#i-chart"/></svg><span>戰報</span>
         </button>
         <button class="mtab" data-page="db" onclick="switchPage('db')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 7.5a3 3 0 0 1 0 6M18.5 20a5 5 0 0 0-3-4.6"/></svg>
-            <span>成員</span>
+            <svg class="ic"><use href="#i-users"/></svg><span>成員</span>
         </button>
         <button class="mtab admin-only" data-page="leave" onclick="switchPage('leave')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v3M16 2v3M3 9h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/></svg>
-            <span>請假</span>
+            <svg class="ic"><use href="#i-calendar"/></svg><span>請假</span>
         </button>
         <button class="mtab" data-page="me" onclick="switchPage('me')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>
-            <span>我的</span>
+            <svg class="ic"><use href="#i-user"/></svg><span>我的</span>
         </button>
     </nav>
 
     <button class="fab admin-only" id="fab" onclick="fabAction()" style="display:none;" aria-label="新增">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <svg class="ic"><use href="#i-plus"/></svg>
     </button>
 
     <!-- 導入戰報 Modal -->
@@ -775,7 +799,8 @@
         </div>
     </div>
 
-    <div id="loading-overlay"><div class="load-box"><div class="load-spin"></div><div class="load-text">努力加載中…</div></div></div>
+    <!-- 只負責擋住重複點擊（透明），文字用底部的小膠囊，不再蓋一整片黑 -->
+    <div id="loading-overlay"><div class="load-box"><span class="load-dot"></span><span class="load-text">努力加載中…</span></div></div>
 
-    <script src="app.js?v=50"></script>
+    <script src="app.js?v=51"></script>
 </body></html>

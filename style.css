@@ -701,3 +701,280 @@ th { background: var(--surface-2) !important; }
     .home-status-act { margin-left: 0; width: 100%; }
     .home-status-act .btn { flex: 1; }
 }
+
+/* =====================================================
+   ===  極簡 2.0：動態與互動回饋
+   ===  原則：動畫只用來說明「東西從哪來、你按到了什麼」，不做裝飾。
+   ===  只動 transform / opacity（不觸發 layout），一律尊重 prefers-reduced-motion。
+   ===================================================== */
+:root {
+    --ease: cubic-bezier(.2, .8, .2, 1);       /* 快出慢收，收尾自然 */
+    --ease-out: cubic-bezier(.16, 1, .3, 1);
+    --t1: .13s;   /* 按下/離開這種即時回饋 */
+    --t2: .2s;    /* hover、顏色、邊框 */
+    --t3: .32s;   /* 進場 */
+    --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+    /* 語意色：深色模式整組換掉，不再散落 hard-code 的淺色 hex */
+    --ok: #2e7d32; --ok-soft: #e8f5e9; --ok-line: #a5d6a7;
+    --warn: #e65100; --warn-soft: #fff3e0; --warn-line: #ffcc80;
+    --danger-soft: #fbe9e7;
+}
+:root[data-theme="dark"] {
+    --ok: #6ddc92; --ok-soft: #16301f; --ok-line: #24543a;
+    --warn: #ffb163; --warn-soft: #2e2113; --warn-line: #5b3d1c;
+    --danger-soft: #331a18;
+    --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+html { scroll-behavior: smooth; }
+::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+
+/* ---- 分頁切換：內容輕輕浮上來，讓人知道畫面換了 ---- */
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.container { animation: page-in var(--t3) var(--ease-out) both; }
+
+/* ---- 進場：卡片依序淡入（只給前幾張，長清單不拖慢） ---- */
+@keyframes rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.home-card, .home-opt, .home-jump, .mcard, .rcard, .menu-row, .leave-block {
+    animation: rise-in var(--t3) var(--ease-out) both;
+}
+.home-jump:nth-child(2), .mcard:nth-child(2), .rcard:nth-child(2), .menu-row:nth-child(2), .leave-block:nth-child(2) { animation-delay: .04s; }
+.home-jump:nth-child(3), .mcard:nth-child(3), .rcard:nth-child(3), .menu-row:nth-child(3), .leave-block:nth-child(3) { animation-delay: .08s; }
+.home-jump:nth-child(4), .mcard:nth-child(4), .rcard:nth-child(4), .menu-row:nth-child(4), .leave-block:nth-child(4) { animation-delay: .12s; }
+.mcard:nth-child(n+5), .rcard:nth-child(n+5) { animation-delay: .15s; }
+.mcard:nth-child(n+13), .rcard:nth-child(n+13) { animation: none; }
+
+/* ---- 按鈕：hover 微微抬起、按下確實壓下去 ---- */
+.btn {
+    transition: transform var(--t1) var(--ease), box-shadow var(--t2) var(--ease),
+                background var(--t2) var(--ease), border-color var(--t2) var(--ease), color var(--t2) var(--ease);
+    filter: none;   /* 蓋掉舊的 brightness hover：改用位移＋陰影，顏色不會變濁 */
+}
+@media (hover: hover) {
+    .btn:hover { filter: none; transform: translateY(-1px); }
+    .btn-primary:hover { box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent); }
+    .btn-outline:hover { border-color: var(--accent); color: var(--accent-strong); background: var(--accent-soft); }
+}
+.btn:active { transform: translateY(0) scale(.975); box-shadow: none; transition-duration: .06s; }
+.btn:disabled { opacity: .55; cursor: not-allowed; transform: none !important; box-shadow: none; }
+
+/* ---- 鍵盤操作看得見焦點（滑鼠點擊不出現，不干擾視覺） ---- */
+.btn:focus-visible, .iconbtn:focus-visible, .tnav:focus-visible, .mtab:focus-visible,
+.nav-item:focus-visible, .home-opt:focus-visible, .home-jump:focus-visible,
+.menu-row:focus-visible, .share-opt:focus-visible, .pick-chip:focus-within,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none; box-shadow: var(--ring); border-color: var(--accent);
+}
+
+/* ---- 輸入框：聚焦時邊框收斂到主色，不用粗框 ---- */
+.search-input, .select-input, input, select, textarea {
+    transition: border-color var(--t2) var(--ease), box-shadow var(--t2) var(--ease), background var(--t2) var(--ease);
+}
+.search-input:focus, .select-input:focus, input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--accent); background: var(--surface);
+}
+
+/* ---- 頂欄分頁：底線指示器滑進來 ---- */
+.tnav { position: relative; transition: color var(--t2) var(--ease), background var(--t2) var(--ease); }
+.tnav::after {
+    content: ""; position: absolute; left: 50%; right: 50%; bottom: 3px; height: 2px;
+    border-radius: 2px; background: var(--accent-strong); opacity: 0;
+    transition: left var(--t2) var(--ease), right var(--t2) var(--ease), opacity var(--t2) var(--ease);
+}
+.tnav.active::after { left: 14px; right: 14px; opacity: 1; }
+.iconbtn { transition: background var(--t2) var(--ease), color var(--t2) var(--ease), transform var(--t1) var(--ease); }
+.iconbtn:active { transform: scale(.9); }
+.iconbtn svg { transition: transform var(--t2) var(--ease); }
+.iconbtn:hover svg { transform: scale(1.08); }
+#theme-btn:active svg { transform: rotate(-25deg) scale(.9); }
+
+/* ---- 手機分頁列：選中的圖示彈一下 ---- */
+.mtab { transition: color var(--t2) var(--ease); }
+.mtab svg { transition: transform var(--t2) var(--ease); }
+.mtab.active svg { transform: translateY(-1px) scale(1.06); }
+
+/* ---- 卡片：hover 抬起、邊框轉主色（觸控裝置不套用，避免黏住的 hover） ---- */
+.hist-card, .mcard, .rcard, .menu-row, .home-jump, .home-opt, .share-opt, .pick-chip, .home-card {
+    transition: transform var(--t2) var(--ease), box-shadow var(--t2) var(--ease),
+                border-color var(--t2) var(--ease), background var(--t2) var(--ease);
+}
+@media (hover: hover) {
+    .hist-card:hover, .mcard:hover, .rcard:hover {
+        transform: translateY(-2px);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+        box-shadow: 0 4px 12px rgba(24,33,52,.07), 0 12px 28px rgba(24,33,52,.07);
+    }
+    .menu-row:hover, .home-jump:hover, .home-opt:hover { transform: translateY(-2px); }
+    tbody tr { transition: background var(--t2) var(--ease); }
+    tbody tr:hover { background: var(--accent-soft); }
+    .lw-card:hover, .roster-row:hover, .lb-row:hover, .pick-list label:hover { background: var(--surface-2); }
+}
+.hist-card:active, .mcard:active, .rcard:active, .menu-row:active,
+.home-jump:active, .home-opt:active, .share-opt:active { transform: scale(.99); }
+.lw-card, .roster-row, .lb-row, .pick-list label { transition: background var(--t2) var(--ease); }
+
+/* ---- 彈窗：桌機淡入＋縮放進場（手機維持既有的 bottom sheet） ---- */
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+#modal, #member-modal, #auth-modal, #sync-confirm-modal, #sync-report-modal,
+#receive-transfer-modal, #override-modal, #window-detail-modal, #sessions-modal,
+#import-modal, #window-modal, #add-member-modal, #edit-report-modal,
+.share-menu-overlay, .pick-overlay {
+    animation: overlay-in var(--t2) var(--ease) both;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+@media (min-width: 769px) {
+    .modal-body, .auth-modal-body, .share-menu-card, .pick-sheet {
+        animation: pop-in var(--t3) var(--ease-out) both;
+    }
+}
+.close-modal-btn, .share-menu-x { transition: color var(--t2) var(--ease), background var(--t2) var(--ease), transform var(--t1) var(--ease); }
+.close-modal-btn:hover { transform: rotate(90deg); }
+
+/* ---- 載入遮罩：淡入不突兀 ---- */
+#loading-overlay.show { animation: overlay-in var(--t2) var(--ease) both; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.load-box { animation: pop-in var(--t3) var(--ease-out) both; }
+
+/* ---- 晶片 / 標籤：狀態改變有過渡 ---- */
+.pick-chip, .filter-btn, .status-pill, .stat-badge, .cat-chip, .nav-item, .home-pill {
+    transition: background var(--t2) var(--ease), color var(--t2) var(--ease),
+                border-color var(--t2) var(--ease), transform var(--t1) var(--ease);
+}
+.pick-chip:active, .filter-btn:active { transform: scale(.98); }
+.stat-badge:hover { transform: translateY(-1px); }
+.mcard-bar > span { transition: width var(--t3) var(--ease-out); }
+
+/* ---- 細捲軸（桌機） ---- */
+@media (min-width: 769px) {
+    * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; border: 3px solid var(--bg); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+}
+
+/* =====================================================
+   ===  深色模式修補：把散落的淺色 hard-code 換成語意色
+   ===  （這些原本寫死白底/淺底，深色模式下會整塊跳出來）
+   ===================================================== */
+.leave-block { background: var(--surface); }
+.lw-card { border-bottom-color: var(--border); }
+.roster-row, .audit-row { border-bottom-color: var(--border); }
+.audit-time { color: var(--muted); }
+.stat-badge { background: var(--surface-2); color: var(--ink); }
+.stat-badge:hover { background: var(--accent-soft); color: var(--accent-strong); }
+.nav-item:hover { background: var(--surface-2); }
+.status-open, .cloud-badge, .home-pill.cloud { background: var(--ok-soft); color: var(--ok); }
+.status-closed { background: var(--danger-soft); color: var(--danger); }
+.local-badge, .job-change-badge, .home-pill.local { background: var(--warn-soft); color: var(--warn); }
+.local-badge, .job-change-badge { border-color: var(--warn-line); }
+.cloud-badge { border-color: var(--ok-line); }
+#mode-banner.local { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+#mode-banner.cloud { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
+.sync-spinner { border-color: var(--border); border-top-color: var(--accent); }
+@media screen and (max-width: 768px) {
+    /* 表格第一欄是 sticky，底色要跟著主題，不然深色模式會出現一條白柱 */
+    th:first-child, td:first-child { background-color: var(--surface) !important; }
+}
+
+/* =====================================================
+   ===  系統設定要求減少動態 → 全部關掉
+   ===================================================== */
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+    }
+    .btn:hover, .hist-card:hover, .mcard:hover, .rcard:hover,
+    .menu-row:hover, .home-jump:hover, .home-opt:hover { transform: none; }
+}
+
+/* =====================================================
+   ===  線性圖標：全站統一 stroke 風格（取代 emoji）
+   ===  尺寸跟著文字（em），顏色跟著 currentColor → 深淺色自動對
+   ===================================================== */
+.ic {
+    width: 1.15em; height: 1.15em; flex-shrink: 0;
+    fill: none; stroke: currentColor; stroke-width: 1.75;
+    stroke-linecap: round; stroke-linejoin: round;
+    vertical-align: -.18em;
+}
+.ic-lg { width: 1.5em; height: 1.5em; }
+.ic-xl { width: 26px; height: 26px; stroke-width: 1.6; }
+.iconbtn .ic { width: 20px; height: 20px; }
+.mtab .ic { width: 22px; height: 22px; }
+.fab .ic { width: 24px; height: 24px; stroke-width: 2; }
+
+/* 有圖標的按鈕：圖文對齊、間距一致 */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.btn .ic { width: 1.05em; height: 1.05em; }
+.ctx-btn .ic { width: 17px; height: 17px; }
+
+/* =====================================================
+   ===  載入指示：頂部細進度條 ＋ 底部小膠囊
+   ===  原本是「整頁蓋黑 + 白盒子大轉圈」，短短一次 API 也會閃一下，很吵。
+   ===  現在：160ms 內回來的完全不顯示；超過才出現一條 2px 的進度條。
+   ===================================================== */
+#load-bar {
+    position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 4000;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    opacity: 0; pointer-events: none; transition: opacity var(--t2) var(--ease);
+}
+#load-bar.show { opacity: 1; }
+#load-bar > span {
+    display: block; height: 100%; width: 38%; border-radius: 0 2px 2px 0;
+    background: linear-gradient(90deg, transparent, var(--accent), var(--accent-strong));
+}
+#load-bar.show > span { animation: load-slide 1.15s var(--ease) infinite; }
+@keyframes load-slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(363%); }
+}
+
+/* 遮罩本身透明，只擋重複點擊；提示做成底部小膠囊 */
+#loading-overlay { background: transparent; align-items: flex-end; justify-content: center; padding-bottom: 26px; }
+#loading-overlay.show { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.load-box {
+    flex-direction: row; align-items: center; gap: 9px;
+    padding: 9px 16px; border-radius: 999px;
+    background: color-mix(in srgb, var(--ink) 88%, transparent);
+    color: var(--surface); border: none;
+    box-shadow: 0 6px 20px rgba(24,33,52,.22);
+    animation: pill-in var(--t2) var(--ease-out) both;
+}
+@keyframes pill-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.load-text { font-size: 13px; font-weight: 600; color: inherit; }
+.load-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0;
+    animation: dot-pulse 1s var(--ease) infinite;
+}
+@keyframes dot-pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+@media (max-width: 768px) {
+    #loading-overlay { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+    #load-bar > span, #load-bar.show > span { animation: none; width: 100%; }
+    .load-dot { animation: none; opacity: 1; }
+}
+
+/* home 快速入口：圖標 + 標題 + 右側箭頭 */
+.home-jump { justify-content: flex-start; }
+.home-jump .hj-t { flex: 1; }
+.home-jump .hj-arr { width: 1em; height: 1em; color: var(--muted); transition: transform var(--t2) var(--ease); }
+.home-jump:hover .hj-arr { transform: translateX(3px); color: var(--accent-strong); }
+.home-opt-ic { color: var(--accent-strong); display: inline-flex; }
+.home-opt-go { display: inline-flex; align-items: center; gap: 3px; }
+.home-opt-go .ic { width: .95em; height: .95em; transition: transform var(--t2) var(--ease); }
+.home-opt:hover .home-opt-go .ic { transform: translateX(3px); }
+.home-empty-ic { color: var(--muted); line-height: 1; }
+.home-empty-ic .ic { width: 40px; height: 40px; stroke-width: 1.4; }
+.home-alert b { display: inline-flex; align-items: center; gap: 6px; }
+.home-pill { display: inline-flex; align-items: center; gap: 5px; }
+
+
+/* 同步到雲端：成功色的外框按鈕（原本寫死淺綠，深色模式看不清） */
+.btn-ok { background: var(--ok-soft) !important; border-color: var(--ok-line) !important; color: var(--ok) !important; }
+.btn-ok:hover { background: color-mix(in srgb, var(--ok) 16%, var(--surface)) !important; }
