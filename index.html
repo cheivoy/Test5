@@ -370,7 +370,13 @@
 
                     <div class="leave-block" style="margin-top:14px;">
                         <div class="leave-block-title">🤖 機器人查詢指令</div>
-                        <p style="font-size:12px; color:var(--muted); margin:4px 0 10px;">在 Discord 綁定機器人後，成員可用 <code>/查詢 名字</code>、<code>/出勤榜</code>、<code>/請假名單</code> 直接查詢。指令在該伺服器的任何頻道都能用（不限一個頻道）。設定完成後按下方按鈕註冊指令（有填伺服器 ID 會即時生效；否則全域最多等 1 小時）。</p>
+                        <p style="font-size:12px; color:var(--muted); margin:4px 0 10px;">在 Discord 綁定機器人後，成員可在該伺服器的任何頻道直接查（不限一個頻道）：</p>
+                        <ul style="font-size:12px; color:var(--muted); margin:0 0 10px; padding-left:20px; line-height:1.9;">
+                            <li><code>/查詢 名字</code>　出席／請假／後備／缺席與出席率<br>可加 <code>類型</code>（幫戰／約戰／領地戰）、<code>天數</code>（例 30）、<code>日期範圍</code>（例 20260701-0731）</li>
+                            <li><code>/出勤榜</code>　出席前 10 名</li>
+                            <li><code>/請假名單</code>　目前開放場次的請假／後備名單<br>可加 <code>日期</code>（YYYY-MM-DD）、<code>類型</code>、<code>日期範圍</code></li>
+                        </ul>
+                        <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">改過指令選項後要重新註冊才會在 Discord 出現。設定完成後按下方按鈕（有填伺服器 ID 會即時生效；否則全域最多等 1 小時）。</p>
                         <button class="btn btn-outline" onclick="registerDiscordCommands()">🔧 註冊 / 更新 slash 指令</button>
                         <div id="discord-bot-msg" style="font-size:12px; color:var(--muted); margin-top:8px;"></div>
                         <details style="margin-top:10px;">
@@ -500,20 +506,30 @@
             <h3 style="margin-top:0;">🗓️ 開放請假場次</h3>
             <label style="font-size:13px; font-weight:bold;">日期</label>
             <input type="date" id="lw-date" class="search-input" style="width:100%; margin-bottom:10px;">
-            <div style="display:flex; gap:8px; margin-bottom:10px;">
-                <select id="lw-session" class="select-input" style="flex:1;">
-                    <option value="第一場">第一場</option>
-                    <option value="第二場">第二場</option>
-                </select>
-                <select id="lw-type" class="select-input" style="flex:1;">
-                    <option value="幫戰">⚔️ 幫戰</option>
-                    <option value="約戰">🤝 約戰</option>
-                    <option value="其他">🏰 領地戰</option>
-                </select>
+            <label style="font-size:13px; font-weight:bold;">場次<span style="font-weight:normal; color:var(--muted);">（可複選，一起開只會 @ 一次）</span></label>
+            <div class="pick-row" style="margin:6px 0 10px;">
+                <label class="pick-chip"><input type="checkbox" class="lw-session-check" value="第一場" checked>第一場</label>
+                <label class="pick-chip"><input type="checkbox" class="lw-session-check" value="第二場">第二場</label>
             </div>
+            <label style="font-size:13px; font-weight:bold;">類型</label>
+            <select id="lw-type" class="select-input" style="width:100%; margin:6px 0 10px;">
+                <option value="幫戰">⚔️ 幫戰</option>
+                <option value="約戰">🤝 約戰</option>
+                <option value="其他">🏰 領地戰</option>
+            </select>
             <label style="font-size:13px; font-weight:bold;">場次備註（選填）</label>
-            <input type="text" id="lw-title" class="search-input" style="width:100%; margin-bottom:14px;" placeholder="選填">
-            <button class="btn btn-primary" style="width:100%;" onclick="createLeaveWindow()">➕ 開放請假</button>
+            <input type="text" id="lw-title" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="選填">
+            <div class="scope-box">
+                <div class="scope-line">
+                    <span>④ 戰報唯讀連結</span>
+                    <b id="rs-label-create">全部場次</b>
+                </div>
+                <div class="scope-line" style="border:0; padding-bottom:0;">
+                    <small style="color:var(--muted);">通知裡會附上免登入的戰報查看連結</small>
+                    <button class="btn btn-outline" style="font-size:12px; padding:5px 12px;" onclick="openReportScopePicker('create')">選擇場次</button>
+                </div>
+            </div>
+            <button class="btn btn-primary" style="width:100%; margin-top:12px;" onclick="createLeaveWindow()">➕ 開放請假</button>
         </div>
     </div>
 

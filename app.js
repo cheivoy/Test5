@@ -3625,70 +3625,186 @@ function copyWinList(windowId) {
     navigator.clipboard.writeText(text).then(() => alert('✅ 名單已複製')).catch(() => prompt('請手動複製：', text));
 }
 
+// ④ 戰報唯讀連結要包含哪幾場：null＝全部場次（連結短，之後新增的戰報也會自動包含）
+let reportScope = { create: null, notify: null };
+function renderReportScope(which) {
+    const el = document.getElementById('rs-label-' + which);
+    if (!el) return;
+    const ids = reportScope[which];
+    el.textContent = !ids ? '全部場次' : `已選 ${ids.length} 場`;
+}
+
+// 挑選 ④ 連結要包含哪幾場戰報（開放請假／發通知彈窗共用）
+function openReportScopePicker(which) {
+    // 只用開站時抓的輕量列表（日期／幫會／勝負／類型／場次）——不要呼叫 ensureFullHistories，
+    // 那會把每場每個人的完整數據都下載下來，光是為了列一份清單不值得。
+    const sorted = [...allHistories].sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (!sorted.length) { alert('目前沒有戰報可以選。'); return; }
+    const picked = reportScope[which]; // null = 全部
+    document.getElementById('report-scope-modal')?.remove();
+    const modal = document.createElement('div');
+    modal.id = 'report-scope-modal';
+    modal.className = 'pick-overlay';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2600;padding:12px;';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    const rows = sorted.map(h => {
+        const d = repOf(h);
+        const on = !picked || picked.includes(h.id);
+        const txt = (h.date + ' ' + (h.guild_a || '')).toLowerCase().replace(/"/g, '&quot;');
+        return `<label data-txt="${txt}">
+            <input type="checkbox" class="rs-check" value="${h.id}" ${on ? 'checked' : ''} onchange="updateReportScopeCount()">
+            <span style="flex:1;"><b>${h.date}</b> <span style="color:var(--muted);font-size:11px;">[${fmtType(d.matchType || '幫戰')}]${d.session ? '【' + d.session + '】' : ''}</span><br><span style="color:var(--muted);">${h.guild_a || ''}</span></span>
+        </label>`;
+    }).join('');
+    modal.innerHTML = `
+      <div class="pick-sheet">
+        <h3 style="margin:0;">📜 戰報連結要包含哪幾場</h3>
+        <p style="font-size:12px;color:var(--muted);margin:0;">預設全選＝連結顯示全部場次（之後新增的戰報也會自動出現）。取消幾場就只分享勾選的。</p>
+        <input type="text" id="rs-search" class="search-input" placeholder="🔍 搜尋日期 / 幫會" style="width:100%;" oninput="filterReportScope()">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-outline" style="font-size:12px;padding:5px 12px;" onclick="toggleAllReportScope(true)">全選</button>
+            <button class="btn btn-outline" style="font-size:12px;padding:5px 12px;" onclick="toggleAllReportScope(false)">取消全選</button>
+            <span id="rs-count" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+        <div class="pick-list" id="rs-list">${rows}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn btn-outline" onclick="document.getElementById('report-scope-modal').remove()">取消</button>
+          <button class="btn btn-primary" onclick="applyReportScope('${which}')">確定</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    updateReportScopeCount();
+}
+function filterReportScope() {
+    const q = (document.getElementById('rs-search')?.value || '').toLowerCase().trim();
+    document.querySelectorAll('#rs-list label').forEach(l => {
+        l.style.display = (!q || (l.dataset.txt || '').includes(q)) ? '' : 'none';
+    });
+}
+function toggleAllReportScope(on) {
+    // 只動目前看得到的（搭配搜尋可以「只勾某個幫會」）
+    document.querySelectorAll('#rs-list label').forEach(l => {
+        if (l.style.display === 'none') return;
+        const cb = l.querySelector('.rs-check'); if (cb) cb.checked = on;
+    });
+    updateReportScopeCount();
+}
+function updateReportScopeCount() {
+    const all = document.querySelectorAll('#rs-list .rs-check').length;
+    const on = document.querySelectorAll('#rs-list .rs-check:checked').length;
+    const el = document.getElementById('rs-count');
+    if (el) el.textContent = on === all ? `全部 ${all} 場` : `已選 ${on} / ${all} 場`;
+}
+function applyReportScope(which) {
+    const all = [...document.querySelectorAll('#rs-list .rs-check')];
+    const on = all.filter(cb => cb.checked).map(cb => cb.value);
+    if (!on.length) { alert('請至少勾一場，或按取消保持全部場次。'); return; }
+    // 全選就存回 null（＝全部場次），連結不用帶一長串 id
+    reportScope[which] = (on.length === all.length) ? null : on;
+    renderReportScope(which);
+    document.getElementById('report-scope-modal')?.remove();
+}
+
 async function createLeaveWindow() {
     const event_date = document.getElementById('lw-date').value;
-    const session = document.getElementById('lw-session').value;
+    const sessions = [...document.querySelectorAll('.lw-session-check:checked')].map(cb => cb.value);
     const match_type = document.getElementById('lw-type').value;
     const title = document.getElementById('lw-title').value;
     if (!event_date) { alert('請選擇日期'); return; }
+    if (!sessions.length) { alert('請至少勾選一個場次'); return; }
     try {
         const res = await fetch(WORKER_URL + "/api/leave/windows/create", {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
-            body: JSON.stringify({ event_date, session, title, match_type })
+            body: JSON.stringify({ event_date, sessions, title, match_type, report_ids: reportScope.create })
         });
         const data = await res.json();
-        if (res.status === 409 && data.existing_window_id) {
+        if (res.status === 409 && (data.duplicates?.length || data.existing_window_id)) {
             // 同日期+場次已存在（可能是先前沒刪乾淨）→ 讓使用者選擇刪掉舊的重建
-            if (confirm(`「${event_date} ${session}」已經有一個場次了。\n是否刪除舊的、重新建立？\n（舊場次的請假/後備紀錄會一併清除）`)) {
-                await fetch(WORKER_URL + "/api/leave/windows/delete", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
-                    body: JSON.stringify({ window_id: data.existing_window_id })
-                });
+            const dups = data.duplicates?.length
+                ? data.duplicates
+                : [{ session: sessions[0], window_id: data.existing_window_id }];
+            const names = dups.map(d => d.session).join('、');
+            if (confirm(`「${event_date} ${names}」已經有場次了。\n是否刪除舊的、重新建立？\n（舊場次的請假/後備紀錄會一併清除）`)) {
+                for (const d of dups) {
+                    if (!d.window_id) continue;
+                    await fetch(WORKER_URL + "/api/leave/windows/delete", {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
+                        body: JSON.stringify({ window_id: d.window_id })
+                    });
+                }
                 return createLeaveWindow(); // 重試
             }
-            await Promise.all([loadLeaveWindows(), loadLeaveBoard()]); // 刷新讓使用者看到那個舊場次
+            await Promise.all([loadLeaveWindows(), loadLeaveBoard()]); // 刷新讓使用者看到那些舊場次
             return;
         }
         if (!res.ok) { alert('開放失敗：' + (data.error || res.status)); return; }
         document.getElementById('lw-title').value = '';
+        closeModal('window-modal');
         await Promise.all([loadLeaveWindows(), loadLeaveBoard()]);
+        // 開一場照舊安靜刷新；開多場才提示，因為「只發一則通知」值得講清楚
+        const opened = data.sessions || sessions;
+        if (opened.length > 1) alert(`✅ 已開放 ${event_date} ${opened.join('、')}\n（${opened.length} 場合成一則 Discord 通知，只 @ 一次）`);
     } catch (e) { alert('開放失敗：' + e.message); }
 }
 
-// 手動重發某場的 Discord 開放請假通知（可自訂加一句話）
+// 手動重發開放請假通知：可勾多場合成一則（＝只 @ 一次）、可選 ④ 戰報連結範圍、可自訂加一句話
 function notifyLeaveWindow(windowId) {
-    const existing = document.getElementById('notify-modal'); if (existing) existing.remove();
+    document.getElementById('notify-modal')?.remove();
+    const clicked = leaveWindowsCache.find(w => w.window_id === windowId);
+    // 同一天的其他開放場次預設一起勾（這正是「不用 @ 兩次」的情境）；其他日期只列出來讓你自己加
+    const opens = leaveWindowsCache.filter(w => w.status === 'open')
+        .sort((a, b) => a.event_date === b.event_date
+            ? String(a.session).localeCompare(String(b.session))
+            : (a.event_date < b.event_date ? 1 : -1));
+    const isOn = (w) => w.window_id === windowId || (clicked && w.event_date === clicked.event_date);
+    reportScope.notify = null;
+    const rows = opens.map(w => `<label>
+        <input type="checkbox" class="nw-check" value="${w.window_id}" ${isOn(w) ? 'checked' : ''}>
+        <span style="flex:1;"><b>${w.event_date}　${w.session}</b> <span class="hash-tag">${fmtType(w.match_type)}</span>${w.window_id === windowId ? ' <span style="color:var(--accent);font-size:11px;">← 你點的這場</span>' : ''}<br><span style="color:var(--muted);font-size:12px;">🙋 請假 ${w.leave_count} 人 · 🔶 後備 ${w.reserve_count} 人</span></span>
+    </label>`).join('');
     const modal = document.createElement('div');
     modal.id = 'notify-modal';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2400;';
+    modal.className = 'pick-overlay';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;justify-content:center;align-items:center;z-index:2400;padding:12px;';
     modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
     modal.innerHTML = `
-      <div style="background:var(--surface);color:var(--ink);border:1px solid var(--border);padding:22px;border-radius:14px;width:420px;max-width:92vw;display:flex;flex-direction:column;gap:12px;">
+      <div class="pick-sheet">
         <h3 style="margin:0;">📣 發送請假通知</h3>
-        <p style="font-size:12px;color:var(--muted);margin:0;">會用現有模板（本場請假／長期請假／找管理／查詢指令）重發到 Discord。下面可再加你想說的話（選填，會附在最後）。</p>
-        <textarea id="notify-msg" class="search-input" rows="4" placeholder="例：本週幫戰很重要，請儘早登記！（可留空）" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+        <p style="font-size:12px;color:var(--muted);margin:0;">勾選的場次會合成一則通知（只 @ 一次）。內容用現有模板：本場請假／長期請假／找管理／戰報連結／查詢指令。</p>
+        <div class="pick-list" style="max-height:32vh;">${rows}</div>
+        <div class="scope-box">
+          <div class="scope-line">
+            <span>④ 戰報唯讀連結</span>
+            <span style="display:flex; gap:8px; align-items:center;"><b id="rs-label-notify">全部場次</b>
+            <button class="btn btn-outline" style="font-size:12px; padding:4px 10px; margin:0;" onclick="openReportScopePicker('notify')">選擇</button></span>
+          </div>
+        </div>
+        <textarea id="notify-msg" class="search-input" rows="3" placeholder="想加一句話？例：本週幫戰很重要，請儘早登記！（可留空）" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
           <button class="btn btn-outline" onclick="document.getElementById('notify-modal').remove()">取消</button>
-          <button class="btn btn-primary" id="notify-go" onclick="sendLeaveNotify('${windowId}')">發送</button>
+          <button class="btn btn-primary" id="notify-go" onclick="sendLeaveNotify()">發送</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
-    setTimeout(() => document.getElementById('notify-msg')?.focus(), 50);
 }
-async function sendLeaveNotify(windowId) {
+async function sendLeaveNotify() {
+    const window_ids = [...document.querySelectorAll('.nw-check:checked')].map(cb => cb.value);
+    if (!window_ids.length) { alert('請至少勾選一個場次'); return; }
     const message = document.getElementById('notify-msg')?.value || '';
     const btn = document.getElementById('notify-go');
     if (btn) { btn.disabled = true; btn.textContent = '發送中…'; }
     try {
         const res = await fetch(WORKER_URL + "/api/leave/windows/notify", {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + currentUser.token },
-            body: JSON.stringify({ window_id: windowId, message })
+            body: JSON.stringify({ window_ids, window_id: window_ids[0], message, report_ids: reportScope.notify })
         });
         if (!res.ok) { const d = await res.json().catch(() => ({})); alert('發送失敗：' + (d.error || res.status)); if (btn) { btn.disabled = false; btn.textContent = '發送'; } return; }
         document.getElementById('notify-modal')?.remove();
-        alert('✅ 已發送 Discord 通知');
+        alert(window_ids.length > 1
+            ? `✅ 已發送 Discord 通知（${window_ids.length} 場合成一則，只 @ 一次）`
+            : '✅ 已發送 Discord 通知');
     } catch (e) { alert('發送失敗：' + e.message); if (btn) { btn.disabled = false; btn.textContent = '發送'; } }
 }
 
@@ -4561,6 +4677,10 @@ function openWindowModal() {
     if (storageMode !== 'cloud' || !currentUser) { alert('請先登入雲端帳號'); return; }
     const m = document.getElementById('window-modal'); if (!m) return;
     const d = document.getElementById('lw-date'); if (d && !d.value) d.valueAsDate = new Date();
+    // 每次打開都回到預設：只勾第一場、戰報連結含全部場次
+    document.querySelectorAll('.lw-session-check').forEach(cb => { cb.checked = (cb.value === '第一場'); });
+    reportScope.create = null;
+    renderReportScope('create');
     m.style.display = 'flex';
 }
 function openAddMemberModal() {

@@ -325,7 +325,7 @@ th:hover { background: var(--accent-soft); }
     #modal, #member-modal, #auth-modal, #sync-confirm-modal,
     #sync-report-modal, #receive-transfer-modal,
     #override-modal, #window-detail-modal, #sessions-modal,
-    #edit-report-modal {
+    #edit-report-modal, #window-modal {
         align-items: flex-end;
     }
     .modal-body, .auth-modal-body {
@@ -617,4 +617,28 @@ th { background: var(--surface-2) !important; }
     .ctx-btn .ci { margin-right: 0; }
     .topbar-context .btn { padding: 8px 9px; }
     .brand-title { max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* 可複選的場次／選項（手機也好按：整塊都是點擊區，最小高度 44px） */
+.pick-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pick-chip { display: flex; align-items: center; gap: 8px; flex: 1 1 120px; min-height: 44px; padding: 8px 14px; border: 1px solid var(--border); background: var(--surface-2); border-radius: 12px; cursor: pointer; font-size: 14px; user-select: none; }
+.pick-chip:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+.pick-chip input { width: 18px; height: 18px; flex-shrink: 0; cursor: pointer; accent-color: var(--accent); }
+.pick-chip small { color: var(--muted); font-weight: normal; }
+
+/* 通知彈窗裡的「範圍」小卡 */
+.scope-box { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 4px 12px; }
+.scope-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 0; font-size: 13px; border-bottom: 1px dashed var(--border); }
+.scope-line:last-child { border-bottom: 0; }
+
+/* 場次挑選清單（戰報範圍／要通知哪幾場） */
+.pick-list { border: 1px solid var(--border); border-radius: 12px; overflow-y: auto; max-height: 46vh; background: var(--surface); }
+.pick-list label { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; }
+.pick-list label:last-child { border-bottom: 0; }
+.pick-list label:has(input:checked) { background: var(--accent-soft); }
+.pick-list input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
+.pick-sheet { background: var(--surface); color: var(--ink); border: 1px solid var(--border); padding: 20px; border-radius: 16px; width: 460px; max-width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
+@media (max-width: 768px) {
+    .pick-sheet { width: 100%; border-radius: 20px 20px 0 0; max-height: 92vh; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
+    .pick-overlay { align-items: flex-end !important; }
 }

@@ -726,42 +726,80 @@ async function notifyDiscord(env, owner, eventKey, message) {
   } catch (e) { console.error("Discord 通知失敗", e); }
 }
 
-// 組出該 owner 的公開請假連結（用設定的站台網址，退回請求 Origin）
+// 站台網址（設定裡的 site_base_url，退回請求 Origin）＋該 owner 的唯讀 share_id
+async function shareBase(env, owner, request) {
+  const u = await env.DB.prepare(
+    "SELECT share_id FROM users WHERE username = ?"
+  ).bind(owner).first();
+  if (!u?.share_id) return null;
+  let base = '';
+  try {
+    const s = await env.DB.prepare(
+      "SELECT site_base_url FROM user_settings WHERE owner = ?"
+    ).bind(owner).first();
+    base = s?.site_base_url || '';
+  } catch (e) { /* 欄位還沒建立 */ }
+  if (!base) base = request.headers.get('Origin') || '';
+  if (!base) return null;
+  return { base: base.replace(/\/+$/, ''), shareId: u.share_id };
+}
+
+// 組出該 owner 的公開請假連結
 async function buildLeaveUrl(env, owner, request) {
   try {
-    const u = await env.DB.prepare(
-      "SELECT share_id FROM users WHERE username = ?"
-    ).bind(owner).first();
-    if (!u?.share_id) return '';
-    let base = '';
-    try {
-      const s = await env.DB.prepare(
-        "SELECT site_base_url FROM user_settings WHERE owner = ?"
-      ).bind(owner).first();
-      base = s?.site_base_url || '';
-    } catch (e) { /* 欄位還沒建立 */ }
-    if (!base) base = request.headers.get('Origin') || '';
-    if (!base) return '';
-    base = base.replace(/\/+$/, '');
-    return `${base}/leave.html?share=${encodeURIComponent(u.share_id)}`;
+    const s = await shareBase(env, owner, request);
+    if (!s) return '';
+    return `${s.base}/leave.html?share=${encodeURIComponent(s.shareId)}`;
   } catch (e) { return ''; }
 }
 
-// 組「已開放請假」通知（供開場次自動發＋管理員手動重發共用）；extraMsg 為管理員自訂加句
-async function buildLeaveOpenEmbed(env, owner, win, request, extraMsg) {
-  const typeLabel = win.match_type === '其他' ? '領地戰' : (win.match_type || '幫戰');
-  const leaveUrl = await buildLeaveUrl(env, owner, request);
+// 組出「以往戰報記錄」的唯讀連結（免登入）。
+// reportIds 給了就只看那幾場；不給＝全部場次（連結也比較短，之後新增的戰報會自動包含）。
+async function buildReportUrl(env, owner, request, reportIds) {
+  try {
+    const s = await shareBase(env, owner, request);
+    if (!s) return '';
+    let u = `${s.base}/index.html?share=${encodeURIComponent(s.shareId)}&mode=view`;
+    const ids = [...new Set((reportIds || []).filter(Boolean).map(String))];
+    if (ids.length) u += `&ids=${ids.map(encodeURIComponent).join(',')}`;
+    return u;
+  } catch (e) { return ''; }
+}
+
+// 組「已開放請假」通知（供開場次自動發＋管理員手動重發共用）
+//   wins：一場或多場（同時開放兩場時合成一則通知，@everyone 只會響一次）
+//   reportIds：④ 戰報唯讀連結要包含哪幾場；不給＝全部場次
+async function buildLeaveOpenEmbed(env, owner, winsIn, request, reportIds) {
+  const wins = (Array.isArray(winsIn) ? winsIn : [winsIn]).filter(Boolean);
+  const fmt = (w) => {
+    const typeLabel = w.match_type === '其他' ? '領地戰' : (w.match_type || '幫戰');
+    return `**${w.event_date}　${w.session}　[${typeLabel}]**${w.title ? "　" + w.title : ""}`;
+  };
+  const dates = [...new Set(wins.map(w => w.event_date))].join('、');
+  const [leaveUrl, reportUrl] = await Promise.all([
+    buildLeaveUrl(env, owner, request),
+    buildReportUrl(env, owner, request, reportIds)
+  ]);
   const longUrl = leaveUrl ? leaveUrl + '#long' : '';
-  let desc = `**${win.event_date}　${win.session}　[${typeLabel}]**${win.title ? "\n" + win.title : ""}`;
+  let desc = wins.map(fmt).join("\n");
   if (leaveUrl) {
-    desc += `\n\n① ${win.event_date} 請假開放，有需要自行申請：\n${leaveUrl}`;
+    desc += `\n\n① ${dates} 請假開放，有需要自行申請：\n${leaveUrl}`;
+    if (wins.length > 1) desc += `\n（${wins.length} 場都在同一個連結裡，請各自登記）`;
     desc += `\n\n② 長期/預先請假（如需於非開放時段請假請用此連結）：\n${longUrl}`;
     desc += `\n\n③ 有問題請找當家/管理處理`;
   } else {
     desc += `\n請到請假連結登記。`;
   }
-  desc += `\n\n🤖 也可直接用機器人指令查詢：\n\`/查詢 名字\`　\`/出勤榜\`　\`/請假名單\``;
-  return { title: "🗓️ 已開放請假", description: desc, color: 3447003 };
+  if (reportUrl) {
+    desc += `\n\n④ 查看以往戰報記錄（唯讀，免登入）：\n${reportUrl}`;
+  }
+  desc += `\n\n🤖 也可直接用機器人指令查詢（伺服器任何頻道都能用）：`;
+  desc += `\n\`/查詢 名字\`　出席／請假／後備／缺席與出席率`;
+  desc += `\n　└ 可加 \`類型\`（幫戰／約戰／領地戰）、\`天數\`（例 30＝近一個月）、\`日期範圍\`（例 20260701-0731）`;
+  desc += `\n\`/出勤榜\`　出席前 10 名`;
+  desc += `\n\`/請假名單\`　目前開放場次的請假／後備名單`;
+  desc += `\n　└ 可加 \`日期\`（例 ${wins[0]?.event_date || '2026-08-19'}）、\`類型\`、\`日期範圍\``;
+  return { title: `🗓️ 已開放請假${wins.length > 1 ? `（${wins.length} 場）` : ''}`, description: desc, color: 3447003 };
 }
 
 // 依 guild_id 找出綁定的戰隊帳號（先查多伺服器表，再退回舊的單一欄位）
@@ -823,6 +861,13 @@ async function verifyDiscordSig(publicKeyHex, signatureHex, timestamp, body) {
   return false;
 }
 
+// 指令選項的「類型」→ 資料庫的 match_type（領地戰在資料庫裡是 '其他'）；null＝全部
+const MATCH_TYPE_MAP = { '全部': null, '幫戰': '幫戰', '約戰': '約戰', '領地戰': '其他', '其他': '其他' };
+function resolveMatchType(raw) {
+  const k = String(raw || '全部').trim();
+  return MATCH_TYPE_MAP[k] !== undefined ? MATCH_TYPE_MAP[k] : null;
+}
+
 // 處理 slash 指令，回傳 Discord interaction response
 // 解析日期範圍字串："20260701-0731"、"20260701-20260731"、"2026-07-01~2026-07-31" 皆可
 // 右邊 4 碼＝沿用左邊年份的 MMDD；2 碼＝沿用左邊年月的 DD。回傳 {from, to}（YYYY-MM-DD）或 null。
@@ -881,8 +926,7 @@ async function handleDiscordCommand(env, interaction) {
     if (!m) return reply(`找不到「${q}」，請確認名字是否正確。`);
     // 類型：全部 / 幫戰 / 約戰 / 領地戰(其他)
     const typeOpt = String(getOpt('類型') || '全部').trim();
-    const typeMap = { '全部': null, '幫戰': '幫戰', '約戰': '約戰', '領地戰': '其他', '其他': '其他' };
-    const T = typeMap[typeOpt] !== undefined ? typeMap[typeOpt] : null;
+    const T = resolveMatchType(typeOpt);
     let att, lv, rs, ns, denom, typeNote;
     if (T) {
       att = (m.attendanceByType && m.attendanceByType[T]) || 0;
@@ -906,7 +950,10 @@ async function handleDiscordCommand(env, interaction) {
 
   if (cmd === '請假名單') {
     const dateOpt = String(getOpt('日期') || '').trim();
-    // 找開放中的場次（可用日期過濾）
+    const range = parseDateRange(getOpt('日期範圍'));
+    const typeOpt = String(getOpt('類型') || '全部').trim();
+    const T = resolveMatchType(typeOpt);
+    // 找開放中的場次（可用日期／日期範圍／類型過濾）
     let wins;
     try {
       ({ results: wins } = await env.DB.prepare(
@@ -917,8 +964,19 @@ async function handleDiscordCommand(env, interaction) {
         "SELECT window_id, event_date, session, title FROM leave_windows WHERE owner = ? AND status = 'open' ORDER BY event_date DESC, session ASC"
       ).bind(owner).all());
     }
-    wins = (wins || []).filter(w => !dateOpt || w.event_date === dateOpt);
-    if (wins.length === 0) return reply(dateOpt ? `${dateOpt} 沒有開放中的場次。` : "目前沒有開放中的場次。");
+    wins = (wins || []).filter(w => {
+      if (dateOpt && w.event_date !== dateOpt) return false;
+      if (range && (w.event_date < range.from || w.event_date > range.to)) return false;
+      if (T && (w.match_type || '幫戰') !== T) return false;
+      return true;
+    });
+    // 有下條件時把條件寫在回覆裡，才不會誤以為「真的一個都沒有」
+    const notes = [];
+    if (dateOpt) notes.push(dateOpt);
+    if (range) notes.push(`${range.from} ~ ${range.to}`);
+    if (T) notes.push(typeOpt);
+    const noteStr = notes.length ? `（${notes.join('　')}）` : '';
+    if (wins.length === 0) return reply(`目前沒有符合的開放中場次${noteStr}。`);
 
     const idToName = {};
     members.forEach(m => { idToName[m.member_id] = m.display_name; });
@@ -932,7 +990,7 @@ async function handleDiscordCommand(env, interaction) {
       if (reserveNames.length) s += `\n🔄 後備（${reserveNames.length}）：${reserveNames.join('、')}`;
       return s;
     });
-    let out = blocks.join("\n\n");
+    let out = (noteStr ? `🔎 篩選${noteStr}\n\n` : '') + blocks.join("\n\n");
     if (out.length > 1900) out = out.slice(0, 1900) + "\n…（名單過長已截斷）";
     return reply(out);
   }
@@ -1858,70 +1916,118 @@ export default {
       // 建立請假場次（日期+第幾場，唯一）
       if (url.pathname === "/api/leave/windows/create" && request.method === "POST") {
         requireAuth();
-        const { event_date, session, title, match_type } = await request.json();
-        if (!event_date || !session) return json({ error: "請選擇日期與場次" }, 400);
+        const { event_date, session, sessions, title, match_type, report_ids } = await request.json();
+        // sessions（陣列）＝一次開放多場；session（單一）保留給舊版前端
+        const wantSessions = [...new Set(
+          (Array.isArray(sessions) && sessions.length ? sessions : [session])
+            .map(s => String(s || '').trim()).filter(Boolean)
+        )].sort();
+        if (!event_date || !wantSessions.length) return json({ error: "請選擇日期與場次" }, 400);
         const mtype = match_type || '幫戰';
+        // 先把所有要開的場次都檢查完才動手，避免「開了一場、另一場卡住」的半套狀態
         // 重複判定＝日期＋場次＋類型（幫戰/約戰/領地戰各自獨立，可同日同場次分別開）
-        let dup;
-        try {
-          dup = await env.DB.prepare(
-            "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ? AND COALESCE(match_type, '幫戰') = ?"
-          ).bind(user, event_date, session, mtype).first();
-        } catch (e) {
-          // match_type 欄位尚未建立（migration 004 未跑）→ 退回舊的日期＋場次判定
-          dup = await env.DB.prepare(
-            "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ?"
-          ).bind(user, event_date, session).first();
-        }
-        if (dup) return json({ error: "這個日期＋場次＋類型已經開過請假了", existing_window_id: dup.window_id, existing_status: dup.status }, 409);
-        const windowId = crypto.randomUUID();
-        const now = Date.now();
-        try {
-          await env.DB.prepare(
-            "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at, match_type) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?, ?)"
-          ).bind(windowId, user, event_date, session, title || "", now, now, mtype).run();
-        } catch (e) {
-          const msg = String((e && e.message) || e);
-          if (/no such column/i.test(msg)) {
-            // match_type 欄位尚未建立（migration 004 還沒跑）→ 退回不含類型
-            await env.DB.prepare(
-              "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?)"
-            ).bind(windowId, user, event_date, session, title || "", now, now).run();
-          } else if (/UNIQUE|constraint/i.test(msg)) {
-            // 舊的唯一索引還鎖在 (owner,date,session)，尚未套用 migration 009
-            return json({ error: "這個日期＋場次已經開過請假了。若要同日同場次分開幫戰／約戰／領地戰，請先在資料庫執行 migration 009。", existing_status: 'open' }, 409);
-          } else {
-            throw e;
+        const dups = [];
+        for (const s of wantSessions) {
+          let dup;
+          try {
+            dup = await env.DB.prepare(
+              "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ? AND COALESCE(match_type, '幫戰') = ?"
+            ).bind(user, event_date, s, mtype).first();
+          } catch (e) {
+            // match_type 欄位尚未建立（migration 004 未跑）→ 退回舊的日期＋場次判定
+            dup = await env.DB.prepare(
+              "SELECT window_id, status FROM leave_windows WHERE owner = ? AND event_date = ? AND session = ?"
+            ).bind(user, event_date, s).first();
           }
+          if (dup) dups.push({ session: s, window_id: dup.window_id, status: dup.status });
         }
-        await writeAudit(env, user, user, 'leave_window', windowId, 'create', { event_date, session, title, match_type: mtype });
-        const openEmbed = await buildLeaveOpenEmbed(env, user, { event_date, session, match_type: mtype, title }, request);
+        if (dups.length) return json({
+          error: `${dups.map(d => d.session).join('、')} 已經開過請假了`,
+          duplicates: dups,
+          // 舊版前端只看得懂單一場次這兩個欄位
+          existing_window_id: dups[0].window_id, existing_status: dups[0].status
+        }, 409);
+
+        const now = Date.now();
+        const created = [];   // { window_id, event_date, session, match_type, title }
+        try {
+          for (const s of wantSessions) {
+            const windowId = crypto.randomUUID();
+            try {
+              await env.DB.prepare(
+                "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at, match_type) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?, ?)"
+              ).bind(windowId, user, event_date, s, title || "", now, now, mtype).run();
+            } catch (e) {
+              const msg = String((e && e.message) || e);
+              if (/no such column/i.test(msg)) {
+                // match_type 欄位尚未建立（migration 004 還沒跑）→ 退回不含類型
+                await env.DB.prepare(
+                  "INSERT INTO leave_windows (window_id, owner, event_date, session, title, status, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'open', 1, ?, ?)"
+                ).bind(windowId, user, event_date, s, title || "", now, now).run();
+              } else if (/UNIQUE|constraint/i.test(msg)) {
+                // 舊的唯一索引還鎖在 (owner,date,session)，尚未套用 migration 009
+                const err = new Error("這個日期＋場次已經開過請假了。若要同日同場次分開幫戰／約戰／領地戰，請先在資料庫執行 migration 009。");
+                err.httpStatus = 409;
+                throw err;
+              } else {
+                throw e;
+              }
+            }
+            created.push({ window_id: windowId, event_date, session: s, match_type: mtype, title });
+          }
+        } catch (e) {
+          // 有任何一場失敗就把剛剛開的收回去，不要留下半套（也不會發出只有一半的通知）
+          for (const c of created) {
+            try { await env.DB.prepare("DELETE FROM leave_windows WHERE owner = ? AND window_id = ?").bind(user, c.window_id).run(); } catch (e2) { }
+          }
+          if (e && e.httpStatus === 409) return json({ error: e.message, existing_status: 'open' }, 409);
+          throw e;
+        }
+        for (const c of created) {
+          await writeAudit(env, user, user, 'leave_window', c.window_id, 'create', { event_date, session: c.session, title, match_type: mtype });
+        }
+        // 多場合成一則通知 → @everyone 只會響一次
+        const openEmbed = await buildLeaveOpenEmbed(env, user, created, request, report_ids);
         await notifyDiscord(env, user, 'leave_open', { embed: openEmbed });
-        return json({ status: "OK", window_id: windowId });
+        return json({ status: "OK", window_id: created[0].window_id, window_ids: created.map(c => c.window_id), sessions: created.map(c => c.session) });
       }
 
       // 手動重發某場的「已開放請假」Discord 通知（可自訂加一句話）
       if (url.pathname === "/api/leave/windows/notify" && request.method === "POST") {
         requireAuth();
-        const { window_id, message } = await request.json();
-        if (!window_id) return json({ error: "參數錯誤" }, 400);
-        let win;
-        try {
-          win = await env.DB.prepare(
-            "SELECT event_date, session, match_type, title, status FROM leave_windows WHERE window_id = ? AND owner = ?"
-          ).bind(window_id, user).first();
-        } catch (e) {
-          win = await env.DB.prepare(
-            "SELECT event_date, session, title, status FROM leave_windows WHERE window_id = ? AND owner = ?"
-          ).bind(window_id, user).first();
+        const { window_id, window_ids, message, report_ids } = await request.json();
+        // window_ids（陣列）＝多場合成一則通知；window_id（單一）保留給舊版前端
+        const ids = [...new Set(
+          (Array.isArray(window_ids) && window_ids.length ? window_ids : [window_id])
+            .map(x => String(x || '').trim()).filter(Boolean)
+        )];
+        if (!ids.length) return json({ error: "參數錯誤" }, 400);
+        const wins = [];
+        for (const id of ids) {
+          let win;
+          try {
+            win = await env.DB.prepare(
+              "SELECT event_date, session, match_type, title, status FROM leave_windows WHERE window_id = ? AND owner = ?"
+            ).bind(id, user).first();
+          } catch (e) {
+            win = await env.DB.prepare(
+              "SELECT event_date, session, title, status FROM leave_windows WHERE window_id = ? AND owner = ?"
+            ).bind(id, user).first();
+          }
+          if (win) wins.push(win);
         }
-        if (!win) return json({ error: "找不到場次" }, 404);
-        const embed = await buildLeaveOpenEmbed(env, user, win, request);
+        if (!wins.length) return json({ error: "找不到場次" }, 404);
+        wins.sort((a, b) => a.event_date === b.event_date
+          ? String(a.session).localeCompare(String(b.session))
+          : (a.event_date < b.event_date ? -1 : 1));
+        const embed = await buildLeaveOpenEmbed(env, user, wins, request, report_ids);
         // 自訂訊息用「訊息本文」的 ## 大標（embed 內文吃不到標題語法）
         const content = (message && String(message).trim()) ? `## 📢 ${String(message).trim()}` : '';
         await notifyDiscord(env, user, 'leave_open', { embed, content });
-        await writeAudit(env, user, user, 'leave_window', window_id, 'notify', { hasMessage: !!(message && String(message).trim()) });
-        return json({ status: "OK" });
+        for (const id of ids) {
+          await writeAudit(env, user, user, 'leave_window', id, 'notify', { hasMessage: !!(message && String(message).trim()), windows: ids.length });
+        }
+        return json({ status: "OK", windows: wins.length });
       }
 
       // 開放 / 關閉場次
@@ -2724,7 +2830,11 @@ export default {
             { name: "日期範圍", description: "例 20260701-0731 或 20260701-20260731（選填）", type: 3, required: false }
           ] },
           { name: "出勤榜", description: "顯示出勤前 10 名" },
-          { name: "請假名單", description: "顯示目前開放場次的請假／後備名單", options: [{ name: "日期", description: "只看某天 YYYY-MM-DD（選填）", type: 3, required: false }] }
+          { name: "請假名單", description: "顯示目前開放場次的請假／後備名單", options: [
+            { name: "日期", description: "只看某天 YYYY-MM-DD（選填）", type: 3, required: false },
+            { name: "類型", description: "戰報類型（預設全部）", type: 3, required: false, choices: [{ name: "全部", value: "全部" }, { name: "幫戰", value: "幫戰" }, { name: "約戰", value: "約戰" }, { name: "領地戰", value: "領地戰" }] },
+            { name: "日期範圍", description: "例 20260701-0731 或 20260701-20260731（選填）", type: 3, required: false }
+          ] }
         ];
         const put = async (endpoint) => {
           const res = await fetch(endpoint, {
