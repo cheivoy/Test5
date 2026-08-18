@@ -28,17 +28,17 @@ function toast(msg) {
     setTimeout(() => el.classList.remove('show'), 1800);
 }
 
-// 加載指示（與後台同一套）：呼叫的那一刻就蓋上全屏遮罩擋住重複點擊，
-// 畫面（牛馬動畫）等 180ms 才淡入，短請求完全不閃；卡超過 8 秒給「取消等待」。
-const LOAD_REVEAL_MS = 180, LOAD_STUCK_MS = 8000;
-let _lc = 0, _lcReveal = null, _lcStuck = null;
+// 加載指示（與後台同一套）：呼叫的那一刻就蓋上全屏遮罩擋住重複點擊。
+// 短請求會閃一下，這是刻意的取捨——寧可閃，也不要有機會連點兩次送出兩筆。
+// 卡超過 8 秒給「取消等待」，不能讓人真的鎖死在遮罩裡。
+const LOAD_STUCK_MS = 8000;
+let _lc = 0, _lcStuck = null;
 function _lcEl() { return document.getElementById('load-overlay'); }
 function showLoading(t) {
     _lc++;
     if (t) { const x = document.querySelector('#load-overlay .load-text'); if (x) x.textContent = t; }
     if (_lc > 1) return;
-    _lcEl()?.classList.add('blocking');
-    _lcReveal = setTimeout(() => { _lcEl()?.classList.add('show'); }, LOAD_REVEAL_MS);
+    _lcEl()?.classList.add('show');
     _lcStuck = setTimeout(() => { _lcEl()?.classList.add('stuck'); }, LOAD_STUCK_MS);
 }
 function hideLoading() {
@@ -48,9 +48,8 @@ function hideLoading() {
 }
 function forceHideLoading() {
     _lc = 0;
-    clearTimeout(_lcReveal); _lcReveal = null;
     clearTimeout(_lcStuck); _lcStuck = null;
-    _lcEl()?.classList.remove('blocking', 'show', 'stuck');
+    _lcEl()?.classList.remove('show', 'stuck');
 }
 
 // 每個打後端的請求都自動蓋遮罩 → 請假／取消／建檔／改名／長期請假都不可能重複送出

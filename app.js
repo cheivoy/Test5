@@ -24,20 +24,19 @@ let dbSessionCountByType = { '幫戰': 0, '約戰': 0, '其他': 0 }; // 各類�
 let aliasToMemberId = {}, memberIdToDisplayName = {}, memberIdToJob = {};
 let subMapByWin = {}; // 代替上號：`日期|場次|類型` -> { 本人member_id: 代打者member_id }
 
-// 加載指示（計數式，支援同時多個載入）。兩段式：
-//   1. 呼叫的那一刻就蓋上全屏遮罩擋住點擊 → 不可能重複送出同一個操作
-//   2. 畫面（牛馬動畫）等 180ms 才淡入 → 200ms 就回來的請求完全不閃
-// 另外卡超過 8 秒會出現「取消等待」，全屏遮罩不能讓人真的鎖死在裡面。
-const LOAD_REVEAL_MS = 180, LOAD_STUCK_MS = 8000;
-let _loadingCount = 0, _loadRevealTimer = null, _loadStuckTimer = null;
+// 加載指示（計數式，支援同時多個載入）。
+// 呼叫的那一刻就蓋上全屏遮罩：點擊完全被擋住 → 不可能重複送出同一個操作。
+// 短請求會閃一下，這是刻意的取捨——寧可閃，也不要有機會連點兩次。
+// 卡超過 8 秒會出現「取消等待」，全屏遮罩不能讓人真的鎖死在裡面。
+const LOAD_STUCK_MS = 8000;
+let _loadingCount = 0, _loadStuckTimer = null;
 function _loadEl() { return document.getElementById('loading-overlay'); }
 function showLoading(text) {
     _loadingCount++;
     if (text) { const t = document.querySelector('#loading-overlay .load-text'); if (t) t.textContent = text; }
     if (_loadingCount > 1) return;                       // 已經在擋了
-    _loadEl()?.classList.add('blocking');                // 立刻擋住重複操作
-    document.getElementById('load-bar')?.classList.add('show');   // 頂部細線立刻出現（很短的請求只會看到這個）
-    _loadRevealTimer = setTimeout(() => { _loadEl()?.classList.add('show'); }, LOAD_REVEAL_MS);
+    _loadEl()?.classList.add('show');
+    document.getElementById('load-bar')?.classList.add('show');
     _loadStuckTimer = setTimeout(() => { _loadEl()?.classList.add('stuck'); }, LOAD_STUCK_MS);
 }
 function hideLoading() {
@@ -48,9 +47,8 @@ function hideLoading() {
 // 逃生出口：卡住時把等待狀態整個重設（畫面不會再被鎖住）
 function forceHideLoading() {
     _loadingCount = 0;
-    clearTimeout(_loadRevealTimer); _loadRevealTimer = null;
     clearTimeout(_loadStuckTimer); _loadStuckTimer = null;
-    _loadEl()?.classList.remove('blocking', 'show', 'stuck');
+    _loadEl()?.classList.remove('show', 'stuck');
     document.getElementById('load-bar')?.classList.remove('show');
 }
 

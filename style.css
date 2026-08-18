@@ -910,7 +910,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
    ===  現在：160ms 內回來的完全不顯示；超過才出現一條 2px 的進度條。
    ===================================================== */
 #load-bar {
-    position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 4000;
+    /* 比遮罩再高一層，蓋著暗底仍看得到「還在跑」 */
+    position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 4100;
     background: color-mix(in srgb, var(--accent) 18%, transparent);
     opacity: 0; pointer-events: none; transition: opacity var(--t2) var(--ease);
 }
@@ -950,24 +951,21 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 
 /* =====================================================
    ===  加載中：全屏遮罩（擋住重複操作）＋ 奔跑的牛馬
-   ===  兩段式：blocking 從第一毫秒就擋住點擊；show 在 180ms 後才淡入畫面，
-   ===  所以「200ms 就回來的請求」不會閃一下，慢的請求才看到動畫。
+   ===  呼叫的那一刻就出現，點擊完全被擋住 → 不可能連點兩次送出兩筆。
    ===================================================== */
 #loading-overlay {
     position: fixed; inset: 0; z-index: 4000;
     display: none; align-items: center; justify-content: center; padding: 20px;
-    background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
 }
-#loading-overlay.blocking { display: flex; }          /* 只擋點擊，還看不到東西 */
 #loading-overlay.show {
+    display: flex;
     background: color-mix(in srgb, var(--ink) 38%, transparent);
     backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
     animation: overlay-in var(--t2) var(--ease) both;
 }
-#loading-overlay .load-box { display: none; }
-#loading-overlay.show .load-box { display: flex; }
 
 .load-box {
+    display: flex;
     flex-direction: column; align-items: center; gap: 2px;
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 20px; padding: 22px 30px 20px;

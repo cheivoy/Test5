@@ -203,23 +203,20 @@
         .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
         /* ---- 加載中：全屏遮罩（擋住重複送出）＋ 奔跑的牛馬 ----
-               兩段式：blocking 從第一毫秒就擋住點擊；show 在 180ms 後才淡入，
-               所以「一下就回來的請求」不會閃一下，慢的請求才看到動畫。 */
+               呼叫的那一刻就出現，點擊完全被擋住 → 不可能連點兩次送出兩筆。 */
         #load-overlay {
             position: fixed; inset: 0; z-index: 60; display: none;
             align-items: center; justify-content: center; padding: 20px;
-            background: transparent;
         }
-        #load-overlay.blocking { display: flex; }
         #load-overlay.show {
+            display: flex;
             background: color-mix(in srgb, var(--ink) 38%, transparent);
             backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
             animation: fade-in var(--t2) var(--ease) both;
         }
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-        #load-overlay .load-box { display: none; }
-        #load-overlay.show .load-box { display: flex; }
         .load-box {
+            display: flex;
             flex-direction: column; align-items: center; gap: 2px; text-align: center;
             background: var(--surface); border: 1px solid var(--border);
             border-radius: 20px; padding: 22px 30px 20px; max-width: min(360px, 90vw);
@@ -410,5 +407,5 @@
         </div>
     </div>
 
-    <script src="leave.js?v=8"></script>
+    <script src="leave.js?v=9"></script>
 </body></html>
