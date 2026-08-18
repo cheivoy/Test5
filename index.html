@@ -7,7 +7,7 @@
     <!-- ⚡ Chart.js 改成 defer：原本是 head 裡的阻擋式載入，205KB 沒下載完畫面不會出來。
          圖表都是在 window.onload 之後才用到，defer 一定來得及。版本也釘住方便瀏覽器快取。 -->
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="style.css?v=43">
+    <link rel="stylesheet" href="style.css?v=44">
 </head>
 
 <body>
@@ -799,8 +799,43 @@
         </div>
     </div>
 
-    <!-- 只負責擋住重複點擊（透明），文字用底部的小膠囊，不再蓋一整片黑 -->
-    <div id="loading-overlay"><div class="load-box"><span class="load-dot"></span><span class="load-text">努力加載中…</span></div></div>
+    <!-- 全屏遮罩：擋住重複操作。點擊從第一毫秒就被擋住，畫面則等 180ms 才淡入（短請求不閃） -->
+    <div id="loading-overlay" role="status" aria-live="polite">
+        <div class="load-box">
+            <svg class="cow-run" viewBox="0 0 150 96" aria-hidden="true">
+                <path class="cw-ground" d="M8 80h134"/>
+                <circle class="cw-dust d1" cx="34" cy="73" r="4"/>
+                <circle class="cw-dust d2" cx="22" cy="69" r="3"/>
+                <circle class="cw-dust d3" cx="13" cy="75" r="2.4"/>
+                <g class="cw-body">
+                    <path class="cw-tail" d="M46 42c-9 2-12 9-11 16"/>
+                    <circle class="cw-tuft" cx="35" cy="60" r="3.2"/>
+                    <path class="cw-leg lg1" d="M56 58v20"/>
+                    <path class="cw-leg lg2" d="M68 58v20"/>
+                    <path class="cw-leg lg3" d="M85 58v20"/>
+                    <path class="cw-leg lg4" d="M96 58v20"/>
+                    <rect class="cw-torso" x="47" y="32" width="60" height="28" rx="14"/>
+                    <ellipse class="cw-spot" cx="63" cy="42" rx="7" ry="5.4"/>
+                    <ellipse class="cw-spot" cx="87" cy="51" rx="5" ry="3.8"/>
+                    <g class="cw-head">
+                        <path class="cw-horn" d="M103 25c-2.5-5 .5-8.5 4-7.5"/>
+                        <path class="cw-horn" d="M121 25c2.5-5-.5-8.5-4-7.5"/>
+                        <ellipse class="cw-ear" cx="102" cy="30" rx="4.2" ry="3"/>
+                        <ellipse class="cw-ear" cx="122" cy="30" rx="4.2" ry="3"/>
+                        <rect class="cw-face" x="100" y="24" width="24" height="27" rx="11.5"/>
+                        <ellipse class="cw-muzzle" cx="112" cy="44" rx="9" ry="6.4"/>
+                        <circle class="cw-eye" cx="107" cy="34" r="1.7"/>
+                        <circle class="cw-eye" cx="118" cy="34" r="1.7"/>
+                        <circle class="cw-nose" cx="108.6" cy="44.5" r="1.2"/>
+                        <circle class="cw-nose" cx="115.4" cy="44.5" r="1.2"/>
+                    </g>
+                </g>
+            </svg>
+            <div class="load-text">牛馬正在為你全速加載</div>
+            <div class="load-sub">牛馬就要有牛馬的樣子，效率那是額外價錢！！</div>
+            <button class="load-escape" onclick="forceHideLoading()">等太久了？點這裡取消等待</button>
+        </div>
+    </div>
 
-    <script src="app.js?v=51"></script>
+    <script src="app.js?v=52"></script>
 </body></html>

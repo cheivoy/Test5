@@ -24,35 +24,40 @@ let dbSessionCountByType = { '幫戰': 0, '約戰': 0, '其他': 0 }; // 各類�
 let aliasToMemberId = {}, memberIdToDisplayName = {}, memberIdToJob = {};
 let subMapByWin = {}; // 代替上號：`日期|場次|類型` -> { 本人member_id: 代打者member_id }
 
-// 載入指示（計數式，支援同時多個載入）。
-// 大多數 API 200ms 內就回來了，馬上蓋一層遮罩只會讓畫面閃一下 →
-// 先等 160ms，真的比較久才顯示頂部進度條與底部提示膠囊。
-let _loadingCount = 0, _loadTimer = null, _loadShown = false;
-function _setLoadVisible(on) {
-    _loadShown = on;
-    document.getElementById('load-bar')?.classList.toggle('show', on);
-    document.getElementById('loading-overlay')?.classList.toggle('show', on);
-}
+// 加載指示（計數式，支援同時多個載入）。兩段式：
+//   1. 呼叫的那一刻就蓋上全屏遮罩擋住點擊 → 不可能重複送出同一個操作
+//   2. 畫面（牛馬動畫）等 180ms 才淡入 → 200ms 就回來的請求完全不閃
+// 另外卡超過 8 秒會出現「取消等待」，全屏遮罩不能讓人真的鎖死在裡面。
+const LOAD_REVEAL_MS = 180, LOAD_STUCK_MS = 8000;
+let _loadingCount = 0, _loadRevealTimer = null, _loadStuckTimer = null;
+function _loadEl() { return document.getElementById('loading-overlay'); }
 function showLoading(text) {
     _loadingCount++;
     if (text) { const t = document.querySelector('#loading-overlay .load-text'); if (t) t.textContent = text; }
-    if (_loadShown || _loadTimer) return;
-    _loadTimer = setTimeout(() => {
-        _loadTimer = null;
-        if (_loadingCount > 0) _setLoadVisible(true);
-    }, 160);
+    if (_loadingCount > 1) return;                       // 已經在擋了
+    _loadEl()?.classList.add('blocking');                // 立刻擋住重複操作
+    document.getElementById('load-bar')?.classList.add('show');   // 頂部細線立刻出現（很短的請求只會看到這個）
+    _loadRevealTimer = setTimeout(() => { _loadEl()?.classList.add('show'); }, LOAD_REVEAL_MS);
+    _loadStuckTimer = setTimeout(() => { _loadEl()?.classList.add('stuck'); }, LOAD_STUCK_MS);
 }
 function hideLoading() {
     _loadingCount = Math.max(0, _loadingCount - 1);
     if (_loadingCount > 0) return;
-    if (_loadTimer) { clearTimeout(_loadTimer); _loadTimer = null; }
-    if (_loadShown) _setLoadVisible(false);
+    forceHideLoading();
+}
+// 逃生出口：卡住時把等待狀態整個重設（畫面不會再被鎖住）
+function forceHideLoading() {
+    _loadingCount = 0;
+    clearTimeout(_loadRevealTimer); _loadRevealTimer = null;
+    clearTimeout(_loadStuckTimer); _loadStuckTimer = null;
+    _loadEl()?.classList.remove('blocking', 'show', 'stuck');
+    document.getElementById('load-bar')?.classList.remove('show');
 }
 
 // 線性圖標：統一從 index.html 的 sprite 取用（取代 emoji）
 function ic(name, cls) { return `<svg class="ic${cls ? ' ' + cls : ''}"><use href="#i-${name}"/></svg>`; }
 async function withLoading(fn, text) {
-    showLoading(text || '努力加載中…');
+    showLoading(text || '牛馬正在為你全速加載');
     try { return await fn(); } finally { hideLoading(); }
 }
 let memberIdToCategory = {};
@@ -130,20 +135,29 @@ function updateModeBanner() {
 // ===  請求都會 401。以前這種情況畫面只會靜靜地空掉（看起來像「系統又壞了」），
 // ===  所以在 fetch 外面包一層統一攔 401，一次提示、清掉失效的登入狀態。
 // =====================================================
+// 順便在同一個地方統一掛上「加載中」：只要是打後端的請求，一律自動蓋遮罩。
+// 這樣開放請假、發通知、請假管理、名冊、覆蓋、匯入…每一個要等伺服器的操作都被擋住，
+// 不必在六十幾個呼叫點各寫一次（也不會有人新增功能時忘記加）。
 let _authExpiryNotified = false;
 function installAuthExpiryGuard() {
     const orig = window.fetch.bind(window);
     window.fetch = async (input, init) => {
-        const res = await orig(input, init);
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const isApi = url.startsWith(WORKER_URL);
+        if (isApi) showLoading();
         try {
-            if (res.status === 401) {
-                const url = typeof input === 'string' ? input : (input && input.url) || '';
-                // 帳密錯誤的 401 不算「登入失效」，不要把人踢掉
-                const isAuthAttempt = /\/api\/(auth\/(login|register)|change-password)/.test(url);
-                if (url.startsWith(WORKER_URL) && !isAuthAttempt && currentUser) onAuthExpired();
-            }
-        } catch (e) { /* 攔截失敗不能影響原本的請求 */ }
-        return res;
+            const res = await orig(input, init);
+            try {
+                if (res.status === 401) {
+                    // 帳密錯誤的 401 不算「登入失效」，不要把人踢掉
+                    const isAuthAttempt = /\/api\/(auth\/(login|register)|change-password)/.test(url);
+                    if (isApi && !isAuthAttempt && currentUser) onAuthExpired();
+                }
+            } catch (e) { /* 攔截失敗不能影響原本的請求 */ }
+            return res;
+        } finally {
+            if (isApi) hideLoading();
+        }
     };
 }
 
@@ -643,7 +657,7 @@ async function ensureReportFull(h) {
 // =====================================================
 // ===  fetchAllHistories
 // =====================================================
-async function fetchAllHistories() { return withLoading(_fetchAllHistoriesImpl, '努力加載中…'); }
+async function fetchAllHistories() { return withLoading(_fetchAllHistoriesImpl, '牛馬正在為你全速加載'); }
 async function _fetchAllHistoriesImpl() {
     try {
         // ⚡ meta=1：只拿列表要顯示的欄位，開站不再下載所有場次的完整選手數據
@@ -1020,7 +1034,7 @@ async function openEditReport(e, id) {
     const h = allHistories.find(x => x.id === id);
     if (!h) { alert('找不到這筆戰報'); return; }
     // 要保留 gA/gB 原樣寫回，所以這裡需要完整資料
-    if (!h.raw_json) await withLoading(() => ensureReportFull(h), '努力加載中…');
+    if (!h.raw_json) await withLoading(() => ensureReportFull(h), '牛馬正在為你全速加載');
     const d = repOf(h);
     if (!h.raw_json) { alert('這筆戰報資料損毀，無法修正'); return; }
 
@@ -1038,7 +1052,7 @@ async function saveEditReport() {
     if (!id) return;
     const h = allHistories.find(x => x.id === id);
     if (!h) { alert('找不到這筆戰報'); return; }
-    if (!h.raw_json) await withLoading(() => ensureReportFull(h), '努力加載中…');
+    if (!h.raw_json) await withLoading(() => ensureReportFull(h), '牛馬正在為你全速加載');
     const d = repOf(h);
     if (!h.raw_json) { alert('這筆戰報資料損毀，無法修正'); return; }
 
@@ -1228,7 +1242,7 @@ async function viewHistory(id) {
     const h = allHistories.find(x => x.id === id);
     if (h) {
         // 列表是輕量載入的 → 點開這場才抓它的完整選手數據
-        if (!h.raw_json) await withLoading(() => ensureReportFull(h), '努力加載中…');
+        if (!h.raw_json) await withLoading(() => ensureReportFull(h), '牛馬正在為你全速加載');
         if (!h.raw_json) { alert('讀取這筆戰報失敗，請稍後再試'); return; }
         const d = repOf(h);
         gA = Array.isArray(d.gA) ? d.gA : [];
@@ -1806,7 +1820,7 @@ async function loadDbComputed(fromDate, toDate) {
     }
 }
 
-async function loadDbData() { return withLoading(_loadDbDataImpl, '努力加載中…'); }
+async function loadDbData() { return withLoading(_loadDbDataImpl, '牛馬正在為你全速加載'); }
 async function _loadDbDataImpl() {
     const { fromDate, toDate } = getDbTimeRange();
 
@@ -3328,7 +3342,7 @@ function renderLeaveBoardList() {
 
 // ---- 長期／預先請假（管理員） ----
 let longLeavesCache = [];
-async function loadLongLeaves() { return withLoading(_loadLongLeavesImpl, '努力加載中…'); }
+async function loadLongLeaves() { return withLoading(_loadLongLeavesImpl, '牛馬正在為你全速加載'); }
 async function _loadLongLeavesImpl() {
     // 成員 datalist（沿用名冊）
     if (!rosterCache.length) { try { await loadRoster(); } catch (e) { } }
@@ -3690,7 +3704,7 @@ function copyLeaveLink() {
 }
 
 // ---- 請假場次（已併入各場次名單）----
-async function loadLeaveWindows() { return withLoading(_loadLeaveWindowsImpl, '努力加載中…'); }
+async function loadLeaveWindows() { return withLoading(_loadLeaveWindowsImpl, '牛馬正在為你全速加載'); }
 async function _loadLeaveWindowsImpl() {
     try {
         const res = await fetch(WORKER_URL + "/api/leave/windows?t=" + Date.now(), {

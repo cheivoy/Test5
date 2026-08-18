@@ -580,14 +580,7 @@ th { background: var(--surface-2) !important; }
 .mcard-break { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .mcard-break span { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 6px; padding: 3px 7px; }
 
-/* 載入中遮罩 */
-#loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.22); display: none; align-items: center; justify-content: center; z-index: 3000; }
-#loading-overlay.show { display: flex; }
-.load-box { display: flex; flex-direction: column; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px 30px; box-shadow: var(--shadow); }
-.load-spin { width: 38px; height: 38px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: load-rot .8s linear infinite; }
-.load-text { font-size: 14px; font-weight: 600; color: var(--ink); }
-@keyframes load-rot { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .load-spin { animation: none; } }
+/* 載入中遮罩：實際樣式在檔案末端的「加載中：全屏遮罩 ＋ 奔跑的牛馬」那一段 */
 
 /* 臨時請假醒目標籤（影響惡劣，需特別注意） */
 .late-tag { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: #d32f2f; border-radius: 5px; padding: 1px 5px; margin-left: 2px; vertical-align: middle; }
@@ -833,8 +826,6 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .close-modal-btn:hover { transform: rotate(90deg); }
 
 /* ---- 載入遮罩：淡入不突兀 ---- */
-#loading-overlay.show { animation: overlay-in var(--t2) var(--ease) both; backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
-.load-box { animation: pop-in var(--t3) var(--ease-out) both; }
 
 /* ---- 晶片 / 標籤：狀態改變有過渡 ---- */
 .pick-chip, .filter-btn, .status-pill, .stat-badge, .cat-chip, .nav-item, .home-pill {
@@ -934,30 +925,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     100% { transform: translateX(363%); }
 }
 
-/* 遮罩本身透明，只擋重複點擊；提示做成底部小膠囊 */
-#loading-overlay { background: transparent; align-items: flex-end; justify-content: center; padding-bottom: 26px; }
-#loading-overlay.show { backdrop-filter: none; -webkit-backdrop-filter: none; }
-.load-box {
-    flex-direction: row; align-items: center; gap: 9px;
-    padding: 9px 16px; border-radius: 999px;
-    background: color-mix(in srgb, var(--ink) 88%, transparent);
-    color: var(--surface); border: none;
-    box-shadow: 0 6px 20px rgba(24,33,52,.22);
-    animation: pill-in var(--t2) var(--ease-out) both;
-}
-@keyframes pill-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.load-text { font-size: 13px; font-weight: 600; color: inherit; }
-.load-dot {
-    width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0;
-    animation: dot-pulse 1s var(--ease) infinite;
-}
-@keyframes dot-pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
-@media (max-width: 768px) {
-    #loading-overlay { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
-}
 @media (prefers-reduced-motion: reduce) {
     #load-bar > span, #load-bar.show > span { animation: none; width: 100%; }
-    .load-dot { animation: none; opacity: 1; }
 }
 
 /* home 快速入口：圖標 + 標題 + 右側箭頭 */
@@ -978,3 +947,91 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 /* 同步到雲端：成功色的外框按鈕（原本寫死淺綠，深色模式看不清） */
 .btn-ok { background: var(--ok-soft) !important; border-color: var(--ok-line) !important; color: var(--ok) !important; }
 .btn-ok:hover { background: color-mix(in srgb, var(--ok) 16%, var(--surface)) !important; }
+
+/* =====================================================
+   ===  加載中：全屏遮罩（擋住重複操作）＋ 奔跑的牛馬
+   ===  兩段式：blocking 從第一毫秒就擋住點擊；show 在 180ms 後才淡入畫面，
+   ===  所以「200ms 就回來的請求」不會閃一下，慢的請求才看到動畫。
+   ===================================================== */
+#loading-overlay {
+    position: fixed; inset: 0; z-index: 4000;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+    background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+#loading-overlay.blocking { display: flex; }          /* 只擋點擊，還看不到東西 */
+#loading-overlay.show {
+    background: color-mix(in srgb, var(--ink) 38%, transparent);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+    animation: overlay-in var(--t2) var(--ease) both;
+}
+#loading-overlay .load-box { display: none; }
+#loading-overlay.show .load-box { display: flex; }
+
+.load-box {
+    flex-direction: column; align-items: center; gap: 2px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 22px 30px 20px;
+    box-shadow: 0 12px 40px rgba(24,33,52,.28);
+    animation: pop-in var(--t3) var(--ease-out) both;
+    max-width: min(360px, 90vw); text-align: center;
+}
+.load-text { font-size: 15px; font-weight: 800; color: var(--ink); letter-spacing: .01em; }
+.load-sub { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 4px; }
+.load-escape {
+    margin-top: 12px; padding: 6px 12px; font-size: 11.5px; font-family: inherit;
+    color: var(--muted); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+    display: none; transition: color var(--t2) var(--ease), border-color var(--t2) var(--ease);
+}
+.load-escape:hover { color: var(--danger); border-color: var(--danger); }
+/* 卡超過 8 秒才給逃生出口——全屏遮罩不能讓人真的鎖死在裡面 */
+#loading-overlay.stuck .load-escape { display: inline-block; }
+
+/* ---- 奔跑的牛馬 ---- */
+.cow-run { width: 168px; height: 108px; overflow: visible; }
+.cow-run * { transform-box: fill-box; }
+.cw-torso, .cw-face, .cw-muzzle, .cw-ear { fill: var(--surface); stroke: var(--accent-strong); stroke-width: 2.4; }
+.cw-spot { fill: var(--accent-soft); stroke: none; }
+.cw-eye, .cw-nose, .cw-tuft { fill: var(--accent-strong); stroke: none; }
+.cw-leg, .cw-tail, .cw-horn {
+    fill: none; stroke: var(--accent-strong); stroke-width: 2.6; stroke-linecap: round;
+}
+.cw-ground {
+    fill: none; stroke: var(--border); stroke-width: 2.6; stroke-linecap: round;
+    stroke-dasharray: 12 10; animation: cw-ground .5s linear infinite;
+}
+.cw-dust { fill: var(--border); stroke: none; }
+.d1 { animation: cw-dust .7s var(--ease) infinite; }
+.d2 { animation: cw-dust .7s var(--ease) .18s infinite; }
+.d3 { animation: cw-dust .7s var(--ease) .36s infinite; }
+
+.cw-body { animation: cw-bob .42s ease-in-out infinite alternate; }
+.cw-head { transform-origin: 20% 80%; animation: cw-nod .84s ease-in-out infinite alternate; }
+.cw-leg { transform-origin: center top; }
+.lg1, .lg4 { animation: cw-step .42s ease-in-out infinite alternate; }
+.lg2, .lg3 { animation: cw-step .42s ease-in-out infinite alternate-reverse; }
+.cw-tail { transform-origin: right top; animation: cw-swish .6s ease-in-out infinite alternate; }
+.cw-tuft { animation: cw-tuft .6s ease-in-out infinite alternate; }
+
+@keyframes cw-bob  { from { transform: translateY(0)    scaleY(1);    } to { transform: translateY(-4px) scaleY(1.03); } }
+@keyframes cw-nod  { from { transform: rotate(-4deg); } to { transform: rotate(3deg); } }
+@keyframes cw-step { from { transform: rotate(-20deg); } to { transform: rotate(20deg); } }
+@keyframes cw-swish{ from { transform: rotate(-14deg); } to { transform: rotate(12deg); } }
+@keyframes cw-tuft { from { transform: translate(-3px, -1px); } to { transform: translate(2px, 2px); } }
+@keyframes cw-ground { to { stroke-dashoffset: -22; } }
+@keyframes cw-dust {
+    0%   { opacity: 0;  transform: translate(6px, 0)    scale(.5); }
+    35%  { opacity: .75; }
+    100% { opacity: 0;  transform: translate(-14px, -8px) scale(1.25); }
+}
+
+@media (max-width: 768px) {
+    .cow-run { width: 148px; height: 96px; }
+    .load-box { padding: 20px 22px 18px; }
+    .load-text { font-size: 14.5px; }
+}
+/* 不喜歡動畫的人：牛馬站著不動，訊息照樣看得到 */
+@media (prefers-reduced-motion: reduce) {
+    .cw-body, .cw-head, .cw-leg, .cw-tail, .cw-tuft, .cw-ground, .cw-dust { animation: none !important; }
+    .cw-dust { opacity: .5; }
+}

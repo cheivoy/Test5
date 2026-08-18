@@ -202,30 +202,74 @@
         }
         .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
-        /* ---- 載入：頂部細進度條 + 底部小膠囊（不再蓋一整片） ---- */
-        #load-overlay { position: fixed; inset: 0; display: none; z-index: 60; pointer-events: none; }
-        #load-overlay.show { display: block; }
-        .load-bar {
-            position: absolute; top: 0; left: 0; right: 0; height: 2px;
-            background: color-mix(in srgb, var(--accent) 18%, transparent);
+        /* ---- 加載中：全屏遮罩（擋住重複送出）＋ 奔跑的牛馬 ----
+               兩段式：blocking 從第一毫秒就擋住點擊；show 在 180ms 後才淡入，
+               所以「一下就回來的請求」不會閃一下，慢的請求才看到動畫。 */
+        #load-overlay {
+            position: fixed; inset: 0; z-index: 60; display: none;
+            align-items: center; justify-content: center; padding: 20px;
+            background: transparent;
         }
-        .load-bar > span {
-            display: block; height: 100%; width: 38%; border-radius: 0 2px 2px 0;
-            background: linear-gradient(90deg, transparent, var(--accent), var(--accent-strong));
-            animation: load-slide 1.15s var(--ease) infinite;
+        #load-overlay.blocking { display: flex; }
+        #load-overlay.show {
+            background: color-mix(in srgb, var(--ink) 38%, transparent);
+            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+            animation: fade-in var(--t2) var(--ease) both;
         }
-        @keyframes load-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(363%); } }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        #load-overlay .load-box { display: none; }
+        #load-overlay.show .load-box { display: flex; }
         .load-box {
-            position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
-            display: flex; align-items: center; gap: 9px; padding: 9px 16px; border-radius: 999px;
-            background: color-mix(in srgb, var(--ink) 88%, transparent); color: var(--surface);
-            box-shadow: 0 6px 20px rgba(24,33,52,.22);
-            animation: pill-in var(--t2) var(--ease-out) both;
+            flex-direction: column; align-items: center; gap: 2px; text-align: center;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 20px; padding: 22px 30px 20px; max-width: min(360px, 90vw);
+            box-shadow: 0 12px 40px rgba(24,33,52,.28);
+            animation: pop-in var(--t3) var(--ease-out) both;
         }
-        @keyframes pill-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
-        .load-text { font-size: 13px; font-weight: 600; }
-        .load-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: dot-pulse 1s var(--ease) infinite; }
-        @keyframes dot-pulse { 0%,100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+        @keyframes pop-in { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }
+        .load-text { font-size: 15px; font-weight: 800; color: var(--ink); }
+        .load-sub { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 4px; }
+        .load-escape {
+            margin-top: 12px; padding: 6px 12px; font-size: 11.5px; font-family: inherit; cursor: pointer;
+            color: var(--muted); background: var(--surface-2); border: 1px solid var(--border);
+            border-radius: 999px; display: none;
+        }
+        .load-escape:hover { color: var(--danger); border-color: var(--danger); }
+        #load-overlay.stuck .load-escape { display: inline-block; }
+
+        /* 奔跑的牛馬 */
+        .cow-run { width: 168px; height: 108px; overflow: visible; }
+        .cow-run * { transform-box: fill-box; }
+        .cw-torso, .cw-face, .cw-muzzle, .cw-ear { fill: var(--surface); stroke: var(--accent-strong); stroke-width: 2.4; }
+        .cw-spot { fill: var(--accent-soft); stroke: none; }
+        .cw-eye, .cw-nose, .cw-tuft { fill: var(--accent-strong); stroke: none; }
+        .cw-leg, .cw-tail, .cw-horn { fill: none; stroke: var(--accent-strong); stroke-width: 2.6; stroke-linecap: round; }
+        .cw-ground {
+            fill: none; stroke: var(--border); stroke-width: 2.6; stroke-linecap: round;
+            stroke-dasharray: 12 10; animation: cw-ground .5s linear infinite;
+        }
+        .cw-dust { fill: var(--border); stroke: none; }
+        .d1 { animation: cw-dust .7s var(--ease) infinite; }
+        .d2 { animation: cw-dust .7s var(--ease) .18s infinite; }
+        .d3 { animation: cw-dust .7s var(--ease) .36s infinite; }
+        .cw-body { animation: cw-bob .42s ease-in-out infinite alternate; }
+        .cw-head { transform-origin: 20% 80%; animation: cw-nod .84s ease-in-out infinite alternate; }
+        .cw-leg { transform-origin: center top; }
+        .lg1, .lg4 { animation: cw-step .42s ease-in-out infinite alternate; }
+        .lg2, .lg3 { animation: cw-step .42s ease-in-out infinite alternate-reverse; }
+        .cw-tail { transform-origin: right top; animation: cw-swish .6s ease-in-out infinite alternate; }
+        .cw-tuft { animation: cw-tuft .6s ease-in-out infinite alternate; }
+        @keyframes cw-bob   { from { transform: translateY(0) scaleY(1); } to { transform: translateY(-4px) scaleY(1.03); } }
+        @keyframes cw-nod   { from { transform: rotate(-4deg); } to { transform: rotate(3deg); } }
+        @keyframes cw-step  { from { transform: rotate(-20deg); } to { transform: rotate(20deg); } }
+        @keyframes cw-swish { from { transform: rotate(-14deg); } to { transform: rotate(12deg); } }
+        @keyframes cw-tuft  { from { transform: translate(-3px, -1px); } to { transform: translate(2px, 2px); } }
+        @keyframes cw-ground { to { stroke-dashoffset: -22; } }
+        @keyframes cw-dust {
+            0%   { opacity: 0;  transform: translate(6px, 0) scale(.5); }
+            35%  { opacity: .75; }
+            100% { opacity: 0;  transform: translate(-14px, -8px) scale(1.25); }
+        }
 
         @media (max-width: 640px) {
             body { padding: 16px 12px 32px; }
@@ -329,10 +373,42 @@
     <div id="empty-state" class="muted" style="display:none;">目前沒有開放中的請假場次。</div>
 
     <div class="toast" id="toast"></div>
-    <div id="load-overlay">
-        <div class="load-bar"><span></span></div>
-        <div class="load-box"><span class="load-dot"></span><span class="load-text">努力加載中…</span></div>
+    <div id="load-overlay" role="status" aria-live="polite">
+        <div class="load-box">
+            <svg class="cow-run" viewBox="0 0 150 96" aria-hidden="true">
+                <path class="cw-ground" d="M8 80h134"/>
+                <circle class="cw-dust d1" cx="34" cy="73" r="4"/>
+                <circle class="cw-dust d2" cx="22" cy="69" r="3"/>
+                <circle class="cw-dust d3" cx="13" cy="75" r="2.4"/>
+                <g class="cw-body">
+                    <path class="cw-tail" d="M46 42c-9 2-12 9-11 16"/>
+                    <circle class="cw-tuft" cx="35" cy="60" r="3.2"/>
+                    <path class="cw-leg lg1" d="M56 58v20"/>
+                    <path class="cw-leg lg2" d="M68 58v20"/>
+                    <path class="cw-leg lg3" d="M85 58v20"/>
+                    <path class="cw-leg lg4" d="M96 58v20"/>
+                    <rect class="cw-torso" x="47" y="32" width="60" height="28" rx="14"/>
+                    <ellipse class="cw-spot" cx="63" cy="42" rx="7" ry="5.4"/>
+                    <ellipse class="cw-spot" cx="87" cy="51" rx="5" ry="3.8"/>
+                    <g class="cw-head">
+                        <path class="cw-horn" d="M103 25c-2.5-5 .5-8.5 4-7.5"/>
+                        <path class="cw-horn" d="M121 25c2.5-5-.5-8.5-4-7.5"/>
+                        <ellipse class="cw-ear" cx="102" cy="30" rx="4.2" ry="3"/>
+                        <ellipse class="cw-ear" cx="122" cy="30" rx="4.2" ry="3"/>
+                        <rect class="cw-face" x="100" y="24" width="24" height="27" rx="11.5"/>
+                        <ellipse class="cw-muzzle" cx="112" cy="44" rx="9" ry="6.4"/>
+                        <circle class="cw-eye" cx="107" cy="34" r="1.7"/>
+                        <circle class="cw-eye" cx="118" cy="34" r="1.7"/>
+                        <circle class="cw-nose" cx="108.6" cy="44.5" r="1.2"/>
+                        <circle class="cw-nose" cx="115.4" cy="44.5" r="1.2"/>
+                    </g>
+                </g>
+            </svg>
+            <div class="load-text">牛馬正在為你全速加載</div>
+            <div class="load-sub">牛馬就要有牛馬的樣子，效率那是額外價錢！！</div>
+            <button class="load-escape" onclick="forceHideLoading()">等太久了？點這裡取消等待</button>
+        </div>
     </div>
 
-    <script src="leave.js?v=7"></script>
+    <script src="leave.js?v=8"></script>
 </body></html>

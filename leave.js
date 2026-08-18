@@ -28,31 +28,49 @@ function toast(msg) {
     setTimeout(() => el.classList.remove('show'), 1800);
 }
 
-// 載入指示：大多數請求 200ms 內就回來，馬上顯示只會閃一下 → 等 160ms 才顯示
-let _lc = 0, _lcTimer = null, _lcShown = false;
-function _lcSet(on) {
-    _lcShown = on;
-    document.getElementById('load-overlay')?.classList.toggle('show', on);
-}
+// 加載指示（與後台同一套）：呼叫的那一刻就蓋上全屏遮罩擋住重複點擊，
+// 畫面（牛馬動畫）等 180ms 才淡入，短請求完全不閃；卡超過 8 秒給「取消等待」。
+const LOAD_REVEAL_MS = 180, LOAD_STUCK_MS = 8000;
+let _lc = 0, _lcReveal = null, _lcStuck = null;
+function _lcEl() { return document.getElementById('load-overlay'); }
 function showLoading(t) {
     _lc++;
     if (t) { const x = document.querySelector('#load-overlay .load-text'); if (x) x.textContent = t; }
-    if (_lcShown || _lcTimer) return;
-    _lcTimer = setTimeout(() => { _lcTimer = null; if (_lc > 0) _lcSet(true); }, 160);
+    if (_lc > 1) return;
+    _lcEl()?.classList.add('blocking');
+    _lcReveal = setTimeout(() => { _lcEl()?.classList.add('show'); }, LOAD_REVEAL_MS);
+    _lcStuck = setTimeout(() => { _lcEl()?.classList.add('stuck'); }, LOAD_STUCK_MS);
 }
 function hideLoading() {
     _lc = Math.max(0, _lc - 1);
     if (_lc > 0) return;
-    if (_lcTimer) { clearTimeout(_lcTimer); _lcTimer = null; }
-    if (_lcShown) _lcSet(false);
+    forceHideLoading();
 }
+function forceHideLoading() {
+    _lc = 0;
+    clearTimeout(_lcReveal); _lcReveal = null;
+    clearTimeout(_lcStuck); _lcStuck = null;
+    _lcEl()?.classList.remove('blocking', 'show', 'stuck');
+}
+
+// 每個打後端的請求都自動蓋遮罩 → 請假／取消／建檔／改名／長期請假都不可能重複送出
+(function installApiLoadingGuard() {
+    const orig = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const isApi = url.startsWith(WORKER_URL);
+        if (isApi) showLoading();
+        try { return await orig(input, init); }
+        finally { if (isApi) hideLoading(); }
+    };
+})();
 
 async function loadBoard() {
     if (!shareId) {
         document.getElementById('sub-line').textContent = "⚠️ 連結無效（缺少 share 參數）";
         return;
     }
-    showLoading('努力加載中…');
+    showLoading('牛馬正在為你全速加載');
     try {
         // 用 public/board（新舊後端都有這條路徑，避免版本不一致時卡「唯讀模式」）
         const res = await fetch(`${WORKER_URL}/api/leave/public/board?share=${encodeURIComponent(shareId)}&t=${Date.now()}`, { cache: "no-store" });
