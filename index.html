@@ -7,7 +7,7 @@
     <!-- ⚡ Chart.js 改成 defer：原本是 head 裡的阻擋式載入，205KB 沒下載完畫面不會出來。
          圖表都是在 window.onload 之後才用到，defer 一定來得及。版本也釘住方便瀏覽器快取。 -->
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="style.css?v=45">
+    <link rel="stylesheet" href="style.css?v=46">
 </head>
 
 <body>
@@ -833,9 +833,14 @@
             </svg>
             <div class="load-text">牛馬正在為你全速加載</div>
             <div class="load-sub">牛馬就要有牛馬的樣子，效率那是額外價錢！！</div>
+            <!-- 只有「同步／待確認」這種純讀取的操作會出現（.can-bg 才顯示） -->
+            <button class="load-bg" onclick="sendLoadingToBackground()">後臺進行（不影響使用）</button>
             <button class="load-escape" onclick="forceHideLoading()">等太久了？點這裡取消等待</button>
         </div>
     </div>
 
-    <script src="app.js?v=53"></script>
+    <!-- 已丟到後臺時的小指示（左下角，不擋任何東西） -->
+    <div id="bg-pill"><span class="bg-dot"></span>牛馬在後臺繼續跑…</div>
+
+    <script src="app.js?v=54"></script>
 </body></html>

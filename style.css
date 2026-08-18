@@ -1033,3 +1033,41 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     .cw-body, .cw-head, .cw-leg, .cw-tail, .cw-tuft, .cw-ground, .cw-dust { animation: none !important; }
     .cw-dust { opacity: .5; }
 }
+
+/* ---- 「後臺進行」：只有成員檔案室的同步／待確認會出現（純讀取，丟後臺是安全的） ---- */
+.load-bg {
+    display: none; margin-top: 14px; padding: 9px 16px;
+    font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
+    color: var(--accent-strong); background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+    border-radius: 999px;
+    transition: background var(--t2) var(--ease), border-color var(--t2) var(--ease), transform var(--t1) var(--ease);
+}
+.load-bg:hover { background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border-color: var(--accent); }
+.load-bg:active { transform: scale(.97); }
+#loading-overlay.can-bg .load-bg { display: inline-block; }
+/* 有「後臺進行」時，取消等待就退成次要選項 */
+#loading-overlay.can-bg .load-escape { margin-top: 8px; }
+
+/* 丟到後臺後的小指示：左下角，不擋任何操作 */
+#bg-pill {
+    position: fixed; left: 16px; bottom: 16px; z-index: 3900;
+    display: none; align-items: center; gap: 8px;
+    padding: 9px 15px; border-radius: 999px;
+    background: color-mix(in srgb, var(--ink) 88%, transparent); color: var(--surface);
+    font-size: 12.5px; font-weight: 600; box-shadow: 0 6px 20px rgba(24,33,52,.22);
+    pointer-events: none;
+    animation: pill-up var(--t3) var(--ease-out) both;
+}
+#bg-pill.show { display: flex; }
+@keyframes pill-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.bg-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0;
+    animation: bg-dot-pulse 1s var(--ease) infinite;
+}
+@keyframes bg-dot-pulse { 0%, 100% { opacity: .35; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+@media (max-width: 768px) {
+    /* 手機底部有分頁列 → 往上挪，別壓在上面 */
+    #bg-pill { left: 12px; right: 12px; bottom: calc(78px + env(safe-area-inset-bottom)); justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) { .bg-dot { animation: none; opacity: 1; } }

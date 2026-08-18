@@ -30,13 +30,21 @@ let subMapByWin = {}; // 代替上號：`日期|場次|類型` -> { 本人member
 // 卡超過 8 秒會出現「取消等待」，全屏遮罩不能讓人真的鎖死在裡面。
 const LOAD_STUCK_MS = 8000;
 let _loadingCount = 0, _loadStuckTimer = null;
+// 「後臺進行」：只有成員檔案室的同步／待確認提供這個選項——它們是純讀取＋重新彙整，
+// 中途不會改到使用者正在編輯的東西，丟到後臺跑完再回報是安全的。
+let _bgOffered = false;    // 目前操作可不可以丟後臺（決定按鈕出不出現）
+let _bgSuppress = false;   // 已經丟到後臺 → 這段期間不再蓋遮罩
+let _bgHideIds = [];       // 一併收起來的自有彈窗（完成時再打開，讓使用者看到結果）
 function _loadEl() { return document.getElementById('loading-overlay'); }
 function showLoading(text) {
     _loadingCount++;
     if (text) { const t = document.querySelector('#loading-overlay .load-text'); if (t) t.textContent = text; }
-    if (_loadingCount > 1) return;                       // 已經在擋了
-    _loadEl()?.classList.add('show');
     document.getElementById('load-bar')?.classList.add('show');
+    if (_bgSuppress) return;                             // 已丟到後臺 → 只留頂部細線
+    if (_loadingCount > 1) return;                       // 已經在擋了
+    const el = _loadEl();
+    el?.classList.add('show');
+    el?.classList.toggle('can-bg', _bgOffered);
     _loadStuckTimer = setTimeout(() => { _loadEl()?.classList.add('stuck'); }, LOAD_STUCK_MS);
 }
 function hideLoading() {
@@ -47,9 +55,38 @@ function hideLoading() {
 // 逃生出口：卡住時把等待狀態整個重設（畫面不會再被鎖住）
 function forceHideLoading() {
     _loadingCount = 0;
+    _bgSuppress = false;
     clearTimeout(_loadStuckTimer); _loadStuckTimer = null;
-    _loadEl()?.classList.remove('show', 'stuck');
+    _loadEl()?.classList.remove('show', 'stuck', 'can-bg');
     document.getElementById('load-bar')?.classList.remove('show');
+    document.getElementById('bg-pill')?.classList.remove('show');
+}
+
+// 把目前這個操作丟到後臺：收起遮罩（不動計數，請求繼續跑），改用左下角的小指示。
+function sendLoadingToBackground() {
+    if (!_bgOffered) return;
+    _bgSuppress = true;
+    clearTimeout(_loadStuckTimer); _loadStuckTimer = null;
+    _loadEl()?.classList.remove('show', 'stuck', 'can-bg');
+    _bgHideIds.forEach(id => { const m = document.getElementById(id); if (m) m.style.display = 'none'; });
+    document.getElementById('bg-pill')?.classList.add('show');
+}
+
+// 包住「可以丟後臺」的操作。hideIds：這個操作自己開的彈窗，丟後臺時一起收、跑完再打開。
+async function runBackgroundable(fn, text, hideIds) {
+    _bgOffered = true;
+    _bgHideIds = hideIds || [];
+    showLoading(text);
+    try {
+        return await fn();
+    } finally {
+        const wasBg = _bgSuppress;
+        const ids = _bgHideIds;
+        _bgOffered = false; _bgSuppress = false; _bgHideIds = [];
+        hideLoading();
+        // 在後臺跑完 → 把它自己的彈窗打開，使用者才看得到結果
+        if (wasBg) ids.forEach(id => { const m = document.getElementById(id); if (m) m.style.display = 'flex'; });
+    }
 }
 
 // 線性圖標：統一從 index.html 的 sprite 取用（取代 emoji）
@@ -847,7 +884,11 @@ async function confirmRosterResolve() {
 }
 
 // 名冊頁「待確認名單」：掃全部歷史戰報，補處理任何漏網的陌生名字
+// 待確認：純讀取（掃出還沒對照到名冊的陌生名字）→ 可以丟後臺
 async function checkUnresolvedRoster() {
+    return runBackgroundable(_checkUnresolvedRosterImpl, '牛馬正在為你全速加載');
+}
+async function _checkUnresolvedRosterImpl() {
     if (storageMode !== 'cloud' || !currentUser) { alert('請先登入雲端帳號'); return; }
     try {
         const res = await fetch(WORKER_URL + "/api/roster/unresolved?t=" + Date.now(), {
@@ -2379,7 +2420,12 @@ async function saveOverride() {
 // =====================================================
 // ===  ✅ 成員同步 / 資料清洗
 // =====================================================
+// 同步：重抓完整戰報再重新彙整（最花時間的是下載）→ 可以丟後臺，
+// 它自己的「同步報告」彈窗會一起收起來，跑完再打開讓使用者看結果。
 async function syncMemberData() {
+    return runBackgroundable(_syncMemberDataImpl, '牛馬正在為你全速加載', ['sync-report-modal']);
+}
+async function _syncMemberDataImpl() {
     const modal = document.getElementById('sync-report-modal');
     const loadingDiv = document.getElementById('sync-report-loading');
     const resultDiv = document.getElementById('sync-report-result');
