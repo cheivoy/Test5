@@ -108,7 +108,7 @@ async function loadStatsInputs(env, owner, fromDate, toDate) {
         "FROM leave_substitutes ls JOIN leave_windows w ON ls.window_id = w.window_id AND ls.owner = w.owner WHERE ls.owner = ?", owner),
       P("SELECT window_id, match_type, event_date, session FROM leave_windows WHERE owner = ?", owner),
       P("SELECT window_id, member_id, action, created_at FROM leave_actions WHERE owner = ? ORDER BY created_at ASC", owner),
-      P("SELECT member_id, from_date, to_date FROM long_leaves WHERE owner = ?", owner),
+      P("SELECT member_id, from_date, to_date, created_at FROM long_leaves WHERE owner = ?", owner),
       P("SELECT member_id, attendance_override, leave_override, reserve_override, overrides_json, version FROM stat_overrides WHERE owner = ?", owner)
     ]);
     const rows = (i) => (res[i] && res[i].results) || [];
@@ -283,10 +283,11 @@ async function computeLeaveStats(env, owner, fromDate, toDate, facts, inputs) {
   const lateState = {};    // 臨時請假
   const noshowState = {};  // No-show（說要來卻沒來，另計、不併入請假）
   const attendState = {};  // 補登出席
+  const leaveActionAt = {}; // key -> 最後一次單場請假/取消的時間，用來和長期請假比先後
   for (const a of results || []) {
     const key = a.window_id + "|" + a.member_id;
-    if (a.action === 'leave_request') leaveState[key] = true;
-    else if (a.action === 'leave_cancel') leaveState[key] = false;
+    if (a.action === 'leave_request') { leaveState[key] = true; leaveActionAt[key] = a.created_at || 0; }
+    else if (a.action === 'leave_cancel') { leaveState[key] = false; leaveActionAt[key] = a.created_at || 0; }
     else if (a.action === 'reserve_set') reserveState[key] = true;
     else if (a.action === 'reserve_unset') reserveState[key] = false;
     else if (a.action === 'late_set') lateState[key] = true;
@@ -343,16 +344,27 @@ async function computeLeaveStats(env, owner, fromDate, toDate, facts, inputs) {
   let longLeaves = [];
   try {
     longLeaves = (inputs ? inputs.longLeaves : (await env.DB.prepare(
-      "SELECT member_id, from_date, to_date FROM long_leaves WHERE owner = ?"
+      "SELECT member_id, from_date, to_date, created_at FROM long_leaves WHERE owner = ?"
     ).bind(owner).all()).results) || [];
-  } catch (e) { longLeaves = []; }
+  } catch (e) {
+    try {
+      // 舊資料庫可能沒有 created_at → 退回不帶時間（等同單場動作一律優先）
+      longLeaves = (await env.DB.prepare(
+        "SELECT member_id, from_date, to_date FROM long_leaves WHERE owner = ?"
+      ).bind(owner).all()).results || [];
+    } catch (e2) { longLeaves = []; }
+  }
   for (const ll of longLeaves) {
     for (const wid in winDate) {
       const d = winDate[wid];
       if (!d || d < ll.from_date || d > ll.to_date) continue;
       if (!inRange(wid)) continue;
       const key = wid + "|" + ll.member_id;
-      if (key in leaveState) continue; // 單場明確動作（請假或取消）優先
+      // 單場明確動作 vs 長期請假：以「比較晚做的那個」為準。
+      // 先取消單場、之後才補長期請假 → 應該回到請假（不然「長期請假生效中」卻不在名單裡）。
+      // 反之長期請假期間單場又取消 → 尊重取消。
+      if (leaveState[key]) continue;      // 已經算過請假（單場請假或前一筆長期）
+      if ((key in leaveState) && (leaveActionAt[key] || 0) >= (ll.created_at || 0)) continue;
       if (attendedSet.has(key)) continue; // 該場已上場（戰報）→ 不算長期請假
       const t = winType[wid] || '幫戰';
       const m = ensureMember(ll.member_id);
@@ -1999,9 +2011,10 @@ export default {
           "SELECT member_id, action, created_at FROM leave_actions WHERE owner = ? AND window_id = ? ORDER BY created_at ASC"
         ).bind(user, windowId).all();
         const st = { leave: {}, reserve: {}, noshow: {}, late: {}, attend: {} };
+        const leaveAt = {}; // member_id -> 最後一次請假/取消的時間，用來和長期請假比先後
         for (const a of results || []) {
-          if (a.action === 'leave_request') st.leave[a.member_id] = true;
-          else if (a.action === 'leave_cancel') st.leave[a.member_id] = false;
+          if (a.action === 'leave_request') { st.leave[a.member_id] = true; leaveAt[a.member_id] = a.created_at || 0; }
+          else if (a.action === 'leave_cancel') { st.leave[a.member_id] = false; leaveAt[a.member_id] = a.created_at || 0; }
           else if (a.action === 'reserve_set') st.reserve[a.member_id] = true;
           else if (a.action === 'reserve_unset') st.reserve[a.member_id] = false;
           else if (a.action === 'noshow_set') st.noshow[a.member_id] = true;
@@ -2017,10 +2030,11 @@ export default {
           const win = await env.DB.prepare("SELECT event_date FROM leave_windows WHERE window_id = ? AND owner = ?").bind(windowId, user).first();
           if (win?.event_date) {
             const { results: lls } = await env.DB.prepare(
-              "SELECT member_id FROM long_leaves WHERE owner = ? AND from_date <= ? AND to_date >= ?"
+              "SELECT member_id, created_at FROM long_leaves WHERE owner = ? AND from_date <= ? AND to_date >= ?"
             ).bind(user, win.event_date, win.event_date).all();
             (lls || []).forEach(l => {
-              if (st.leave[l.member_id] === false) return; // 該場明確取消過 → 尊重
+              // 和 computeLeaveStats 同一套規則：單場取消 vs 長期請假，以比較晚做的為準
+              if (st.leave[l.member_id] === false && (leaveAt[l.member_id] || 0) >= (l.created_at || 0)) return;
               st.leave[l.member_id] = true;
               longSet.add(l.member_id);
             });

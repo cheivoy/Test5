@@ -3136,6 +3136,7 @@ function renderLeaveBoardList() {
 }
 
 // ---- 長期／預先請假（管理員） ----
+let longLeavesCache = [];
 async function loadLongLeaves() { return withLoading(_loadLongLeavesImpl, '努力加載中…'); }
 async function _loadLongLeavesImpl() {
     // 成員 datalist（沿用名冊）
@@ -3146,20 +3147,35 @@ async function _loadLongLeavesImpl() {
     const _t = ymd(new Date());
     const llf = document.getElementById('ll-from'), llt = document.getElementById('ll-to');
     if (llf) llf.min = _t; if (llt) llt.min = _t;
-    let rows = [];
     try {
         const res = await fetch(WORKER_URL + "/api/leave/long?t=" + Date.now(), {
             cache: "no-store", headers: { 'Authorization': 'Bearer ' + currentUser.token }
         });
-        rows = await res.json();
-    } catch (e) { rows = []; }
+        longLeavesCache = await res.json();
+    } catch (e) { longLeavesCache = []; }
+    if (!Array.isArray(longLeavesCache)) longLeavesCache = [];
+    renderLongLeaves();
+}
+
+// 預設只顯示還沒過期的（迄日 >= 今天）；勾「顯示已過期」才把舊的一起列出來
+function renderLongLeaves() {
     const el = document.getElementById('long-leave-list');
     if (!el) return;
-    if (!Array.isArray(rows) || !rows.length) {
-        el.innerHTML = '<div style="color:var(--muted); font-size:13px; padding:6px;">目前沒有長期／預先請假。</div>';
+    const today = ymd(new Date());
+    const all = longLeavesCache || [];
+    const showExpired = !!document.getElementById('ll-show-expired')?.checked;
+    const expiredCount = all.filter(r => r.to_date < today).length;
+    const hint = document.getElementById('ll-expired-hint');
+    if (hint) hint.textContent = expiredCount
+        ? (showExpired ? `（含 ${expiredCount} 筆已過期）` : `已隱藏 ${expiredCount} 筆已過期`)
+        : '';
+    const rows = showExpired ? all : all.filter(r => r.to_date >= today);
+    if (!rows.length) {
+        el.innerHTML = all.length
+            ? '<div style="color:var(--muted); font-size:13px; padding:6px;">目前沒有生效中的長期／預先請假（勾「顯示已過期」可看舊紀錄）。</div>'
+            : '<div style="color:var(--muted); font-size:13px; padding:6px;">目前沒有長期／預先請假。</div>';
         return;
     }
-    const today = ymd(new Date());
     el.innerHTML = rows.map(r => {
         // 只要迄日還沒過（含未來場次）就算生效中——它已在自動涵蓋範圍內的場次，不用等到當天
         const effective = r.to_date >= today;
