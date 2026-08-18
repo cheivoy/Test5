@@ -56,6 +56,8 @@ let currentUser = null;
 const LOCALSTORAGE_HISTORIES_KEY = 'nsh_local_histories';
 const LOCALSTORAGE_MEMBERS_KEY = 'nsh_local_members';
 const LOCALSTORAGE_USER_KEY = 'nsh_current_user';
+// 使用者在首頁按過「本地模式（訪客）」＝已經做過選擇，之後不再擋在選擇畫面
+const LOCALSTORAGE_GUEST_KEY = 'nsh_guest_ack';
 
 function getLocalHistories() {
     try { return JSON.parse(localStorage.getItem(LOCALSTORAGE_HISTORIES_KEY) || '[]'); } catch (e) { return []; }
@@ -104,6 +106,163 @@ function updateModeBanner() {
         if (sessionsBtn) sessionsBtn.style.display = 'none';
         if (shareNote) shareNote.style.display = '';
     }
+}
+
+// =====================================================
+// ===  登入失效偵測
+// ===  token 可能在別的裝置被登出、session 被清、或密碼改過 → 之後每個帶 token 的
+// ===  請求都會 401。以前這種情況畫面只會靜靜地空掉（看起來像「系統又壞了」），
+// ===  所以在 fetch 外面包一層統一攔 401，一次提示、清掉失效的登入狀態。
+// =====================================================
+let _authExpiryNotified = false;
+function installAuthExpiryGuard() {
+    const orig = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+        const res = await orig(input, init);
+        try {
+            if (res.status === 401) {
+                const url = typeof input === 'string' ? input : (input && input.url) || '';
+                // 帳密錯誤的 401 不算「登入失效」，不要把人踢掉
+                const isAuthAttempt = /\/api\/(auth\/(login|register)|change-password)/.test(url);
+                if (url.startsWith(WORKER_URL) && !isAuthAttempt && currentUser) onAuthExpired();
+            }
+        } catch (e) { /* 攔截失敗不能影響原本的請求 */ }
+        return res;
+    };
+}
+
+function onAuthExpired() {
+    if (_authExpiryNotified) return;   // 一個動作可能同時打好幾個 API，只提示一次
+    _authExpiryNotified = true;
+    currentUser = null;
+    storageMode = 'local';
+    localStorage.removeItem(LOCALSTORAGE_USER_KEY);
+    authExpired = true;
+    updateModeBanner();
+    switchPage('home');   // 內含 renderHome()
+    // 等當下的載入遮罩收掉再提示，不然 alert 會卡在轉圈畫面上
+    setTimeout(() => {
+        alert('⚠️ 登入已失效，請重新登入。\n（可能是在其他裝置登出，或密碼被改過）');
+        openAuthModal();
+    }, 60);
+}
+
+// =====================================================
+// ===  首頁（預設分頁）
+// ===  未登入且沒選過模式 → 先讓使用者挑「登入」或「本地訪客」；
+// ===  進入後顯示目前模式、資料量與快速入口；完全沒資料時明講「尚未導入任何資料」。
+// =====================================================
+let guestAck = false;
+let authExpired = false;   // token 失效過 → 首頁掛一條紅色提示，不只是彈一次視窗
+
+function enterGuestMode() {
+    guestAck = true;
+    localStorage.setItem(LOCALSTORAGE_GUEST_KEY, '1');
+    authExpired = false;
+    updateModeBanner();
+    renderHome();
+}
+
+function homeDataCount() {
+    // 雲端看已載入的列表；本地看 localStorage（還沒載完時也不會誤報成 0）
+    if (storageMode === 'cloud' && currentUser) return Array.isArray(allHistories) ? allHistories.length : 0;
+    return getLocalHistories().length;
+}
+
+function renderHome() {
+    const el = document.getElementById('home-mount');
+    if (!el) return;
+    const card = (inner, extra) => `<div class="home-card" ${extra || ''}>${inner}</div>`;
+    const jump = (icon, label, page) =>
+        `<button class="home-jump" onclick="switchPage('${page}')"><span>${icon}</span>${label}</button>`;
+
+    let html = `<div class="home-hero">
+        <div class="home-logo">NSH</div>
+        <h1>戰績管理 Pro</h1>
+        <p>解析戰報、管理成員名冊、統計出席與請假</p>
+    </div>`;
+
+    if (authExpired) {
+        html += card(`<div class="home-alert">
+            <b>⚠️ 登入已失效</b>
+            <span>可能是在其他裝置登出、或密碼改過了。請重新登入才能讀寫雲端資料。</span>
+            <button class="btn btn-primary" onclick="openAuthModal()">🔑 重新登入</button>
+        </div>`);
+    }
+
+    // ── 唯讀分享訪客：不需要登入，也不該看到模式選擇 ──
+    if (shareId || isViewMode) {
+        const n = Array.isArray(allHistories) ? allHistories.length : 0;
+        html += card(`<div class="home-status"><span class="home-pill view">👁️ 唯讀查看模式</span>
+            <small>透過分享連結進入，可以看戰報與統計，不能修改。</small></div>
+            <div class="home-stat"><b>${n}</b><small>可查看的戰報</small></div>`);
+        html += `<div class="home-jumps">${jump('📊', '戰報解析', 'report')}${jump('👥', '成員檔案室', 'db')}</div>`;
+        el.innerHTML = html;
+        return;
+    }
+
+    // ── 還沒選過：登入 or 本地訪客 ──
+    if (!currentUser && !guestAck) {
+        html += `<div class="home-choose">
+            <button class="home-opt" onclick="openAuthModal()">
+                <span class="home-opt-ic">🔑</span>
+                <b>登入 / 註冊</b>
+                <small>資料存在雲端，換裝置也看得到。可用請假管理、Discord 通知、分享連結。</small>
+                <span class="home-opt-go">開始 →</span>
+            </button>
+            <button class="home-opt" onclick="enterGuestMode()">
+                <span class="home-opt-ic">💾</span>
+                <b>本地模式（訪客）</b>
+                <small>資料只存在這台裝置的瀏覽器，不用註冊就能先試用。之後登入可以整批同步上雲。</small>
+                <span class="home-opt-go">直接使用 →</span>
+            </button>
+        </div>
+        <p class="home-foot">清瀏覽器資料會讓本地模式的戰報消失；要長期保存請登入雲端。</p>`;
+        el.innerHTML = html;
+        return;
+    }
+
+    // ── 已進入（雲端或本地）──
+    const cloud = storageMode === 'cloud' && !!currentUser;
+    const n = homeDataCount();
+    html += card(`<div class="home-status">
+        ${cloud
+            ? `<span class="home-pill cloud">☁️ 雲端模式</span><small>${currentUser.username}${currentUser.guild ? '　·　' + currentUser.guild : ''}</small>`
+            : `<span class="home-pill local">💾 本地模式（訪客）</span><small>資料只存在這台裝置</small>`}
+        <div class="home-status-act">
+            ${cloud
+            ? `<button class="btn btn-outline" onclick="switchPage('me')">👤 我的</button>`
+            : `<button class="btn btn-primary" onclick="openAuthModal()">🔑 登入 / 註冊</button>`}
+        </div>
+    </div>`);
+
+    if (n === 0) {
+        // 這是「登入後沒有任何資料」要看到的畫面
+        html += card(`<div class="home-empty">
+            <div class="home-empty-ic">📭</div>
+            <b>尚未導入任何資料</b>
+            <span>${cloud
+                ? '這個帳號的雲端還沒有任何戰報。導入 CSV 之後，戰報解析、成員檔案室與出席統計才會有內容。'
+                : '這台裝置還沒有任何戰報。導入 CSV 之後就能開始分析。'}</span>
+            ${isViewMode ? '' : `<button class="btn btn-primary" onclick="openImportModal()">📁 立即導入戰報</button>`}
+        </div>`);
+    } else {
+        const latest = [...allHistories].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+        html += card(`<div class="home-stats">
+            <div class="home-stat"><b>${n}</b><small>已導入戰報</small></div>
+            <div class="home-stat"><b>${latest?.date || '—'}</b><small>最近一場</small></div>
+            <div class="home-stat"><b>${latest?.guild_a || '—'}</b><small>最近對手記錄</small></div>
+        </div>`);
+    }
+
+    html += `<div class="home-jumps">
+        ${jump('📊', '戰報解析', 'report')}
+        ${jump('👥', '成員檔案室', 'db')}
+        ${cloud && !isViewMode ? jump('🗓️', '請假管理', 'leave') : ''}
+        ${jump('👤', '我的', 'me')}
+    </div>`;
+    if (!cloud) html += `<p class="home-foot">本地模式沒有請假管理與 Discord 通知；登入後這些才會出現。</p>`;
+    el.innerHTML = html;
 }
 
 // =====================================================
@@ -179,8 +338,12 @@ async function doLogin() {
         currentUser = { username: data.username, token: data.token, guild: data.guild, share_id: data.share_id };
         localStorage.setItem(LOCALSTORAGE_USER_KEY, JSON.stringify(currentUser));
         storageMode = 'cloud';
+        // 重新登入成功 → 清掉失效提示，下次真的再失效時還要能再提示一次
+        authExpired = false;
+        _authExpiryNotified = false;
         closeModal('auth-modal');
         updateModeBanner();
+        renderHome();
         const localHists = getLocalHistories();
         if (localHists.length > 0) {
             if (confirm(`⚠️ 偵測到本地有 ${localHists.length} 場戰報尚未同步！\n是否立即同步到雲端？\n（取消可稍後手動點「☁️ 同步到雲端」）`)) {
@@ -188,6 +351,7 @@ async function doLogin() {
             }
         }
         await fetchAllHistories();
+        renderHome();   // 資料量變了 → 首頁的統計/「尚未導入」要跟著更新
         if (document.getElementById('page-db').style.display !== 'none') loadDbData();
     } catch (e) { msgEl.textContent = '連線失敗: ' + e.message; }
 }
@@ -205,8 +369,15 @@ async function logoutUser() {
     currentUser = null;
     storageMode = 'local';
     localStorage.removeItem(LOCALSTORAGE_USER_KEY);
+    // 主動登出＝重新做選擇 → 回到首頁的「登入 / 本地訪客」畫面
+    localStorage.removeItem(LOCALSTORAGE_GUEST_KEY);
+    guestAck = false;
+    authExpired = false;
+    _authExpiryNotified = false;
     updateModeBanner();
-    fetchAllHistories();
+    switchPage('home');
+    await fetchAllHistories();
+    renderHome();
 }
 
 // =====================================================
@@ -296,11 +467,13 @@ const shareId = urlParams.get('share');
 // ===  初始化
 // =====================================================
 window.onload = async () => {
+    installAuthExpiryGuard();   // 要在任何 API 呼叫之前裝好
     const savedUser = localStorage.getItem(LOCALSTORAGE_USER_KEY);
     if (savedUser) {
         try { currentUser = JSON.parse(savedUser); storageMode = 'cloud'; }
         catch (e) { currentUser = null; storageMode = 'local'; }
     }
+    guestAck = localStorage.getItem(LOCALSTORAGE_GUEST_KEY) === '1';
 
     if (isViewMode) {
         document.querySelectorAll('.admin-only').forEach(el => el.remove());
@@ -322,11 +495,13 @@ window.onload = async () => {
     updateModeBanner();
     initSections();
     layoutForViewport();
-    switchPage('report'); // 初始化頂欄/分頁/FAB 狀態
+    switchPage('home'); // 預設落在首頁（也一併初始化頂欄/分頁/FAB 狀態）
 
     await fetchAllHistories();
+    renderHome();       // 戰報載完才知道到底有沒有資料
     const reportId = urlParams.get('id');
-    if (reportId) viewHistory(reportId);
+    // 連結直接指定某場戰報 → 不要把人留在首頁
+    if (reportId) { switchPage('report'); viewHistory(reportId); }
 
     // ✅ 修復：改用 token 方式接收共享戰報
     const transferToken = urlParams.get('transfer');
@@ -4581,11 +4756,11 @@ async function loadAuditLog() {
 // ===  UI 工具函數
 // =====================================================
 let currentPageId = 'report';
-const PAGE_TITLES = { report: '戰報解析', db: '成員檔案室', leave: '請假管理', me: '我的' };
+const PAGE_TITLES = { home: '首頁', report: '戰報解析', db: '成員檔案室', leave: '請假管理', me: '我的' };
 
 function switchPage(p) {
     currentPageId = p;
-    ['report', 'db', 'leave', 'me'].forEach(x => {
+    ['home', 'report', 'db', 'leave', 'me'].forEach(x => {
         const el = document.getElementById('page-' + x);
         if (el) el.style.display = (x === p) ? 'block' : 'none';
     });
@@ -4599,6 +4774,7 @@ function switchPage(p) {
     updateTopbarContext(p);
     updateFab(p);
     window.scrollTo(0, 0);
+    if (p === 'home') renderHome();
     if (p === 'db') {
         // 範圍沒變又沒有任何寫入 → 沿用已算好的結果，切分頁不用再等一輪
         const r = getDbTimeRange();

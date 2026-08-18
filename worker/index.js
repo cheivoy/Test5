@@ -1346,8 +1346,18 @@ export default {
       // 🔒 權限檢查函式
       // =========================
       const requireAuth = () => {
-        if (!user) throw new Error("未授權");
+        // 沒登入／token 失效要回 401（不是 500）。前端靠這個狀態碼才分得出
+        // 「你該重新登入了」和「伺服器壞了」——只看 500 的話畫面只會靜靜地空掉。
+        if (!user) { const e = new Error("登入已失效，請重新登入"); e.httpStatus = 401; throw e; }
       };
+
+      // 唯讀端點在找不到 owner 時本來一律回空資料（本地模式沒帶 token，這樣是對的）。
+      // 但「帶了 token 卻查不到使用者」＝token 失效，回空的話畫面只會靜靜地空掉，
+      // 使用者完全不知道要重新登入 → 這種情況明確回 401。
+      const staleToken = () => !!token && !user;
+      const emptyOr401 = (empty) => staleToken()
+        ? json({ error: "登入已失效，請重新登入" }, 401)
+        : json(empty);
 
       // =========================
       // 📜 戰報列表
@@ -1459,7 +1469,7 @@ export default {
       if (url.pathname === "/api/db-bundle") {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
-        if (!owner) return json({ aliases: [], roster: [], substitutes: [], members: [], attendance: [], leaveStats: {}, overrides: [] });
+        if (!owner) return emptyOr401({ aliases: [], roster: [], substitutes: [], members: [], attendance: [], leaveStats: {}, overrides: [] });
         const fromDate = url.searchParams.get("from") || null;
         const toDate = url.searchParams.get("to") || null;
         const computedMode = url.searchParams.get("computed") === "1";
@@ -1882,7 +1892,7 @@ export default {
       if (url.pathname === "/api/overrides") {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
-        if (!owner) return json([]);
+        if (!owner) return emptyOr401([]);
         return json(await loadOverridesFor(env, owner));
       }
 
@@ -1892,7 +1902,7 @@ export default {
       if (url.pathname === "/api/leave/windows" && request.method === "GET") {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
-        if (!owner) return json([]);
+        if (!owner) return emptyOr401([]);
         let results;
         try {
           ({ results } = await env.DB.prepare(
@@ -2380,7 +2390,7 @@ export default {
       if (url.pathname === "/api/leave/attendance" && request.method === "GET") {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
-        if (!owner) return json([]);
+        if (!owner) return emptyOr401([]);
         return json(await loadAttendanceFor(env, owner));
       }
 
@@ -2388,7 +2398,7 @@ export default {
       if (url.pathname === "/api/leave/substitutes" && request.method === "GET") {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
-        if (!owner) return json([]);
+        if (!owner) return emptyOr401([]);
         return json(await loadSubstitutesFor(env, owner));
       }
 
@@ -2471,7 +2481,7 @@ export default {
       if (url.pathname === "/api/leave/stats") {
         let owner = user;
         if (isShareMode) owner = await getShareOwner();
-        if (!owner) return json({});
+        if (!owner) return emptyOr401({});
         const fromDate = url.searchParams.get("from") || null;
         const toDate = url.searchParams.get("to") || null;
         const stats = await computeLeaveStats(env, owner, fromDate, toDate);
@@ -2486,7 +2496,7 @@ export default {
         let owner = user;
         let openOnly = false;
         if (isShareMode) { owner = await getShareOwner(); openOnly = true; }
-        if (!owner) return json({ guild: "", windows: [], members: [], roster: [], leaveByWindow: {}, reserveByWindow: {} });
+        if (!owner) return emptyOr401({ guild: "", windows: [], members: [], roster: [], leaveByWindow: {}, reserveByWindow: {} });
 
         const openClause = openOnly ? " AND status = 'open'" : "";
         const loadBoardWindows = async () => {
@@ -3082,6 +3092,8 @@ export default {
       return json({ error: "API 路徑未定義", path: url.pathname }, 404);
     } catch (e) {
       console.error(e);
+      // 帶了 httpStatus 的是「預期中的拒絕」（例如 requireAuth 的 401）→ 照它的狀態碼回
+      if (e && e.httpStatus) return json({ error: e.message }, e.httpStatus);
       return json({ error: "伺服器內部錯誤", detail: e.message }, 500);
     }
   }

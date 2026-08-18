@@ -7,7 +7,7 @@
     <!-- ⚡ Chart.js 改成 defer：原本是 head 裡的阻擋式載入，205KB 沒下載完畫面不會出來。
          圖表都是在 window.onload 之後才用到，defer 一定來得及。版本也釘住方便瀏覽器快取。 -->
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="style.css?v=41">
+    <link rel="stylesheet" href="style.css?v=42">
 </head>
 
 <body>
@@ -18,7 +18,8 @@
     <header class="topbar">
         <div class="brand"><span class="brand-mark">NSH</span><span id="topbar-title" class="brand-title">戰報解析</span></div>
         <nav class="topnav" id="topnav">
-            <button class="tnav active" data-page="report" onclick="switchPage('report')">戰報解析</button>
+            <button class="tnav active" data-page="home" onclick="switchPage('home')">首頁</button>
+            <button class="tnav" data-page="report" onclick="switchPage('report')">戰報解析</button>
             <button class="tnav" data-page="db" onclick="switchPage('db')">成員檔案室</button>
             <button class="tnav admin-only" data-page="leave" onclick="switchPage('leave')">請假管理</button>
             <button class="tnav" data-page="me" onclick="switchPage('me')">我的</button>
@@ -49,7 +50,8 @@
             <button class="btn btn-outline admin-only" id="sync-btn" onclick="syncLocalToCloud()" style="flex:1; font-size:12px; display:none; background:#e8f5e9; border-color:#a5d6a7; color:#2e7d32;">☁️ 同步到雲端</button>
         </div>
 
-        <div class="nav-item active" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
+        <div class="nav-item active" id="nav-home" onclick="switchPage('home')">🏠 首頁</div>
+        <div class="nav-item" id="nav-report" onclick="switchPage('report')">📊 戰報解析</div>
         <div class="nav-item" id="nav-db" onclick="switchPage('db')">👥 成員檔案室</div>
         <div class="nav-item admin-only" id="nav-leave" onclick="switchPage('leave')">🗓️ 請假管理</div>
 
@@ -108,7 +110,12 @@
     </div>
 
     <div class="main-content">
-        <div class="container" id="page-report">
+        <!-- 首頁（預設分頁）：選擇登入 / 本地訪客模式；已進入後顯示狀態與快速入口 -->
+        <div class="container" id="page-home">
+            <div id="home-mount"></div>
+        </div>
+
+        <div class="container" id="page-report" style="display:none;">
             <div id="report-browse">
                 <div id="report-hist-mount"></div>
             </div>
@@ -417,7 +424,11 @@
 
     <!-- 手機底部分頁列 -->
     <nav id="mobile-tabbar">
-        <button class="mtab active" data-page="report" onclick="switchPage('report')">
+        <button class="mtab active" data-page="home" onclick="switchPage('home')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5M5.5 9.5V20h13V9.5M9.5 20v-6h5v6"/></svg>
+            <span>首頁</span>
+        </button>
+        <button class="mtab" data-page="report" onclick="switchPage('report')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
             <span>戰報</span>
         </button>
